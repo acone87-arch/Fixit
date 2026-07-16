@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Сервис и склад — панель администратора</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+
+<div id="toast-root"></div>
+
+<!-- Экран входа -->
+<div id="login-screen" class="login-screen hidden">
+  <div class="login-card">
+    <div class="display">Сервис<span style="color:var(--accent)">.</span>Склад</div>
+    <div class="subtitle">Учёт ремонтов и складских остатков</div>
+    <div id="login-error" class="login-error hidden"></div>
+    <form id="login-form">
+      <div class="field">
+        <label>Email</label>
+        <input type="email" id="login-email" required autocomplete="username">
+      </div>
+      <div class="field">
+        <label>Пароль</label>
+        <input type="password" id="login-password" required autocomplete="current-password">
+      </div>
+      <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center">Войти</button>
+    </form>
+  </div>
+</div>
+
+<!-- Основное приложение -->
+<div id="app" class="hidden">
+  <div class="sidebar">
+    <div class="brand">Сервис<span>.</span>Склад</div>
+    <nav id="nav"></nav>
+    <div class="sidebar-footer">
+      <div class="sidebar-user">
+        <strong id="user-name">—</strong>
+        <span id="user-role">—</span>
+      </div>
+      <button class="logout-btn" id="logout-btn">Выйти</button>
+    </div>
+  </div>
+  <div class="main">
+    <div id="content"></div>
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
