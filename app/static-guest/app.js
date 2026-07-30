@@ -6,6 +6,15 @@ const qrToken = params.get('token');
 
 const state = { severity: 'not_working', tags: new Set() };
 
+function createIdempotencyKey() {
+  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 async function init() {
   if (!qrToken) return showError('Некорректная ссылка — попробуйте отсканировать QR ещё раз.');
   try {
@@ -48,10 +57,12 @@ document.getElementById('form').addEventListener('submit', async (e) => {
   // Идемпотентность: один и тот же ключ на повторных сабмитах (двойной тап,
   // разрыв связи) — храним в localStorage per-QR, чтобы дубль не улетел дважды.
   const idKey = `fixit-ticket-key:${qrToken}`;
-  let idempotencyKey = localStorage.getItem(idKey);
-  if (!idempotencyKey) { idempotencyKey = crypto.randomUUID(); localStorage.setItem(idKey, idempotencyKey); }
-
   try {
+    let idempotencyKey = localStorage.getItem(idKey);
+    if (!idempotencyKey) {
+      idempotencyKey = createIdempotencyKey();
+      localStorage.setItem(idKey, idempotencyKey);
+    }
     const res = await fetch(`/api/public/equipment/${qrToken}/tickets`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
