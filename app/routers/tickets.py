@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import require_roles
 from app.database import get_db
-from app.models.core import Equipment, EquipmentStatus, Ticket, UserRole
+from app.models.core import Equipment, EquipmentStatus, Task, TaskPriority, TaskStatus, Ticket, User, UserRole
 from app.schemas.equipment import PublicEquipmentOut
 from app.schemas.ticket import GuestTicketCreate, TicketAssign, TicketCreateResult, TicketOut
 
@@ -73,9 +73,9 @@ async def assign_ticket(
     ticket_id: uuid.UUID,
     payload: TicketAssign,
     db: AsyncSession = Depends(get_db),
-    _user=Depends(require_roles(UserRole.admin, UserRole.dispatcher)),
+    user: User = Depends(require_roles(UserRole.admin, UserRole.dispatcher)),
 ):
-    from app.models.core import TicketStatus, User
+    from app.models.core import TicketSeverity, TicketStatus
 
     ticket = await db.get(Ticket, ticket_id)
     technician = await db.get(User, payload.technician_id)
@@ -83,6 +83,25 @@ async def assign_ticket(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Заявка или техник не найдены")
     if not technician.is_active:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Нельзя назначить неактивного техника")
+
+    task = await db.scalar(select(Task).where(Task.ticket_id == ticket.id))
+    if task:
+        task.assigned_to = technician.id
+        task.status = TaskStatus.assigned
+    else:
+        problem = ", ".join(ticket.symptom_tags)
+        task = Task(
+            ticket_id=ticket.id,
+            equipment_id=ticket.equipment_id,
+            assigned_to=technician.id,
+            priority=(TaskPriority.urgent if ticket.severity == TicketSeverity.not_working else TaskPriority.planned),
+            status=TaskStatus.assigned,
+            title=f"Гостевая заявка: {problem}",
+            description=ticket.comment or problem,
+            created_by=user.id,
+        )
+        db.add(task)
+
     ticket.assigned_technician_id = technician.id
     ticket.status = TicketStatus.assigned
     await db.commit()
