@@ -1,0 +1,14 @@
+# Python bytecode and test caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+
+# Local database and editor files
+*.sqlite3
+.vscode/
+.idea/

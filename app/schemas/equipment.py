@@ -78,6 +78,15 @@ class TaskCreate(TaskBase):
     pass
 
 
+class TaskUpdate(BaseModel):
+    title: str | None = None
+    description: str | None = None
+    priority: TaskPriority | None = None
+    status: TaskStatus | None = None
+    due_at: datetime | None = None
+    assigned_to: uuid.UUID | None = None
+
+
 class TaskOut(TaskBase):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID

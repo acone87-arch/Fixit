@@ -81,6 +81,8 @@ async def assign_ticket(
     technician = await db.get(User, payload.technician_id)
     if not ticket or not technician or technician.role != UserRole.technician:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Заявка или техник не найдены")
+    if not technician.is_active:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Нельзя назначить неактивного техника")
     ticket.assigned_technician_id = technician.id
     ticket.status = TicketStatus.assigned
     await db.commit()

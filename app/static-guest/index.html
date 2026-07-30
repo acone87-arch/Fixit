@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Сообщить о поломке</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@600;700&family=Inter:wght@400;500;600;700&display=swap');
+  :root { --bg:#1C1E1B; --surface:#fff; --ink:#1C1E1B; --ink-soft:#5B5F58; --line:#D7D8CF; --accent:#E1670E; --warn:#C9432A; --good:#2F7A4D; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); font-family:'Inter',sans-serif; color:var(--ink); min-height:100vh; display:flex; align-items:center; justify-content:center; padding:20px; }
+  .card { background:var(--surface); border-radius:14px; padding:26px 22px; width:100%; max-width:380px; }
+  h1 { font-family:'Oswald',sans-serif; font-size:19px; margin:0 0 4px; }
+  .sub { color:var(--ink-soft); font-size:12.5px; margin-bottom:18px; }
+  .field { margin-bottom:14px; }
+  label { display:block; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; color:var(--ink-soft); margin-bottom:6px; }
+  input, textarea { width:100%; padding:11px 12px; border:1px solid var(--line); border-radius:8px; font-family:inherit; font-size:15px; }
+  textarea { min-height:70px; resize:vertical; }
+  .chip-group { display:flex; flex-wrap:wrap; gap:8px; }
+  .chip { padding:7px 13px; border-radius:100px; font-size:13px; font-weight:600; background:#E4E5DE; border:none; cursor:pointer; }
+  .chip.active { background:var(--accent); color:#fff; }
+  .severity { display:flex; gap:8px; }
+  .severity button { flex:1; padding:11px; border-radius:8px; border:1px solid var(--line); background:#fff; font-size:13px; font-weight:600; cursor:pointer; }
+  .severity button.active { background:var(--warn); border-color:var(--warn); color:#fff; }
+  .btn { width:100%; padding:13px; border-radius:8px; border:none; background:var(--accent); color:#fff; font-size:15px; font-weight:700; cursor:pointer; }
+  .btn:disabled { opacity:.5; }
+  .msg { padding:11px; border-radius:8px; font-size:13px; margin-bottom:14px; }
+  .msg-error { background:#C9432A1A; color:var(--warn); }
+  .msg-success { background:#2F7A4D1A; color:var(--good); text-align:center; }
+  .eq-name { font-weight:600; }
+  .hidden { display:none !important; }
+</style>
+</head>
+<body>
+  <div class="card" id="card">
+    <div id="loading">Загрузка данных об оборудовании…</div>
+
+    <div id="content" class="hidden">
+      <h1>Сообщить о поломке</h1>
+      <div class="sub eq-name" id="eq-name"></div>
+
+      <div id="error" class="msg msg-error hidden"></div>
+
+      <form id="form">
+        <div class="field">
+          <label>Насколько серьёзно</label>
+          <div class="severity">
+            <button type="button" data-sev="partially_working">Работает с перебоями</button>
+            <button type="button" data-sev="not_working" class="active">Не работает</button>
+          </div>
+        </div>
+        <div class="field">
+          <label>Что не так (можно несколько)</label>
+          <div class="chip-group" id="symptoms">
+            <button type="button" class="chip" data-tag="Течёт">Течёт</button>
+            <button type="button" class="chip" data-tag="Шумит">Шумит</button>
+            <button type="button" class="chip" data-tag="Не включается">Не включается</button>
+            <button type="button" class="chip" data-tag="Плохо моет">Плохо моет</button>
+          </div>
+        </div>
+        <div class="field"><label>Комментарий</label><textarea id="comment" placeholder="Необязательно"></textarea></div>
+        <div class="field"><label>Ваше имя</label><input id="name" placeholder="Необязательно"></div>
+        <div class="field"><label>Телефон</label><input id="phone" placeholder="Необязательно, если нужно уточнить"></div>
+        <button type="submit" class="btn" id="submit-btn">Отправить</button>
+      </form>
+    </div>
+
+    <div id="success" class="hidden">
+      <div class="msg msg-success">Спасибо! Заявка передана в сервис.</div>
+    </div>
+  </div>
+
+<script src="/guest/app.js"></script>
+</body>
+</html>

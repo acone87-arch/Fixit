@@ -170,6 +170,9 @@ input, select, textarea {
 }
 
 table { width: 100%; border-collapse: collapse; }
+table.fixed-table { table-layout: fixed; }
+table.fixed-table td, table.fixed-table th { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+table.fixed-table td strong, table.fixed-table td > div { white-space: normal; }
 
 th {
   text-align: left;

@@ -1,0 +1,167 @@
+@import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap');
+
+:root {
+  --bg: #EEEFE9;
+  --surface: #FFFFFF;
+  --surface-sunk: #E4E5DE;
+  --ink: #1C1E1B;
+  --ink-soft: #5B5F58;
+  --line: #D7D8CF;
+  --accent: #E1670E;
+  --accent-ink: #FFFFFF;
+  --good: #2F7A4D;
+  --warn: #C9432A;
+  --idle: #5B6470;
+  --amber: #B8860B;
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--ink);
+  color: var(--ink);
+  font-family: 'Inter', sans-serif;
+  font-size: 15px;
+  overscroll-behavior-y: contain;
+}
+
+h1, h2, .display { font-family: 'Oswald', sans-serif; font-weight: 600; letter-spacing: 0.01em; margin: 0; }
+.mono { font-family: 'IBM Plex Mono', monospace; }
+button { font-family: inherit; cursor: pointer; border: none; background: none; }
+input, select, textarea { font-family: inherit; font-size: 15px; }
+
+#app { display: flex; flex-direction: column; height: 100dvh; background: var(--bg); max-width: 480px; margin: 0 auto; position: relative; }
+
+/* ---------- Строка соединения (сигнатурный элемент) ---------- */
+
+#conn-strip {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 16px; font-size: 12.5px; font-weight: 500;
+  background: var(--surface-sunk); border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+#conn-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+#conn-label { color: var(--ink-soft); }
+#conn-strip.syncing #conn-dot { animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+/* ---------- Header ---------- */
+
+.screen-header {
+  display: flex; align-items: center; gap: 8px;
+  padding: 14px 16px; background: var(--surface); border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+.screen-header h1 { font-size: 17px; flex: 1; }
+.back-btn { padding: 4px; margin-left: -6px; }
+
+/* ---------- Content ---------- */
+
+#screen { flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+
+.section-padding { padding: 14px 16px; }
+.text-soft { color: var(--ink-soft); }
+.section-loading, .empty-state { padding: 40px 20px; text-align: center; color: var(--ink-soft); font-size: 14px; }
+
+/* ---------- Task cards ---------- */
+
+.task-card {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+  padding: 12px; margin-bottom: 10px; display: flex; flex-direction: column; gap: 6px;
+  text-align: left; width: 100%;
+}
+.task-card-top { display: flex; align-items: center; justify-content: space-between; }
+.task-title { font-weight: 600; font-size: 14.5px; }
+
+/* ---------- Badges ---------- */
+
+.badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 9px; border-radius: 100px; font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.02em;
+}
+.badge-dot { width: 6px; height: 6px; border-radius: 50%; }
+.badge-good { background: #2F7A4D1A; color: var(--good); } .badge-good .badge-dot { background: var(--good); }
+.badge-warn { background: #C9432A1A; color: var(--warn); } .badge-warn .badge-dot { background: var(--warn); }
+.badge-idle { background: #5B64701A; color: var(--idle); } .badge-idle .badge-dot { background: var(--idle); }
+.badge-amber { background: #B8860B1A; color: var(--amber); } .badge-amber .badge-dot { background: var(--amber); }
+
+/* ---------- Equipment passport ---------- */
+
+.eq-header { display: flex; gap: 14px; align-items: flex-start; padding: 16px; background: var(--surface); border-bottom: 1px solid var(--line); }
+.eq-meta { font-size: 13px; }
+.eq-serial { font-size: 12.5px; color: var(--ink-soft); margin-top: 4px; }
+
+.timeline-item { display: flex; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.timeline-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); margin-top: 5px; flex-shrink: 0; }
+
+/* ---------- Scan screen ---------- */
+
+.scan-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #101211; position: relative; }
+#scan-video { width: 100%; max-height: 60vh; object-fit: cover; }
+.scan-frame {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: 220px; height: 220px; pointer-events: none;
+}
+.scan-corner { position: absolute; width: 34px; height: 34px; border-color: var(--accent); }
+
+/* ---------- Buttons ---------- */
+
+.btn { padding: 12px 18px; border-radius: 8px; font-size: 14.5px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.btn-primary { background: var(--accent); color: var(--accent-ink); }
+.btn-primary:disabled { opacity: 0.5; }
+.btn-secondary { background: var(--surface-sunk); color: var(--ink); }
+.btn-block { width: 100%; }
+.btn-good { background: var(--good); color: #fff; }
+
+/* ---------- Bottom nav ---------- */
+
+#bottom-nav { display: flex; background: var(--surface); border-top: 1px solid var(--line); flex-shrink: 0; }
+.nav-btn { flex: 1; padding: 8px 0 10px; display: flex; flex-direction: column; align-items: center; gap: 3px; color: var(--ink-soft); font-size: 11px; font-weight: 600; }
+.nav-btn.active { color: var(--accent); }
+.nav-btn svg { width: 20px; height: 20px; }
+
+/* ---------- Forms ---------- */
+
+.field { margin-bottom: 14px; }
+.field label { display: block; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; color: var(--ink-soft); margin-bottom: 6px; }
+.field input, .field select, .field textarea {
+  width: 100%; padding: 11px 12px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--surface); color: var(--ink);
+}
+.field textarea { resize: vertical; min-height: 70px; }
+.field input:focus, .field select:focus, .field textarea:focus { outline: none; border-color: var(--accent); }
+
+.chip-group { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { padding: 7px 13px; border-radius: 100px; font-size: 13px; font-weight: 600; background: var(--surface-sunk); color: var(--ink); }
+.chip.active { background: var(--accent); color: var(--accent-ink); }
+
+.part-row { display: flex; align-items: center; justify-content: space-between; padding: 10px; border: 1px solid var(--line); border-radius: 10px; margin-bottom: 8px; background: var(--surface); }
+.part-name { font-weight: 500; font-size: 13.5px; }
+.part-meta { font-size: 11.5px; color: var(--ink-soft); }
+.qty-control { display: flex; align-items: center; gap: 10px; }
+.qty-btn { width: 28px; height: 28px; border-radius: 6px; background: var(--surface-sunk); display: flex; align-items: center; justify-content: center; font-weight: 700; }
+.qty-btn:disabled { opacity: 0.35; }
+
+.notice { display: flex; gap: 8px; padding: 11px; border-radius: 8px; font-size: 12.5px; background: #5B64701A; color: var(--idle); margin: 4px 0 14px; }
+.notice-warn { background: #C9432A1A; color: var(--warn); }
+
+/* ---------- Login ---------- */
+
+.login-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; background: var(--ink); }
+.login-card { background: var(--surface); border-radius: 14px; padding: 28px 24px; width: 100%; max-width: 340px; }
+.login-card .display { font-size: 19px; }
+.login-card .subtitle { color: var(--ink-soft); font-size: 12.5px; margin: 4px 0 18px; }
+.login-error { background: #C9432A1A; color: var(--warn); padding: 10px 12px; border-radius: 6px; font-size: 12.5px; margin-bottom: 12px; }
+
+/* ---------- Toast ---------- */
+
+#toast-root { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 200; width: calc(100% - 32px); max-width: 448px; display: flex; flex-direction: column; gap: 8px; }
+.toast { padding: 11px 14px; border-radius: 8px; font-size: 13px; font-weight: 500; color: #fff; box-shadow: 0 4px 16px rgba(0,0,0,0.2); }
+.toast-error { background: var(--warn); }
+.toast-success { background: var(--good); }
+.toast-info { background: var(--idle); }
+
+.hidden { display: none !important; }

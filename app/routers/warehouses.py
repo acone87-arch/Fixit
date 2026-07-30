@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_current_user, require_roles
+from app.core.deps import get_current_user, get_technician_mobile_warehouse_id, require_roles
 from app.database import get_db
 from app.models.core import User, UserRole
 from app.models.warehouse import Part, Warehouse, WarehouseStock
@@ -18,6 +18,33 @@ parts_router = APIRouter(prefix="/api/parts", tags=["parts"])
 @router.get("", response_model=list[WarehouseOut])
 async def list_warehouses(db: AsyncSession = Depends(get_db)):
     return (await db.scalars(select(Warehouse).order_by(Warehouse.name))).all()
+
+
+@router.get("/mine/stock", response_model=list[StockItem])
+async def my_warehouse_stock(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_roles(UserRole.technician)),
+):
+    warehouse_id = await get_technician_mobile_warehouse_id(db, user.id)
+    rows = (
+        await db.execute(
+            select(WarehouseStock, Part)
+            .join(Part, Part.id == WarehouseStock.part_id)
+            .where(WarehouseStock.warehouse_id == warehouse_id)
+            .order_by(Part.name)
+        )
+    ).all()
+    return [
+        StockItem(
+            part_id=part.id,
+            article=part.article,
+            name=part.name,
+            quantity=stock.quantity,
+            min_critical_qty=part.min_critical_qty,
+            is_critical=stock.quantity <= part.min_critical_qty,
+        )
+        for stock, part in rows
+    ]
 
 
 @router.get("/{warehouse_id}/stock", response_model=list[StockItem])

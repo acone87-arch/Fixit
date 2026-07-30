@@ -6,7 +6,7 @@ from app.core.deps import get_current_user, require_roles
 from app.core.security import hash_password
 from app.database import get_db
 from app.models.core import User, UserRole
-from app.schemas.user import UserCreate, UserOut
+from app.schemas.user import UserCreate, UserOut, UserUpdate
 
 router = APIRouter(prefix="/api/users", tags=["users"])
 
@@ -41,6 +41,25 @@ async def create_user(
         hashed_password=hash_password(payload.password),
     )
     db.add(user)
+    await db.commit()
+    await db.refresh(user)
+    return user
+
+
+@router.patch("/{user_id}", response_model=UserOut)
+async def update_user(
+    user_id: uuid.UUID,
+    payload: UserUpdate,
+    db: AsyncSession = Depends(get_db),
+    _user=Depends(require_roles(UserRole.admin)),
+):
+    """Updates a staff member's contact details and availability."""
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Пользователь не найден")
+
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(user, field, value)
     await db.commit()
     await db.refresh(user)
     return user

@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0">
+<title>Fixit — приложение техника</title>
+<link rel="manifest" href="/tech/manifest.json">
+<meta name="theme-color" content="#1C1E1B">
+<link rel="apple-touch-icon" href="/tech/icon-192.png">
+<link rel="stylesheet" href="/tech/styles.css">
+</head>
+<body>
+
+<div id="toast-root"></div>
+
+<!-- Экран входа -->
+<div id="login-screen" class="login-wrap hidden">
+  <div class="login-card">
+    <div class="display">Fixit<span style="color:var(--accent)">.</span>Техник</div>
+    <div class="subtitle">Заявки и ремонты — работает офлайн</div>
+    <div id="login-error" class="login-error hidden"></div>
+    <form id="login-form">
+      <div class="field"><label>Email</label><input type="email" id="login-email" required autocomplete="username"></div>
+      <div class="field"><label>Пароль</label><input type="password" id="login-password" required autocomplete="current-password"></div>
+      <button type="submit" class="btn btn-primary btn-block">Войти</button>
+    </form>
+  </div>
+</div>
+
+<!-- Основное приложение -->
+<div id="app" class="hidden">
+  <div id="conn-strip"><span id="conn-dot"></span><span id="conn-label">—</span><button id="logout-btn" style="margin-left:auto;background:none;border:none;color:var(--ink-soft);font-size:12px;padding:2px 4px">Выйти</button></div>
+  <div id="screen"></div>
+  <div id="bottom-nav"></div>
+</div>
+
+<script src="/tech/db.js"></script>
+<script src="/tech/app.js"></script>
+</body>
+</html>

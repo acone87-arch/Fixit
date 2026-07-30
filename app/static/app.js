@@ -271,6 +271,7 @@ function openCreateEquipmentModal() {
 
 async function openEquipmentPassport(id) {
   const passport = await api(`/equipment/${id}/passport`);
+  const canDelete = state.me.role === 'admin' || state.me.role === 'dispatcher';
   const historyHtml = passport.history.length ? passport.history.map((h) => `
     <div style="display:flex;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)">
       <div style="width:8px;height:8px;border-radius:50%;background:var(--accent);margin-top:6px;flex-shrink:0"></div>
@@ -292,9 +293,22 @@ async function openEquipmentPassport(id) {
     </div>
     <h2 style="font-size:14px;margin-bottom:6px">Лента истории</h2>
     <div>${historyHtml}</div>
-  `, `<button class="btn btn-secondary" id="modal-close">Закрыть</button>`);
+  `, `${canDelete ? '<button class="btn btn-ghost" id="delete-equipment-btn" style="color:#b42318">Удалить оборудование</button>' : ''}
+      <button class="btn btn-secondary" id="modal-close">Закрыть</button>`);
 
   document.getElementById('modal-close').addEventListener('click', closeModal);
+  const deleteButton = document.getElementById('delete-equipment-btn');
+  if (deleteButton) {
+    deleteButton.addEventListener('click', async () => {
+      if (!confirm(`Удалить оборудование «${passport.name}»? Это действие нельзя отменить.`)) return;
+      try {
+        await api(`/equipment/${id}`, { method: 'DELETE' });
+        closeModal();
+        toast('Оборудование удалено');
+        router();
+      } catch (e) { toast(e.message, 'error'); }
+    });
+  }
 }
 
 // ============================================================
@@ -303,50 +317,129 @@ async function openEquipmentPassport(id) {
 
 async function renderTasks(content) {
   const isStaff = state.me.role !== 'technician';
+  // GET /api/equipment не ограничен по роли — тянем список всегда, иначе
+  // у техника в таблице вместо названия оборудования был виден сырой UUID.
   const [tasks, equipmentList, technicians] = await Promise.all([
     api('/tasks'),
-    isStaff ? api('/equipment') : Promise.resolve([]),
-    isStaff ? api('/users').then((u) => u.filter((x) => x.role === 'technician')) : Promise.resolve([]),
+    api('/equipment'),
+    isStaff ? api('/users').then((u) => u.filter((x) => x.role === 'technician' && x.is_active)) : Promise.resolve([]),
   ]);
-  const eqName = (id) => { const e = equipmentList.find((x) => x.id === id); return e ? e.name : id; };
+  const eqOf = (id) => equipmentList.find((x) => x.id === id);
+  const eqName = (id) => { const e = eqOf(id); return e ? `${e.name} · ${e.serial_number}` : id; };
 
   content.innerHTML = `
     <div class="page-header">
-      <div><h1>${isStaff ? 'Наряды' : 'Мои наряды'}</h1><div class="page-subtitle">${isStaff ? 'Внутренние заявки на обслуживание оборудования' : 'Назначенные вам заявки'}</div></div>
-      ${isStaff ? '<button class="btn btn-primary" id="add-task-btn">+ Новый наряд</button>' : ''}
+      <div><h1>${isStaff ? 'Наряды' : 'Мои наряды'}</h1><div class="page-subtitle">${isStaff ? 'Внутренние заявки на обслуживание оборудования' : 'Назначенные вам заявки — закрыть с актом ремонта можно в приложении техника'}</div></div>
+      ${isStaff ? '<button class="btn btn-primary" id="add-task-btn">+ Новый наряд</button>' : '<a class="btn btn-secondary" href="/tech/" target="_blank" rel="noopener">Открыть приложение техника →</a>'}
     </div>
     <div class="card" style="padding:0">
-      <table>
-        <thead><tr><th>Заявка</th><th>Оборудование</th><th>Приоритет</th><th>Статус</th><th>Срок</th>${isStaff ? '<th>Техник</th>' : ''}</tr></thead>
+      <table class="fixed-table">
+        <colgroup>
+          <col style="width:26%"><col style="width:22%"><col style="width:12%"><col style="width:12%"><col style="width:13%">${isStaff ? '<col style="width:15%">' : ''}
+        </colgroup>
+        <thead><tr><th>Заявка</th><th>Оборудование</th><th>Приоритет</th><th>Статус</th><th>Срок</th>${isStaff ? '<th>Техник / действия</th>' : ''}</tr></thead>
         <tbody id="task-rows"></tbody>
       </table>
     </div>`;
 
   const rows = document.getElementById('task-rows');
   rows.innerHTML = tasks.length ? tasks.map((t) => `
-    <tr>
-      <td><strong>${esc(t.title)}</strong>${t.description ? `<div class="text-soft">${esc(t.description)}</div>` : ''}</td>
-      <td>${esc(isStaff ? eqName(t.equipment_id) : t.equipment_id)}</td>
+    <tr class="${!isStaff ? 'clickable' : ''}" data-eq="${t.equipment_id}">
+      <td><strong>${esc(t.title)}</strong>${t.description ? `<div class="text-soft" style="font-size:12px">${esc(t.description)}</div>` : ''}</td>
+      <td class="text-soft">${esc(eqName(t.equipment_id))}</td>
       <td>${badge(TASK_PRIORITY, t.priority)}</td>
       <td>${badge(TASK_STATUS, t.status)}</td>
-      <td>${fmtDate(t.due_at)}</td>
-      ${isStaff ? `<td>${t.assigned_to ? '<span class="badge badge-good"><span class="badge-dot"></span>Назначен</span>' : `<select class="assign-select" data-task="${t.id}"><option value="">— назначить —</option>${technicians.map((tech) => `<option value="${tech.id}">${esc(tech.full_name)}</option>`).join('')}</select>`}</td>` : ''}
+      <td class="text-soft">${fmtDate(t.due_at)}</td>
+      ${isStaff ? `<td style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          ${t.assigned_to ? '<span class="badge badge-good"><span class="badge-dot"></span>Назначен</span>' : `<select class="assign-select" data-task="${t.id}"><option value="">— назначить —</option>${technicians.map((tech) => `<option value="${tech.id}">${esc(tech.full_name)}</option>`).join('')}</select>`}
+          <button class="btn btn-ghost btn-sm edit-task-btn" data-id="${t.id}">Изменить</button>
+          ${t.status === 'new' && !t.assigned_to ? `<button class="btn btn-ghost btn-sm delete-task-btn" data-id="${t.id}" style="color:#b42318">Удалить</button>` : ''}
+        </td>` : ''}
     </tr>`).join('') : `<tr class="empty-row"><td colspan="${isStaff ? 6 : 5}">Нарядов пока нет</td></tr>`;
 
   rows.querySelectorAll('.assign-select').forEach((sel) => {
-    sel.addEventListener('change', async () => {
+    sel.addEventListener('change', async (e) => {
+      e.stopPropagation();
       if (!sel.value) return;
       try {
         await api(`/tasks/${sel.dataset.task}/assign?technician_id=${sel.value}`, { method: 'PATCH' });
         toast('Техник назначен');
         router();
-      } catch (e) { toast(e.message, 'error'); }
+      } catch (err) { toast(err.message, 'error'); }
+    });
+    sel.addEventListener('click', (e) => e.stopPropagation());
+  });
+
+  rows.querySelectorAll('.edit-task-btn').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const task = tasks.find((t) => t.id === btn.dataset.id);
+      openEditTaskModal(task, technicians);
     });
   });
+
+  rows.querySelectorAll('.delete-task-btn').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const task = tasks.find((t) => t.id === btn.dataset.id);
+      if (!task || !confirm(`Удалить наряд «${task.title}»? Это действие нельзя отменить.`)) return;
+      try {
+        await api(`/tasks/${task.id}`, { method: 'DELETE' });
+        toast('Наряд удалён');
+        router();
+      } catch (err) { toast(err.message, 'error'); }
+    });
+  });
+
+  if (!isStaff) {
+    rows.querySelectorAll('tr[data-eq]').forEach((tr) => {
+      tr.addEventListener('click', () => openEquipmentPassport(tr.dataset.eq));
+    });
+  }
 
   if (isStaff) {
     document.getElementById('add-task-btn').addEventListener('click', () => openCreateTaskModal(equipmentList, technicians));
   }
+}
+
+function openEditTaskModal(task, technicians) {
+  const backdrop = openModal('Изменить наряд', `
+    <div class="field"><label>Заголовок</label><input id="f-title" value="${esc(task.title)}" required></div>
+    <div class="field"><label>Описание</label><textarea id="f-desc" rows="3">${esc(task.description || '')}</textarea></div>
+    <div class="field-row">
+      <div class="field"><label>Приоритет</label>
+        <select id="f-priority"><option value="planned" ${task.priority === 'planned' ? 'selected' : ''}>Плановая</option><option value="urgent" ${task.priority === 'urgent' ? 'selected' : ''}>Срочно</option></select>
+      </div>
+      <div class="field"><label>Статус</label>
+        <select id="f-status">${Object.keys(TASK_STATUS).map((k) => `<option value="${k}" ${task.status === k ? 'selected' : ''}>${TASK_STATUS[k].label}</option>`).join('')}</select>
+      </div>
+    </div>
+    <div class="field"><label>Техник</label>
+      <select id="f-tech"><option value="">— не назначен —</option>${technicians.map((t) => `<option value="${t.id}" ${task.assigned_to === t.id ? 'selected' : ''}>${esc(t.full_name)}</option>`).join('')}</select>
+    </div>`,
+    `<button class="btn btn-secondary" id="modal-cancel">Отмена</button>
+     <button class="btn btn-primary" id="modal-save">Сохранить</button>`);
+
+  backdrop.querySelector('#modal-cancel').addEventListener('click', closeModal);
+  backdrop.querySelector('#modal-save').addEventListener('click', async () => {
+    const title = backdrop.querySelector('#f-title').value.trim();
+    if (!title) return toast('Укажите заголовок', 'error');
+    try {
+      await api(`/tasks/${task.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          title,
+          description: backdrop.querySelector('#f-desc').value.trim() || null,
+          priority: backdrop.querySelector('#f-priority').value,
+          status: backdrop.querySelector('#f-status').value,
+          assigned_to: backdrop.querySelector('#f-tech').value || null,
+        }),
+      });
+      closeModal();
+      toast('Наряд обновлён');
+      router();
+    } catch (e) { toast(e.message, 'error'); }
+  });
 }
 
 function openCreateTaskModal(equipmentList, technicians) {
@@ -396,7 +489,7 @@ function openCreateTaskModal(equipmentList, technicians) {
 async function renderTickets(content) {
   const [tickets, technicians] = await Promise.all([
     api('/tickets'),
-    api('/users').then((u) => u.filter((x) => x.role === 'technician')),
+    api('/users').then((u) => u.filter((x) => x.role === 'technician' && x.is_active)),
   ]);
 
   content.innerHTML = `
@@ -560,7 +653,7 @@ async function renderUsers(content) {
     </div>
     <div class="card" style="padding:0">
       <table>
-        <thead><tr><th>Имя</th><th>Email</th><th>Роль</th><th>Телефон</th></tr></thead>
+        <thead><tr><th>Имя</th><th>Email</th><th>Роль</th><th>Телефон</th><th></th></tr></thead>
         <tbody id="user-rows"></tbody>
       </table>
     </div>`;
@@ -571,9 +664,40 @@ async function renderUsers(content) {
       <td>${esc(u.email)}</td>
       <td>${esc(ROLE_LABEL[u.role] || u.role)}</td>
       <td>${esc(u.phone || '—')}</td>
+      <td><button class="btn btn-secondary btn-compact" data-edit-user="${u.id}">Редактировать</button></td>
     </tr>`).join('') : '<tr class="empty-row"><td colspan="4">Пользователей пока нет</td></tr>';
 
   document.getElementById('add-user-btn').addEventListener('click', openCreateUserModal);
+  document.getElementById('user-rows').addEventListener('click', (event) => {
+    const button = event.target.closest('[data-edit-user]');
+    if (!button) return;
+    const user = users.find((item) => item.id === button.dataset.editUser);
+    if (user) openEditUserModal(user);
+  });
+}
+
+function openEditUserModal(user) {
+  const availability = user.role === 'technician' ? `
+    <div class="field"><label><input type="checkbox" id="f-active" ${user.is_active ? 'checked' : ''}> Активен и доступен для назначения</label></div>` : '';
+  const backdrop = openModal('Редактировать пользователя', `
+    <div class="field"><label>ФИО</label><input id="f-name" required value="${esc(user.full_name)}"></div>
+    <div class="field"><label>Телефон</label><input id="f-phone" value="${esc(user.phone || '')}"></div>
+    ${availability}`,
+    `<button class="btn btn-secondary" id="modal-cancel">Отмена</button>
+     <button class="btn btn-primary" id="modal-save">Сохранить</button>`);
+  backdrop.querySelector('#modal-cancel').addEventListener('click', closeModal);
+  backdrop.querySelector('#modal-save').addEventListener('click', async () => {
+    const full_name = backdrop.querySelector('#f-name').value.trim();
+    if (!full_name) return toast('Укажите ФИО', 'error');
+    const payload = { full_name, phone: backdrop.querySelector('#f-phone').value.trim() || null };
+    if (user.role === 'technician') payload.is_active = backdrop.querySelector('#f-active').checked;
+    try {
+      await api(`/users/${user.id}`, { method: 'PATCH', body: JSON.stringify(payload) });
+      closeModal();
+      toast('Данные пользователя сохранены');
+      router();
+    } catch (e) { toast(e.message, 'error'); }
+  });
 }
 
 function openCreateUserModal() {

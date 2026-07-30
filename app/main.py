@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.routers import auth, equipment, sync, tasks, tickets, users, warehouses
@@ -31,12 +32,42 @@ async def health():
     return {"status": "ok"}
 
 
+@app.get("/e/{qr_token}", tags=["meta"])
+async def qr_redirect(qr_token: str):
+    """Физическая QR-наклейка на оборудовании кодирует именно этот URL (см.
+    services→equipment_qr). Гость сканирует её обычной камерой телефона —
+    сюда попадает без авторизации и уходит на гостевую страницу заявки."""
+    return RedirectResponse(url=f"/guest/?token={qr_token}")
+
+
+# StaticFiles(html=True), смонтированный на "/tech" или "/guest", отдаёт
+# index.html только по пути СО слэшем на конце ("/tech/"). Без него запрос
+# всё равно попадает в примонтированное приложение (совпадение по префиксу),
+# но там такого файла нет — 404. Ловим оба случая явными редиректами,
+# зарегистрированными раньше самих mount() ниже.
+@app.get("/tech", include_in_schema=False)
+async def tech_redirect():
+    return RedirectResponse(url="/tech/")
+
+
+@app.get("/guest", include_in_schema=False)
+async def guest_redirect():
+    return RedirectResponse(url="/guest/")
+
+
 # Примечание: таблицы создаются через Alembic-миграции (см. README), а не через
 # Base.metadata.create_all в lifespan — это единственный источник правды о схеме
 # и для локальной разработки, и для прода.
 
+# PWA техника — офлайн-first, отдельно от админ-панели. Смонтирована ДО "/",
+# иначе catch-all статики админки перехватит все запросы к /tech/*.
+app.mount("/tech", StaticFiles(directory="app/static-tech", html=True), name="tech-frontend")
+
+# Гостевая страница заявки — без авторизации, открывается по QR (см. /e/{qr_token} выше).
+app.mount("/guest", StaticFiles(directory="app/static-guest", html=True), name="guest-frontend")
+
 # Веб-панель администратора — статика, смонтирована последней, чтобы не
-# перехватывать /api/* и /docs. html=True отдаёт index.html на "/" и на
-# неизвестные пути (частая надобность для SPA с client-side роутингом).
+# перехватывать /api/*, /docs, /tech/* и /guest/*. html=True отдаёт index.html
+# на "/" и на неизвестные пути (частая надобность для SPA с client-side роутингом).
 app.mount("/static", StaticFiles(directory="app/static"), name="static-assets")
 app.mount("/", StaticFiles(directory="app/static", html=True), name="frontend")

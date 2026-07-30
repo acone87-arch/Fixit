@@ -8,9 +8,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.core.deps import require_roles
+from app.core.deps import get_current_user, require_roles
 from app.database import get_db
-from app.models.core import Equipment, EquipmentType, UserRole
+from app.models.core import Equipment, EquipmentType, Task, Ticket, UserRole
 from app.models.repair import Repair
 from app.schemas.equipment import (
     EquipmentCreate,
@@ -67,6 +67,21 @@ async def create_equipment(
     return equipment
 
 
+@router.get("/by-qr/{qr_token}", response_model=EquipmentPassport)
+async def get_equipment_by_qr(
+    qr_token: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _user=Depends(get_current_user),
+):
+    """Для мобильного приложения техника — в отличие от /api/public/equipment/{qr_token}
+    (гостевой, без авторизации, отдаёт минимум полей), тут нужен именно внутренний id,
+    чтобы дальше открыть полный паспорт и создать акт ремонта."""
+    equipment = await db.scalar(select(Equipment).where(Equipment.public_qr_token == qr_token))
+    if not equipment:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Оборудование не найдено")
+    return await get_passport(equipment.id, db)
+
+
 @router.patch("/{equipment_id}", response_model=EquipmentOut)
 async def update_equipment(
     equipment_id: uuid.UUID,
@@ -83,6 +98,34 @@ async def update_equipment(
     await db.commit()
     await db.refresh(equipment)
     return equipment
+
+
+@router.delete("/{equipment_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_equipment(
+    equipment_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _user=Depends(require_roles(UserRole.admin, UserRole.dispatcher)),
+):
+    """Удаляет ошибочно заведённую единицу оборудования без сервисной истории."""
+    equipment = await db.get(Equipment, equipment_id)
+    if not equipment:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Оборудование не найдено")
+
+    # Паспорт с реальными заявками/ремонтами — часть аудита. Его нельзя удалить
+    # вместе с историей одной кнопкой, поэтому для ошибочной записи разрешаем
+    # удаление только до начала эксплуатации.
+    has_task = await db.scalar(select(Task.id).where(Task.equipment_id == equipment_id).limit(1))
+    has_ticket = await db.scalar(select(Ticket.id).where(Ticket.equipment_id == equipment_id).limit(1))
+    has_repair = await db.scalar(select(Repair.id).where(Repair.equipment_id == equipment_id).limit(1))
+    if has_task or has_ticket or has_repair:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Нельзя удалить оборудование с нарядами, заявками или историей ремонтов",
+        )
+
+    await db.delete(equipment)
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/{equipment_id}/passport", response_model=EquipmentPassport)
