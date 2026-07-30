@@ -6,6 +6,7 @@
 серийнику записи пропускаются.
 """
 import asyncio
+import os
 
 from sqlalchemy import select
 
@@ -15,9 +16,9 @@ from app.models.core import Equipment, EquipmentType, User, UserRole
 from app.models.warehouse import Part, Warehouse, WarehouseStock, WarehouseType
 
 ADMIN_EMAIL = "admin@example.com"
-ADMIN_PASSWORD = "admin12345"
+ADMIN_PASSWORD = os.getenv("INITIAL_ADMIN_PASSWORD", "admin12345")
 TECH_EMAIL = "tech@example.com"
-TECH_PASSWORD = "tech12345"
+TECH_PASSWORD = os.getenv("INITIAL_TECH_PASSWORD", "tech12345")
 
 
 async def main() -> None:
