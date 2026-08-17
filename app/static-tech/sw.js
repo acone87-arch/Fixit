@@ -5,7 +5,7 @@
 // даже если вкладка/приложение закрыты (см. п.3.2 ТЗ: "отложенная отправка").
 // ============================================================
 
-const CACHE_NAME = 'fixit-tech-shell-v1';
+const CACHE_NAME = 'fixit-tech-shell-v2';
 const SHELL_FILES = [
   '/tech/',
   '/tech/index.html',
@@ -18,6 +18,15 @@ const SHELL_FILES = [
 ];
 
 self.importScripts('/tech/db.js');
+
+function createUuid() {
+  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -67,7 +76,7 @@ async function syncPendingRepairsFromSW() {
   if (!pending.length) return;
 
   let deviceId = await self.TechDB.kvGet('deviceId');
-  if (!deviceId) { deviceId = crypto.randomUUID(); await self.TechDB.kvSet('deviceId', deviceId); }
+  if (!deviceId) { deviceId = createUuid(); await self.TechDB.kvSet('deviceId', deviceId); }
 
   try {
     const res = await fetch('/api/v1/sync/repairs', {

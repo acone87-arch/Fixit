@@ -36,6 +36,15 @@ function esc(s) {
   if (s === null || s === undefined) return '';
   return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
+
+function createUuid() {
+  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
 function badge(map, key) {
   const info = map[key] || { label: key, cls: 'idle' };
   return `<span class="badge badge-${info.cls}"><span class="badge-dot"></span>${esc(info.label)}</span>`;
@@ -76,7 +85,7 @@ async function apiFetch(path, options = {}) {
 
 async function getDeviceId() {
   let id = await TechDB.kvGet('deviceId');
-  if (!id) { id = crypto.randomUUID(); await TechDB.kvSet('deviceId', id); }
+  if (!id) { id = createUuid(); await TechDB.kvSet('deviceId', id); }
   return id;
 }
 
@@ -324,7 +333,7 @@ async function renderActScreen(screen) {
     const parts_used = Object.entries(usedQty).filter(([, q]) => q > 0).map(([part_id, quantity]) => ({ part_id, quantity }));
 
     const payload = {
-      local_uuid: crypto.randomUUID(),
+      local_uuid: createUuid(),
       equipment_id: eq.id,
       task_id: state.drill.taskId || null,
       ticket_id: null,

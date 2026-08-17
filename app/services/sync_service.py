@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_technician_mobile_warehouse_id
-from app.models.core import Equipment, EquipmentStatus, Ticket, TicketStatus
+from app.models.core import Equipment, EquipmentStatus, Task, TaskStatus, Ticket, TicketStatus
 from app.models.repair import Repair, RepairPart, SyncOperation, SyncStatus
 from app.schemas.repair import RepairCreate, SyncItemResult
 from app.services.stock_service import InsufficientStockError, decrement_stock
@@ -63,6 +63,20 @@ async def sync_one_repair(db: AsyncSession, technician_id: uuid.UUID, payload: R
             if not equipment:
                 raise _SyncFailure("Оборудование не найдено")
 
+            task = None
+            ticket_id = payload.ticket_id
+            if payload.task_id:
+                task = await db.scalar(
+                    select(Task)
+                    .where(Task.id == payload.task_id, Task.assigned_to == technician_id)
+                    .with_for_update()
+                )
+                if not task:
+                    raise _SyncFailure("Наряд не найден или не назначен вам")
+                if task.equipment_id != equipment.id:
+                    raise _SyncFailure("Наряд относится к другому оборудованию")
+                ticket_id = task.ticket_id or ticket_id
+
             conflict = equipment.version != payload.base_equipment_version
 
             repair = Repair(
@@ -70,7 +84,7 @@ async def sync_one_repair(db: AsyncSession, technician_id: uuid.UUID, payload: R
                 local_uuid=payload.local_uuid,
                 equipment_id=equipment.id,
                 task_id=payload.task_id,
-                ticket_id=payload.ticket_id,
+                ticket_id=ticket_id,
                 technician_id=technician_id,
                 fault_type=payload.fault_type,
                 description=payload.description,
@@ -85,8 +99,11 @@ async def sync_one_repair(db: AsyncSession, technician_id: uuid.UUID, payload: R
             for item in payload.parts_used:
                 db.add(RepairPart(repair_id=repair.id, part_id=item.part_id, quantity=item.quantity))
 
-            if payload.ticket_id and not conflict:
-                ticket = await db.get(Ticket, payload.ticket_id, with_for_update=True)
+            if task:
+                task.status = TaskStatus.closed
+
+            if ticket_id and not conflict:
+                ticket = await db.get(Ticket, ticket_id, with_for_update=True)
                 if ticket and ticket.status != TicketStatus.resolved:
                     ticket.status = TicketStatus.resolved
 
