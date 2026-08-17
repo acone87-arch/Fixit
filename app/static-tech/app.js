@@ -112,15 +112,17 @@ async function renderConnStrip() {
 }
 
 async function syncPendingRepairs() {
-  if (!navigator.onLine) return;
+  const resultsById = new Map();
+  if (!navigator.onLine) return resultsById;
   const pending = await TechDB.getAll('pendingRepairs');
-  if (!pending.length) return;
+  if (!pending.length) return resultsById;
   state.syncing = true; renderConnStrip();
   try {
     const device_id = await getDeviceId();
     const payload = pending.map(({ _equipmentName, ...rest }) => rest);
     const res = await apiFetch('/v1/sync/repairs', { method: 'POST', body: JSON.stringify({ device_id, repairs: payload }) });
     for (const r of res.results) {
+      resultsById.set(r.local_uuid, r);
       if (r.resolved_as === 'failed') {
         toast(`Не удалось отправить ремонт: ${r.error}`, 'error');
       } else {
@@ -134,6 +136,7 @@ async function syncPendingRepairs() {
     toast('Не удалось синхронизировать: ' + e.message, 'error');
   }
   state.syncing = false; renderConnStrip();
+  return resultsById;
 }
 
 async function registerBackgroundSync() {
@@ -282,6 +285,7 @@ async function renderActScreen(screen) {
   const stock = await TechDB.getAll('stock');
   let selectedFault = FAULT_TYPES[0];
   const usedQty = {};
+  let savedPayload = null;
 
   function partsHtml() {
     return stock.length ? stock.map((p) => `
@@ -328,6 +332,22 @@ async function renderActScreen(screen) {
   }
 
   async function submit() {
+    const closeButton = screen.querySelector('#close-btn');
+    if (savedPayload) {
+      closeButton.disabled = true;
+      closeButton.textContent = 'Отправляем акт…';
+      const retryResults = await syncPendingRepairs();
+      const retryResult = retryResults.get(savedPayload.local_uuid);
+      if (retryResult && retryResult.resolved_as !== 'failed') {
+        toast('Акт принят, наряд закрыт');
+        state.drill = null; state.tab = 'tasks'; render();
+        return;
+      }
+      closeButton.disabled = false;
+      closeButton.textContent = 'Повторить отправку';
+      return;
+    }
+
     const description = screen.querySelector('#f-desc').value.trim();
     if (!description) return toast('Опишите, что сделано', 'error');
     const parts_used = Object.entries(usedQty).filter(([, q]) => q > 0).map(([part_id, quantity]) => ({ part_id, quantity }));
@@ -346,6 +366,7 @@ async function renderActScreen(screen) {
       parts_used,
     };
     await TechDB.put('pendingRepairs', payload);
+    savedPayload = payload;
 
     // Оптимистично уменьшаем локальный кэш остатков — для немедленной обратной связи в UI,
     // не дожидаясь синка.
@@ -354,10 +375,26 @@ async function renderActScreen(screen) {
       if (item) { item.quantity = Math.max(0, item.quantity - p.quantity); await TechDB.put('stock', item); }
     }
 
-    toast(navigator.onLine ? 'Сохранено, отправляем…' : 'Сохранено локально, отправим при связи');
-    state.drill = null; state.tab = 'tasks';
-    render();
-    if (navigator.onLine) syncPendingRepairs(); else registerBackgroundSync();
+    if (!navigator.onLine) {
+      toast('Акт сохранён на устройстве и будет отправлен при появлении связи');
+      state.drill = null; state.tab = 'tasks';
+      render();
+      registerBackgroundSync();
+      return;
+    }
+
+    closeButton.disabled = true;
+    closeButton.textContent = 'Закрываем наряд…';
+    const results = await syncPendingRepairs();
+    const result = results.get(payload.local_uuid);
+    if (result && result.resolved_as !== 'failed') {
+      toast('Акт принят, наряд закрыт');
+      state.drill = null; state.tab = 'tasks';
+      render();
+      return;
+    }
+    closeButton.disabled = false;
+    closeButton.textContent = 'Повторить отправку';
   }
 
   draw();
