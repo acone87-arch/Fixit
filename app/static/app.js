@@ -324,6 +324,12 @@ async function renderTasks(content) {
     api('/equipment'),
     isStaff ? api('/users').then((u) => u.filter((x) => x.role === 'technician' && x.is_active)) : Promise.resolve([]),
   ]);
+  const orderedTasks = [...tasks].sort((a, b) => {
+    const aClosed = a.status === 'closed' || a.status === 'cancelled';
+    const bClosed = b.status === 'closed' || b.status === 'cancelled';
+    if (aClosed !== bClosed) return Number(aClosed) - Number(bClosed);
+    return String(b.created_at || '').localeCompare(String(a.created_at || ''));
+  });
   const eqOf = (id) => equipmentList.find((x) => x.id === id);
   const eqName = (id) => { const e = eqOf(id); return e ? `${e.name} · ${e.serial_number}` : id; };
 
@@ -343,10 +349,10 @@ async function renderTasks(content) {
     </div>`;
 
   const rows = document.getElementById('task-rows');
-  rows.innerHTML = tasks.length ? tasks.map((t) => `
-    <tr class="${!isStaff ? 'clickable' : ''}" data-eq="${t.equipment_id}">
+  rows.innerHTML = orderedTasks.length ? orderedTasks.map((t) => `
+    <tr class="${!isStaff ? 'clickable ' : ''}${t.status === 'closed' || t.status === 'cancelled' ? 'task-row-closed' : 'task-row-active'}" data-eq="${t.equipment_id}">
       <td><strong>${esc(t.title)}</strong>${t.description ? `<div class="text-soft" style="font-size:12px">${esc(t.description)}</div>` : ''}</td>
-      <td class="text-soft">${esc(eqName(t.equipment_id))}</td>
+      <td class="text-soft">${esc(eqName(t.equipment_id))}${eqOf(t.equipment_id)?.location ? `<div style="font-size:12px">${esc(eqOf(t.equipment_id).location)}</div>` : ''}</td>
       <td>${badge(TASK_PRIORITY, t.priority)}</td>
       <td>${badge(TASK_STATUS, t.status)}</td>
       <td class="text-soft">${fmtDate(t.due_at)}</td>

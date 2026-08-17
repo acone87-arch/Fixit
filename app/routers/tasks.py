@@ -1,7 +1,7 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import select
+from sqlalchemy import case, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, require_roles
@@ -15,7 +15,13 @@ router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
 @router.get("", response_model=list[TaskOut])
 async def list_tasks(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
-    query = select(Task).order_by(Task.due_at)
+    # Активные наряды показываем первыми, закрытые и отменённые — внизу.
+    # Внутри групп свежие заявки идут раньше старых.
+    closed_last = case(
+        (Task.status.in_((TaskStatus.closed, TaskStatus.cancelled)), 1),
+        else_=0,
+    )
+    query = select(Task).order_by(closed_last, Task.created_at.desc())
     # Техник видит только свои назначенные заявки — так же, как в мобильном
     # клиенте (см. экран "Мои заявки" в мокапе); админ/диспетчер видят всё.
     if user.role == UserRole.technician:

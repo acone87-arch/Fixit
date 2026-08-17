@@ -208,13 +208,21 @@ async function renderTasksScreen(screen) {
   const tasks = await loadTasks();
   const equipmentCache = {};
   for (const t of tasks) equipmentCache[t.equipment_id] = await TechDB.get('equipment', t.equipment_id);
+  const orderedTasks = [...tasks].sort((a, b) => {
+    const aClosed = a.status === 'closed' || a.status === 'cancelled';
+    const bClosed = b.status === 'closed' || b.status === 'cancelled';
+    if (aClosed !== bClosed) return Number(aClosed) - Number(bClosed);
+    return String(b.created_at || '').localeCompare(String(a.created_at || ''));
+  });
 
-  const body = tasks.length ? tasks.map((t) => {
+  const body = orderedTasks.length ? orderedTasks.map((t) => {
     const eq = equipmentCache[t.equipment_id];
-    return `<button class="task-card" data-task="${t.id}" data-eq="${t.equipment_id}">
+    const isClosed = t.status === 'closed' || t.status === 'cancelled';
+    return `<button class="task-card ${isClosed ? 'task-card-closed' : 'task-card-active'}" data-task="${t.id}" data-eq="${t.equipment_id}">
       <div class="task-card-top">${badge(TASK_PRIORITY, t.priority)}<span class="text-soft" style="font-size:11.5px">${fmtDate(t.due_at)}</span></div>
       <div class="task-title">${esc(t.title)}</div>
       <div class="text-soft" style="font-size:12.5px">${eq ? esc(eq.name) + ' · ' + esc(eq.serial_number) : 'оборудование не в кэше'}</div>
+      ${eq?.location ? `<div class="text-soft task-location">Расположение: ${esc(eq.location)}</div>` : ''}
       ${badge(TASK_STATUS, t.status)}
     </button>`;
   }).join('') : '<div class="empty-state">Заявок нет</div>';

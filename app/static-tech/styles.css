@@ -74,6 +74,9 @@ input, select, textarea { font-family: inherit; font-size: 15px; }
 }
 .task-card-top { display: flex; align-items: center; justify-content: space-between; }
 .task-title { font-weight: 600; font-size: 14.5px; }
+.task-card-active { background: #fff8ef; border-left: 4px solid var(--accent); }
+.task-card-closed { background: #f1f7f3; border-left: 4px solid var(--good); opacity: 0.82; }
+.task-location { font-size: 12px; }
 
 /* ---------- Badges ---------- */
 

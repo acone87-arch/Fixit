@@ -224,6 +224,12 @@ tr.clickable:hover { background: var(--surface-sunk); cursor: pointer; }
 .badge-amber { background: #B8860B1A; color: var(--amber); }
 .badge-amber .badge-dot { background: var(--amber); }
 
+/* Активные наряды заметны в верхней части списка, завершённые — спокойнее. */
+.fixed-table tbody tr.task-row-active { background: #fff8ef; }
+.fixed-table tbody tr.task-row-active:hover { background: #fff1dd; }
+.fixed-table tbody tr.task-row-closed { background: #f1f7f3; color: #5c6c61; }
+.fixed-table tbody tr.task-row-closed:hover { background: #e7f1ea; }
+
 /* ---------- Forms ---------- */
 
 .field { margin-bottom: 14px; }
