@@ -180,11 +180,16 @@ async function renderEquipment(content) {
   const [items] = await Promise.all([api('/equipment'), ensureEquipmentTypes()]);
   const typeName = (id) => (state.equipmentTypes.find((t) => t.id === id) || {}).name || '—';
   const canEdit = state.me.role !== 'technician';
+  const locations = [...new Set(items.map((eq) => (eq.location || '').trim() || 'Не указано'))]
+    .sort((a, b) => a.localeCompare(b, 'ru'));
 
   content.innerHTML = `
     <div class="page-header">
       <div><h1>Оборудование</h1><div class="page-subtitle">Цифровой паспорт и лента ремонтов по каждой единице техники</div></div>
-      ${canEdit ? '<button class="btn btn-primary" id="add-equipment-btn">+ Добавить оборудование</button>' : ''}
+      <div style="display:flex;gap:10px;align-items:center">
+        <select id="equipment-location-filter" aria-label="Фильтр по расположению"><option value="">Все расположения</option>${locations.map((location) => `<option value="${esc(location)}">${esc(location)}</option>`).join('')}</select>
+        ${canEdit ? '<button class="btn btn-primary" id="add-equipment-btn">+ Добавить оборудование</button>' : ''}
+      </div>
     </div>
     <div class="card" style="padding:0">
       <table>
@@ -194,18 +199,29 @@ async function renderEquipment(content) {
     </div>`;
 
   const rows = document.getElementById('equipment-rows');
-  rows.innerHTML = items.length ? items.map((eq) => `
-    <tr class="clickable" data-id="${eq.id}">
+  const renderRows = () => {
+    const selectedLocation = document.getElementById('equipment-location-filter').value;
+    const visibleItems = items
+      .filter((eq) => !selectedLocation || ((eq.location || '').trim() || 'Не указано') === selectedLocation)
+      .sort((a, b) => {
+        const byLocation = ((a.location || '').trim() || 'Не указано').localeCompare((b.location || '').trim() || 'Не указано', 'ru');
+        return byLocation || a.name.localeCompare(b.name, 'ru');
+      });
+    rows.innerHTML = visibleItems.length ? visibleItems.map((eq) => `
+      <tr class="clickable" data-id="${eq.id}">
       <td><strong>${esc(eq.name)}</strong><div class="text-soft">${esc(eq.manufacturer || '')} ${esc(eq.model || '')}</div></td>
       <td>${esc(typeName(eq.equipment_type_id))}</td>
       <td class="mono">${esc(eq.serial_number)}</td>
       <td>${badge(EQUIPMENT_STATUS, eq.status)}</td>
       <td>${esc(eq.location || '—')}</td>
-    </tr>`).join('') : '<tr class="empty-row"><td colspan="5">Оборудование ещё не добавлено</td></tr>';
+      </tr>`).join('') : '<tr class="empty-row"><td colspan="5">В этом расположении оборудования нет</td></tr>';
 
-  rows.querySelectorAll('tr[data-id]').forEach((tr) => {
-    tr.addEventListener('click', () => openEquipmentPassport(tr.dataset.id));
-  });
+    rows.querySelectorAll('tr[data-id]').forEach((tr) => {
+      tr.addEventListener('click', () => openEquipmentPassport(tr.dataset.id));
+    });
+  };
+  renderRows();
+  document.getElementById('equipment-location-filter').addEventListener('change', renderRows);
 
   if (canEdit) {
     document.getElementById('add-equipment-btn').addEventListener('click', () => openCreateEquipmentModal(items));
