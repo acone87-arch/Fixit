@@ -5,13 +5,13 @@
 // даже если вкладка/приложение закрыты (см. п.3.2 ТЗ: "отложенная отправка").
 // ============================================================
 
-const CACHE_NAME = 'fixit-tech-shell-v2';
+const CACHE_NAME = 'fixit-tech-shell-v3';
 const SHELL_FILES = [
   '/tech/',
   '/tech/index.html',
   '/tech/styles.css',
-  '/tech/app.js',
-  '/tech/db.js',
+  '/tech/app.js?v=20260817-3',
+  '/tech/db.js?v=20260817-3',
   '/tech/manifest.json',
   '/tech/icon-192.png',
   '/tech/icon-512.png',
@@ -41,7 +41,8 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Cache-first только для файлов оболочки приложения (свой origin, /tech/*).
+// Сеть сначала для файлов оболочки приложения: иначе кэш может удерживать старую
+// версию после выпуска. При отсутствии связи берём последнюю сохранённую копию.
 // Запросы к /api/* всегда идут в сеть напрямую — офлайн-данные для них
 // обслуживает IndexedDB на уровне app.js, а не service worker.
 self.addEventListener('fetch', (event) => {
@@ -50,14 +51,11 @@ self.addEventListener('fetch', (event) => {
   if (url.pathname.startsWith('/api/')) return;
 
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      if (cached) return cached;
-      return fetch(event.request).then((res) => {
-        const copy = res.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
-        return res;
-      }).catch(() => cached);
-    })
+    fetch(event.request).then((res) => {
+      const copy = res.clone();
+      caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+      return res;
+    }).catch(() => caches.match(event.request))
   );
 });
 
