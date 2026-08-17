@@ -430,10 +430,20 @@ function openEditTaskModal(task, technicians) {
     <div class="field"><label>Техник</label>
       <select id="f-tech"><option value="">— не назначен —</option>${technicians.map((t) => `<option value="${t.id}" ${task.assigned_to === t.id ? 'selected' : ''}>${esc(t.full_name)}</option>`).join('')}</select>
     </div>`,
-    `<button class="btn btn-secondary" id="modal-cancel">Отмена</button>
+    `${task.status === 'closed' || task.status === 'cancelled' || (task.status === 'new' && !task.assigned_to) ? '<button class="btn btn-ghost" id="modal-delete" style="color:#b42318;margin-right:auto">Удалить</button>' : '<span style="margin-right:auto"></span>'}
+     <button class="btn btn-secondary" id="modal-cancel">Отмена</button>
      <button class="btn btn-primary" id="modal-save">Сохранить</button>`);
 
   backdrop.querySelector('#modal-cancel').addEventListener('click', closeModal);
+  backdrop.querySelector('#modal-delete')?.addEventListener('click', async () => {
+    if (!confirm(`Удалить наряд «${task.title}»? Сам наряд исчезнет из списка, но оформленные акты ремонта сохранятся в истории.`)) return;
+    try {
+      await api(`/tasks/${task.id}`, { method: 'DELETE' });
+      closeModal();
+      toast('Наряд удалён');
+      router();
+    } catch (e) { toast(e.message, 'error'); }
+  });
   backdrop.querySelector('#modal-save').addEventListener('click', async () => {
     const title = backdrop.querySelector('#f-title').value.trim();
     if (!title) return toast('Укажите заголовок', 'error');

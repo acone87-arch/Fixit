@@ -66,23 +66,25 @@ async def delete_task(
     db: AsyncSession = Depends(get_db),
     _user=Depends(require_roles(UserRole.admin, UserRole.dispatcher)),
 ):
-    """Удаляет ошибочно созданный, ещё не выданный технику наряд."""
+    """Deletes a work order while preserving completed repair-act history."""
     task = await db.get(Task, task_id)
     if not task:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Наряд не найден")
-
-    # После назначения техник мог уже начать работу офлайн. Удаление такого
-    # наряда сделает его будущую синхронизацию некорректной, поэтому безопасно
-    # удалять только новый (неназначенный) наряд.
-    if task.status != TaskStatus.new or task.assigned_to is not None:
+    if task.status not in (TaskStatus.closed, TaskStatus.cancelled) and not (
+        task.status == TaskStatus.new and task.assigned_to is None
+    ):
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            "Можно удалить только новый неназначенный наряд. Сначала снимите назначение и верните статус «Новый».",
+            "Активный назначенный наряд удалять нельзя. Сначала завершите или отмените его.",
         )
 
-    has_repair = await db.scalar(select(Repair.id).where(Repair.task_id == task_id).limit(1))
-    if has_repair:
-        raise HTTPException(status.HTTP_409_CONFLICT, "Нельзя удалить наряд с оформленным актом ремонта")
+    # Акт ремонта является учётной историей, поэтому не удаляем его вместе с
+    # нарядом. Отвязываем акт от наряда, чтобы внешний ключ не блокировал
+    # удаление; сведения об оборудовании, технике и выполненной работе в акте
+    # сохраняются.
+    repairs = (await db.scalars(select(Repair).where(Repair.task_id == task_id))).all()
+    for repair in repairs:
+        repair.task_id = None
 
     await db.delete(task)
     await db.commit()
