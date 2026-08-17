@@ -329,15 +329,15 @@ async function renderTasks(content) {
 
   content.innerHTML = `
     <div class="page-header">
-      <div><h1>${isStaff ? 'Наряды' : 'Мои наряды'}</h1><div class="page-subtitle">${isStaff ? 'Внутренние заявки на обслуживание оборудования' : 'Назначенные вам заявки — закрыть с актом ремонта можно в приложении техника'}</div></div>
+      <div><h1>${isStaff ? 'Наряды' : 'Мои наряды'}</h1><div class="page-subtitle">${isStaff ? 'Внутренние заявки на обслуживание оборудования' : 'Назначенные вам заявки — можно закрыть здесь или оформить акт ремонта в приложении техника'}</div></div>
       ${isStaff ? '<button class="btn btn-primary" id="add-task-btn">+ Новый наряд</button>' : '<a class="btn btn-secondary" href="/tech/" target="_blank" rel="noopener">Открыть приложение техника →</a>'}
     </div>
     <div class="card" style="padding:0">
       <table class="fixed-table">
         <colgroup>
-          <col style="width:26%"><col style="width:22%"><col style="width:12%"><col style="width:12%"><col style="width:13%">${isStaff ? '<col style="width:15%">' : ''}
+          <col style="width:26%"><col style="width:22%"><col style="width:12%"><col style="width:12%"><col style="width:13%">${isStaff ? '<col style="width:15%">' : '<col style="width:15%">'}
         </colgroup>
-        <thead><tr><th>Заявка</th><th>Оборудование</th><th>Приоритет</th><th>Статус</th><th>Срок</th>${isStaff ? '<th>Техник / действия</th>' : ''}</tr></thead>
+        <thead><tr><th>Заявка</th><th>Оборудование</th><th>Приоритет</th><th>Статус</th><th>Срок</th>${isStaff ? '<th>Техник / действия</th>' : '<th>Действие</th>'}</tr></thead>
         <tbody id="task-rows"></tbody>
       </table>
     </div>`;
@@ -354,8 +354,8 @@ async function renderTasks(content) {
           ${t.assigned_to ? '<span class="badge badge-good"><span class="badge-dot"></span>Назначен</span>' : `<select class="assign-select" data-task="${t.id}"><option value="">— назначить —</option>${technicians.map((tech) => `<option value="${tech.id}">${esc(tech.full_name)}</option>`).join('')}</select>`}
           <button class="btn btn-ghost btn-sm edit-task-btn" data-id="${t.id}">Изменить</button>
           ${t.status === 'new' && !t.assigned_to ? `<button class="btn btn-ghost btn-sm delete-task-btn" data-id="${t.id}" style="color:#b42318">Удалить</button>` : ''}
-        </td>` : ''}
-    </tr>`).join('') : `<tr class="empty-row"><td colspan="${isStaff ? 6 : 5}">Нарядов пока нет</td></tr>`;
+        </td>` : `<td>${t.status === 'assigned' || t.status === 'in_progress' ? `<button class="btn btn-primary btn-sm close-task-btn" data-id="${t.id}">Закрыть</button>` : '—'}</td>`}
+    </tr>`).join('') : `<tr class="empty-row"><td colspan="6">Нарядов пока нет</td></tr>`;
 
   rows.querySelectorAll('.assign-select').forEach((sel) => {
     sel.addEventListener('change', async (e) => {
@@ -386,6 +386,19 @@ async function renderTasks(content) {
       try {
         await api(`/tasks/${task.id}`, { method: 'DELETE' });
         toast('Наряд удалён');
+        router();
+      } catch (err) { toast(err.message, 'error'); }
+    });
+  });
+
+  rows.querySelectorAll('.close-task-btn').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const task = tasks.find((t) => t.id === btn.dataset.id);
+      if (!task || !confirm(`Закрыть наряд «${task.title}»?`)) return;
+      try {
+        await api(`/tasks/${task.id}/close`, { method: 'POST' });
+        toast('Наряд закрыт');
         router();
       } catch (err) { toast(err.message, 'error'); }
     });

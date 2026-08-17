@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, require_roles
 from app.database import get_db
-from app.models.core import Task, TaskStatus, User, UserRole
+from app.models.core import Task, TaskStatus, Ticket, TicketStatus, User, UserRole
 from app.models.repair import Repair
 from app.schemas.equipment import TaskCreate, TaskOut, TaskUpdate
 
@@ -104,6 +104,36 @@ async def assign_task(
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Можно назначить только активного техника")
     task.assigned_to = technician_id
     task.status = TaskStatus.assigned
+    await db.commit()
+    await db.refresh(task)
+    return task
+
+
+@router.post("/{task_id}/close", response_model=TaskOut)
+async def close_own_task(
+    task_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_roles(UserRole.technician)),
+):
+    """Allows a technician to close only a work order assigned to them."""
+    task = await db.scalar(
+        select(Task)
+        .where(Task.id == task_id, Task.assigned_to == user.id)
+        .with_for_update()
+    )
+    if not task:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Наряд не найден или не назначен вам")
+    if task.status == TaskStatus.closed:
+        return task
+    if task.status in (TaskStatus.new, TaskStatus.cancelled):
+        raise HTTPException(status.HTTP_409_CONFLICT, "Этот наряд нельзя закрыть")
+
+    task.status = TaskStatus.closed
+    if task.ticket_id:
+        ticket = await db.get(Ticket, task.ticket_id, with_for_update=True)
+        if ticket and ticket.status != TicketStatus.resolved:
+            ticket.status = TicketStatus.resolved
+
     await db.commit()
     await db.refresh(task)
     return task
