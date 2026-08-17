@@ -466,9 +466,14 @@ function openEditTaskModal(task, technicians) {
 }
 
 function openCreateTaskModal(equipmentList, technicians) {
+  const locations = [...new Set(equipmentList.map((e) => (e.location || '').trim() || 'Не указано'))]
+    .sort((a, b) => a.localeCompare(b, 'ru'));
   const backdrop = openModal('Новый наряд', `
-    <div class="field"><label>Оборудование</label>
-      <select id="f-eq">${equipmentList.map((e) => `<option value="${e.id}">${esc(e.name)} · ${esc(e.serial_number)}</option>`).join('')}</select>
+    <div class="field"><label>Расположение</label>
+      <select id="f-location"><option value="">— выберите объект —</option>${locations.map((location) => `<option value="${esc(location)}">${esc(location)}</option>`).join('')}</select>
+    </div>
+    <div class="field"><label>Оборудование на объекте</label>
+      <select id="f-eq" disabled><option value="">Сначала выберите расположение</option></select>
     </div>
     <div class="field"><label>Заголовок</label><input id="f-title" required placeholder="Например: течёт бак"></div>
     <div class="field"><label>Описание</label><textarea id="f-desc" rows="3"></textarea></div>
@@ -483,10 +488,21 @@ function openCreateTaskModal(equipmentList, technicians) {
     `<button class="btn btn-secondary" id="modal-cancel">Отмена</button>
      <button class="btn btn-primary" id="modal-save">Создать</button>`);
 
+  const locationSelect = backdrop.querySelector('#f-location');
+  const equipmentSelect = backdrop.querySelector('#f-eq');
+  locationSelect.addEventListener('change', () => {
+    const location = locationSelect.value;
+    const matchingEquipment = equipmentList.filter((e) => ((e.location || '').trim() || 'Не указано') === location);
+    equipmentSelect.disabled = !location || !matchingEquipment.length;
+    equipmentSelect.innerHTML = matchingEquipment.length
+      ? `<option value="">— выберите технику —</option>${matchingEquipment.map((e) => `<option value="${e.id}">${esc(e.name)} · ${esc(e.serial_number)}</option>`).join('')}`
+      : '<option value="">На этом объекте техники нет</option>';
+  });
   backdrop.querySelector('#modal-cancel').addEventListener('click', closeModal);
   backdrop.querySelector('#modal-save').addEventListener('click', async () => {
     const title = backdrop.querySelector('#f-title').value.trim();
     if (!title) return toast('Укажите заголовок', 'error');
+    if (!equipmentSelect.value) return toast('Выберите расположение и технику', 'error');
     try {
       await api('/tasks', {
         method: 'POST',
