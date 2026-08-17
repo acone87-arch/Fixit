@@ -221,6 +221,7 @@ async function renderTasksScreen(screen) {
     return `<button class="task-card ${isClosed ? 'task-card-closed' : 'task-card-active'}" data-task="${t.id}" data-eq="${t.equipment_id}">
       <div class="task-card-top">${badge(TASK_PRIORITY, t.priority)}<span class="text-soft" style="font-size:11.5px">${fmtDate(t.due_at)}</span></div>
       <div class="task-title">${esc(t.title)}</div>
+      ${t.description ? `<div class="task-description">Проблема: ${esc(t.description)}</div>` : ''}
       <div class="text-soft" style="font-size:12.5px">${eq ? esc(eq.name) + ' · ' + esc(eq.serial_number) : 'оборудование не в кэше'}</div>
       ${eq?.location ? `<div class="text-soft task-location">Расположение: ${esc(eq.location)}</div>` : ''}
       ${badge(TASK_STATUS, t.status)}

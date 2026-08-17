@@ -84,12 +84,17 @@ async def assign_ticket(
     if not technician.is_active:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Нельзя назначить неактивного техника")
 
+    problem = (ticket.comment or '').strip() or ", ".join(ticket.symptom_tags) or "Не указано"
+    task_description = ticket.comment or problem
     task = await db.scalar(select(Task).where(Task.ticket_id == ticket.id))
     if task:
         task.assigned_to = technician.id
         task.status = TaskStatus.assigned
+        # У уже созданного наряда также обновляем текст гостевой проблемы,
+        # чтобы техник всегда видел актуальное описание при переназначении.
+        task.title = f"Гостевая заявка: {problem}"
+        task.description = task_description
     else:
-        problem = ", ".join(ticket.symptom_tags)
         task = Task(
             ticket_id=ticket.id,
             equipment_id=ticket.equipment_id,
@@ -97,7 +102,7 @@ async def assign_ticket(
             priority=(TaskPriority.urgent if ticket.severity == TicketSeverity.not_working else TaskPriority.planned),
             status=TaskStatus.assigned,
             title=f"Гостевая заявка: {problem}",
-            description=ticket.comment or problem,
+            description=task_description,
             created_by=user.id,
         )
         db.add(task)
