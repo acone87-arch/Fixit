@@ -565,10 +565,12 @@ function openCreateTaskModal(equipmentList, technicians) {
 // ============================================================
 
 async function renderTickets(content) {
-  const [tickets, technicians] = await Promise.all([
+  const [tickets, technicians, equipmentList] = await Promise.all([
     api('/tickets'),
     api('/users').then((u) => u.filter((x) => x.role === 'technician' && x.is_active)),
+    api('/equipment'),
   ]);
+  const equipmentOf = (id) => equipmentList.find((equipment) => equipment.id === id);
 
   content.innerHTML = `
     <div class="page-header">
@@ -576,21 +578,25 @@ async function renderTickets(content) {
     </div>
     <div class="card" style="padding:0">
       <table>
-        <thead><tr><th>Что сообщили</th><th>Серьёзность</th><th>От кого</th><th>Статус</th><th>Когда</th><th>Назначить</th></tr></thead>
+        <thead><tr><th>Что сообщили</th><th>Серьёзность</th><th>Оборудование</th><th>Расположение</th><th>Статус</th><th>Когда</th><th>Назначить</th></tr></thead>
         <tbody id="ticket-rows"></tbody>
       </table>
     </div>`;
 
   const rows = document.getElementById('ticket-rows');
-  rows.innerHTML = tickets.length ? tickets.map((t) => `
+  rows.innerHTML = tickets.length ? tickets.map((t) => {
+    const equipment = equipmentOf(t.equipment_id);
+    return `
     <tr>
       <td>${t.comment ? esc(t.comment) : '<span class="text-soft">без комментария</span>'}${t.symptom_tags.length ? `<div class="text-soft" style="font-size:12px">${t.symptom_tags.map(esc).join(', ')}</div>` : ''}</td>
       <td>${esc(TICKET_SEVERITY[t.severity] || t.severity)}</td>
-      <td class="text-soft">${esc(t.equipment_id).slice(0, 8)}…</td>
+      <td class="text-soft">${equipment ? `${esc(equipment.name)}<div style="font-size:12px">${esc(equipment.serial_number)}</div>` : '—'}</td>
+      <td>${esc(equipment?.location || 'Не указано')}</td>
       <td>${badge(TICKET_STATUS, t.status)}</td>
       <td>${fmtDate(t.created_at)}</td>
       <td>${t.status === 'resolved' ? '—' : `<select class="ticket-assign" data-id="${t.id}"><option value="">— выбрать —</option>${technicians.map((tech) => `<option value="${tech.id}" ${t.assigned_technician_id === tech.id ? 'selected' : ''}>${esc(tech.full_name)}</option>`).join('')}</select>`}</td>
-    </tr>`).join('') : '<tr class="empty-row"><td colspan="6">Гостевых заявок пока нет</td></tr>';
+    </tr>`;
+  }).join('') : '<tr class="empty-row"><td colspan="7">Гостевых заявок пока нет</td></tr>';
 
   rows.querySelectorAll('.ticket-assign').forEach((sel) => {
     sel.addEventListener('change', async () => {
