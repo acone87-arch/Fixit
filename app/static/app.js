@@ -208,12 +208,14 @@ async function renderEquipment(content) {
   });
 
   if (canEdit) {
-    document.getElementById('add-equipment-btn').addEventListener('click', openCreateEquipmentModal);
+    document.getElementById('add-equipment-btn').addEventListener('click', () => openCreateEquipmentModal(items));
   }
 }
 
-function openCreateEquipmentModal() {
+function openCreateEquipmentModal(equipmentList) {
   const typeOptions = state.equipmentTypes.map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join('');
+  const locations = [...new Set(equipmentList.map((e) => (e.location || '').trim()).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, 'ru'));
   const backdrop = openModal('Новое оборудование', `
     <form id="equipment-form">
       <div class="field"><label>Тип оборудования</label>
@@ -226,7 +228,10 @@ function openCreateEquipmentModal() {
         <div class="field"><label>Модель</label><input id="f-model"></div>
       </div>
       <div class="field"><label>Серийный номер</label><input id="f-serial" required></div>
-      <div class="field"><label>Расположение</label><input id="f-location" placeholder="Объект, участок"></div>
+      <div class="field"><label>Расположение</label>
+        <input id="f-location" list="location-options" placeholder="Выберите или введите новый объект">
+        <datalist id="location-options">${locations.map((location) => `<option value="${esc(location)}"></option>`).join('')}</datalist>
+      </div>
     </form>`,
     `<button class="btn btn-secondary" id="modal-cancel">Отмена</button>
      <button class="btn btn-primary" id="modal-save">Создать</button>`);
@@ -282,7 +287,10 @@ async function openEquipmentPassport(id) {
       </div>
     </div>`).join('') : '<div class="text-soft" style="padding:12px 0">Ремонтов ещё не было</div>';
 
-  openModal(passport.name, `
+  const qrFilenamePart = (value) => String(value || 'без-названия')
+    .trim().replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').replace(/\s+/g, ' ');
+  const qrFilename = `QR — ${qrFilenamePart(passport.location)} — ${qrFilenamePart(passport.model || passport.name)}.svg`;
+  const backdrop = openModal(passport.name, `
     <div style="display:flex;gap:16px;align-items:flex-start;margin-bottom:16px">
       <img src="/api/equipment/${id}/qr" alt="QR" style="width:96px;height:96px;border:1px solid var(--line);border-radius:8px;padding:6px;background:#fff">
       <div>
@@ -294,10 +302,19 @@ async function openEquipmentPassport(id) {
     <h2 style="font-size:14px;margin-bottom:6px">Лента истории</h2>
     <div>${historyHtml}</div>
   `, `${canDelete ? '<button class="btn btn-ghost" id="delete-equipment-btn" style="color:#b42318">Удалить оборудование</button>' : ''}
+      <button class="btn btn-secondary" id="download-qr-btn">Скачать QR</button>
       <button class="btn btn-secondary" id="modal-close">Закрыть</button>`);
 
-  document.getElementById('modal-close').addEventListener('click', closeModal);
-  const deleteButton = document.getElementById('delete-equipment-btn');
+  backdrop.querySelector('#modal-close').addEventListener('click', closeModal);
+  backdrop.querySelector('#download-qr-btn').addEventListener('click', () => {
+    const link = document.createElement('a');
+    link.href = `/api/equipment/${id}/qr`;
+    link.download = qrFilename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  });
+  const deleteButton = backdrop.querySelector('#delete-equipment-btn');
   if (deleteButton) {
     deleteButton.addEventListener('click', async () => {
       if (!confirm(`Удалить оборудование «${passport.name}»? Это действие нельзя отменить.`)) return;
