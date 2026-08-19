@@ -57,5 +57,18 @@ async def get_technician_mobile_warehouse_id(db: AsyncSession, technician_id: uu
         )
     )
     if not warehouse_id:
-        raise HTTPException(status.HTTP_409_CONFLICT, "Мобильный склад для техника не настроен")
+        # Старые учётные записи могли быть заведены до появления мобильных
+        # складов. Создаём пустой склад автоматически: при списании деталей
+        # проверка остатка всё равно не даст списать то, чего на нём нет.
+        technician = await db.get(User, technician_id)
+        if not technician:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Техник не найден")
+        warehouse = Warehouse(
+            type=WarehouseType.mobile,
+            name=f"Мобильный склад — {technician.full_name}",
+            owner_user_id=technician_id,
+        )
+        db.add(warehouse)
+        await db.flush()
+        warehouse_id = warehouse.id
     return warehouse_id

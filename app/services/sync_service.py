@@ -39,23 +39,25 @@ async def sync_one_repair(db: AsyncSession, technician_id: uuid.UUID, payload: R
         # savepoint (включая уже применённые внутри неё частичные списания),
         # не трогая остальные уже обработанные записи того же пакета.
         async with db.begin_nested():
-            mobile_warehouse_id = await get_technician_mobile_warehouse_id(db, technician_id)
-
-            for item in payload.parts_used:
-                try:
-                    await decrement_stock(
-                        db,
-                        warehouse_id=mobile_warehouse_id,
-                        part_id=item.part_id,
-                        quantity=item.quantity,
-                        repair_id=None,
-                        created_by=technician_id,
-                    )
-                except InsufficientStockError as exc:
-                    raise _SyncFailure(
-                        f"Недостаточно запчастей на складе: доступно {exc.available}, "
-                        f"требуется {exc.requested}"
-                    ) from exc
+            # Для акта без запчастей склад вообще не нужен. Раньше именно это
+            # лишнее требование не давало технику закрыть выполненный ремонт.
+            if payload.parts_used:
+                mobile_warehouse_id = await get_technician_mobile_warehouse_id(db, technician_id)
+                for item in payload.parts_used:
+                    try:
+                        await decrement_stock(
+                            db,
+                            warehouse_id=mobile_warehouse_id,
+                            part_id=item.part_id,
+                            quantity=item.quantity,
+                            repair_id=None,
+                            created_by=technician_id,
+                        )
+                    except InsufficientStockError as exc:
+                        raise _SyncFailure(
+                            f"Недостаточно запчастей на складе: доступно {exc.available}, "
+                            f"требуется {exc.requested}"
+                        ) from exc
 
             equipment = await db.scalar(
                 select(Equipment).where(Equipment.id == payload.equipment_id).with_for_update()
