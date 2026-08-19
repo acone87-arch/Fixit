@@ -199,7 +199,7 @@ async function renderEquipment(content) {
     </div>
     <div class="card" style="padding:0">
       <table>
-        <thead><tr><th>Оборудование</th><th>Тип</th><th>Серийный №</th><th>Статус</th><th>Расположение</th></tr></thead>
+        <thead><tr><th>Тип оборудования</th><th>Серийный №</th><th>Статус</th><th>Расположение</th></tr></thead>
         <tbody id="equipment-rows"></tbody>
       </table>
     </div>`;
@@ -211,16 +211,15 @@ async function renderEquipment(content) {
       .filter((eq) => !selectedLocation || ((eq.location || '').trim() || 'Не указано') === selectedLocation)
       .sort((a, b) => {
         const byLocation = ((a.location || '').trim() || 'Не указано').localeCompare((b.location || '').trim() || 'Не указано', 'ru');
-        return byLocation || a.name.localeCompare(b.name, 'ru');
+        return byLocation || typeName(a.equipment_type_id).localeCompare(typeName(b.equipment_type_id), 'ru');
       });
     rows.innerHTML = visibleItems.length ? visibleItems.map((eq) => `
       <tr class="clickable" data-id="${eq.id}">
-      <td><strong>${esc(eq.name)}</strong><div class="text-soft">${esc(eq.manufacturer || '')} ${esc(eq.model || '')}</div></td>
-      <td>${esc(typeName(eq.equipment_type_id))}</td>
+      <td><strong>${esc(typeName(eq.equipment_type_id))}</strong><div class="text-soft">${esc(eq.manufacturer || '')} ${esc(eq.model || '')}</div></td>
       <td class="mono">${esc(eq.serial_number)}</td>
       <td>${badge(EQUIPMENT_STATUS, eq.status)}</td>
       <td>${esc(eq.location || '—')}</td>
-      </tr>`).join('') : '<tr class="empty-row"><td colspan="5">В этом расположении оборудования нет</td></tr>';
+      </tr>`).join('') : '<tr class="empty-row"><td colspan="4">В этом расположении оборудования нет</td></tr>';
 
     rows.querySelectorAll('tr[data-id]').forEach((tr) => {
       tr.addEventListener('click', () => openEquipmentPassport(tr.dataset.id));
@@ -244,7 +243,6 @@ function openCreateEquipmentModal(equipmentList) {
         <select id="f-type" required>${typeOptions}<option value="__new">+ Новый тип…</option></select>
       </div>
       <div class="field hidden" id="f-newtype-wrap"><label>Название нового типа</label><input id="f-newtype"></div>
-      <div class="field"><label>Название</label><input id="f-name" required placeholder="Поломоечная машина"></div>
       <div class="field-row">
         <div class="field"><label>Производитель</label><input id="f-manufacturer"></div>
         <div class="field"><label>Модель</label><input id="f-model"></div>
@@ -273,14 +271,12 @@ function openCreateEquipmentModal(equipmentList) {
         state.equipmentTypes.push(created);
         typeId = created.id;
       }
-      const name = backdrop.querySelector('#f-name').value.trim();
       const serial = backdrop.querySelector('#f-serial').value.trim();
-      if (!name || !serial) return toast('Заполните название и серийный номер', 'error');
+      if (!serial) return toast('Укажите серийный номер', 'error');
       await api('/equipment', {
         method: 'POST',
         body: JSON.stringify({
           equipment_type_id: Number(typeId),
-          name,
           manufacturer: backdrop.querySelector('#f-manufacturer').value.trim() || null,
           model: backdrop.querySelector('#f-model').value.trim() || null,
           serial_number: serial,
@@ -298,6 +294,7 @@ function openCreateEquipmentModal(equipmentList) {
 
 async function openEquipmentPassport(id) {
   const passport = await api(`/equipment/${id}/passport`);
+  const equipmentTypeName = (state.equipmentTypes.find((type) => type.id === passport.equipment_type_id) || {}).name || passport.name;
   const canDelete = state.me.role === 'admin' || state.me.role === 'dispatcher';
   const historyHtml = passport.history.length ? passport.history.map((h) => `
     <div style="display:flex;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)">
@@ -311,8 +308,8 @@ async function openEquipmentPassport(id) {
 
   const qrFilenamePart = (value) => String(value || 'без-названия')
     .trim().replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').replace(/\s+/g, ' ');
-  const qrFilename = `QR — ${qrFilenamePart(passport.location)} — ${qrFilenamePart(passport.model || passport.name)}.svg`;
-  const backdrop = openModal(passport.name, `
+  const qrFilename = `QR — ${qrFilenamePart(passport.location)} — ${qrFilenamePart(passport.model || equipmentTypeName)}.svg`;
+  const backdrop = openModal(equipmentTypeName, `
     <div style="display:flex;gap:16px;align-items:flex-start;margin-bottom:16px">
       <img src="/api/equipment/${id}/qr" alt="QR" style="width:96px;height:96px;border:1px solid var(--line);border-radius:8px;padding:6px;background:#fff">
       <div>
@@ -339,7 +336,7 @@ async function openEquipmentPassport(id) {
   const deleteButton = backdrop.querySelector('#delete-equipment-btn');
   if (deleteButton) {
     deleteButton.addEventListener('click', async () => {
-      if (!confirm(`Удалить оборудование «${passport.name}»? Это действие нельзя отменить.`)) return;
+      if (!confirm(`Удалить оборудование «${equipmentTypeName}»? Это действие нельзя отменить.`)) return;
       try {
         await api(`/equipment/${id}`, { method: 'DELETE' });
         closeModal();
@@ -362,6 +359,7 @@ async function renderTasks(content) {
     api('/tasks'),
     api('/equipment'),
     isStaff ? api('/users').then((u) => u.filter((x) => x.role === 'technician' && x.is_active)) : Promise.resolve([]),
+    ensureEquipmentTypes(),
   ]);
   const orderedTasks = [...tasks].sort((a, b) => {
     const aClosed = a.status === 'closed' || a.status === 'cancelled';
@@ -370,7 +368,8 @@ async function renderTasks(content) {
     return String(b.created_at || '').localeCompare(String(a.created_at || ''));
   });
   const eqOf = (id) => equipmentList.find((x) => x.id === id);
-  const eqName = (id) => { const e = eqOf(id); return e ? `${e.name} · ${e.serial_number}` : id; };
+  const typeName = (id) => (state.equipmentTypes.find((type) => type.id === id) || {}).name || '—';
+  const eqName = (id) => { const e = eqOf(id); return e ? `${typeName(e.equipment_type_id)} · ${e.serial_number}` : id; };
 
   content.innerHTML = `
     <div class="page-header">
@@ -540,7 +539,7 @@ function openCreateTaskModal(equipmentList, technicians) {
     const matchingEquipment = equipmentList.filter((e) => ((e.location || '').trim() || 'Не указано') === location);
     equipmentSelect.disabled = !location || !matchingEquipment.length;
     equipmentSelect.innerHTML = matchingEquipment.length
-      ? `<option value="">— выберите технику —</option>${matchingEquipment.map((e) => `<option value="${e.id}">${esc(e.name)} · ${esc(e.serial_number)}</option>`).join('')}`
+      ? `<option value="">— выберите технику —</option>${matchingEquipment.map((e) => `<option value="${e.id}">${esc((state.equipmentTypes.find((type) => type.id === e.equipment_type_id) || {}).name || e.name)} · ${esc(e.serial_number)}</option>`).join('')}`
       : '<option value="">На этом объекте техники нет</option>';
   });
   backdrop.querySelector('#modal-cancel').addEventListener('click', closeModal);
@@ -575,8 +574,10 @@ async function renderTickets(content) {
     api('/tickets'),
     api('/users').then((u) => u.filter((x) => x.role === 'technician' && x.is_active)),
     api('/equipment'),
+    ensureEquipmentTypes(),
   ]);
   const equipmentOf = (id) => equipmentList.find((equipment) => equipment.id === id);
+  const typeName = (id) => (state.equipmentTypes.find((type) => type.id === id) || {}).name || '—';
 
   content.innerHTML = `
     <div class="page-header">
@@ -596,7 +597,7 @@ async function renderTickets(content) {
     <tr>
       <td>${t.comment ? esc(t.comment) : '<span class="text-soft">без комментария</span>'}${t.symptom_tags.length ? `<div class="text-soft" style="font-size:12px">${t.symptom_tags.map(esc).join(', ')}</div>` : ''}</td>
       <td>${esc(TICKET_SEVERITY[t.severity] || t.severity)}</td>
-      <td class="text-soft">${equipment ? `${esc(equipment.name)}<div style="font-size:12px">${esc(equipment.serial_number)}</div>` : '—'}</td>
+      <td class="text-soft">${equipment ? `${esc(typeName(equipment.equipment_type_id))}<div style="font-size:12px">${esc(equipment.serial_number)}</div>` : '—'}</td>
       <td>${esc(equipment?.location || 'Не указано')}</td>
       <td>${badge(TICKET_STATUS, t.status)}</td>
       <td>${fmtDate(t.created_at)}</td>

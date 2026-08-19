@@ -56,7 +56,12 @@ async def create_equipment(
     db: AsyncSession = Depends(get_db),
     _user=Depends(require_roles(UserRole.admin, UserRole.dispatcher)),
 ):
-    equipment = Equipment(**payload.model_dump())
+    equipment_type = await db.get(EquipmentType, payload.equipment_type_id)
+    if not equipment_type:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Тип оборудования не найден")
+    # Не принимаем произвольное название из клиента: тип — единственное
+    # название единицы оборудования во всех экранах.
+    equipment = Equipment(**payload.model_dump(exclude={"name"}), name=equipment_type.name)
     db.add(equipment)
     try:
         await db.commit()

@@ -18,7 +18,9 @@ class EquipmentTypeCreate(BaseModel):
 
 class EquipmentBase(BaseModel):
     equipment_type_id: int
-    name: str
+    # Название больше не вводится пользователем: сервер берёт его из типа
+    # оборудования, чтобы во всех разделах было единое обозначение.
+    name: str | None = None
     manufacturer: str | None = None
     model: str | None = None
     serial_number: str
