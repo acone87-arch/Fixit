@@ -56,7 +56,10 @@ document.getElementById('form').addEventListener('submit', async (e) => {
 
   // Идемпотентность: один и тот же ключ на повторных сабмитах (двойной тап,
   // разрыв связи) — храним в localStorage per-QR, чтобы дубль не улетел дважды.
-  const idKey = `fixit-ticket-key:${qrToken}`;
+  // Ключ нужен только на время повторной отправки одного обращения. Версия
+  // отделяет новые заявки от ключей, которые прежняя версия страницы могла
+  // оставить навсегда в браузере.
+  const idKey = `fixit-ticket-key:v2:${qrToken}`;
   try {
     let idempotencyKey = localStorage.getItem(idKey);
     if (!idempotencyKey) {
@@ -79,6 +82,9 @@ document.getElementById('form').addEventListener('submit', async (e) => {
       const body = await res.json().catch(() => ({}));
       throw new Error(typeof body.detail === 'string' ? body.detail : 'Не удалось отправить заявку');
     }
+    // Следующее обращение по этому QR — это уже новая заявка, а не повтор
+    // предыдущей отправки. При ошибке ключ намеренно остаётся для ретрая.
+    localStorage.removeItem(idKey);
     document.getElementById('content').classList.add('hidden');
     document.getElementById('success').classList.remove('hidden');
   } catch (err) {

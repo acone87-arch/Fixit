@@ -10,6 +10,8 @@ const state = {
   route: location.hash.replace('#', '') || 'equipment',
 };
 
+let ticketsRefreshTimer = null;
+
 // ---------- API-клиент ----------
 
 async function api(path, options = {}) {
@@ -150,6 +152,10 @@ function renderNav() {
 
 async function router() {
   state.route = location.hash.replace('#', '') || 'equipment';
+  if (state.route !== 'tickets' && ticketsRefreshTimer) {
+    clearTimeout(ticketsRefreshTimer);
+    ticketsRefreshTimer = null;
+  }
   renderNav();
   const content = document.getElementById('content');
   content.innerHTML = '<div class="section-loading">Загрузка…</div>';
@@ -608,6 +614,13 @@ async function renderTickets(content) {
       } catch (e) { toast(e.message, 'error'); }
     });
   });
+
+  // Новые QR-обращения приходят без действий диспетчера. Обновляем только
+  // открытый экран заявок и одним таймером, чтобы не плодить запросы.
+  if (ticketsRefreshTimer) clearTimeout(ticketsRefreshTimer);
+  ticketsRefreshTimer = window.setTimeout(() => {
+    if (state.route === 'tickets') router();
+  }, 15000);
 }
 
 // ============================================================
