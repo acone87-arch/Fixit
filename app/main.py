@@ -37,7 +37,12 @@ async def qr_redirect(qr_token: str):
     """Физическая QR-наклейка на оборудовании кодирует именно этот URL (см.
     services→equipment_qr). Гость сканирует её обычной камерой телефона —
     сюда попадает без авторизации и уходит на гостевую страницу заявки."""
-    return RedirectResponse(url=f"/guest/?token={qr_token}")
+    # Версия в URL не даёт мобильному браузеру повторно использовать
+    # закэшированную гостевую страницу со старой логикой idempotency.
+    return RedirectResponse(
+        url=f"/guest/?token={qr_token}&v=20260819-2",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 # StaticFiles(html=True), смонтированный на "/tech" или "/guest", отдаёт
