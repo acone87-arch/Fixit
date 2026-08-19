@@ -46,8 +46,16 @@ async def create_equipment_type(
 
 @router.get("", response_model=list[EquipmentOut])
 async def list_equipment(db: AsyncSession = Depends(get_db)):
-    rows = (await db.scalars(select(Equipment).order_by(Equipment.updated_at.desc()))).all()
-    return rows
+    rows = (
+        await db.execute(
+            select(Equipment, EquipmentType.name)
+            .join(EquipmentType, Equipment.equipment_type_id == EquipmentType.id)
+            .order_by(Equipment.updated_at.desc())
+        )
+    ).all()
+    # Для старых записей сохраняем историческое поле name в БД, но наружу
+    # всегда отдаём тип: все клиенты показывают единое обозначение техники.
+    return [EquipmentOut.model_validate(equipment).model_copy(update={"name": type_name}) for equipment, type_name in rows]
 
 
 @router.post("", response_model=EquipmentOut, status_code=status.HTTP_201_CREATED)
@@ -172,7 +180,12 @@ async def get_passport(equipment_id: uuid.UUID, db: AsyncSession = Depends(get_d
             )
         )
 
-    return EquipmentPassport(**EquipmentOut.model_validate(equipment).model_dump(), history=history)
+    equipment_type_name = await db.scalar(
+        select(EquipmentType.name).where(EquipmentType.id == equipment.equipment_type_id)
+    )
+    data = EquipmentOut.model_validate(equipment).model_dump()
+    data["name"] = equipment_type_name or equipment.name
+    return EquipmentPassport(**data, history=history)
 
 
 @router.get("/{equipment_id}/qr", response_class=Response)

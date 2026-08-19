@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import require_roles
 from app.database import get_db
-from app.models.core import Equipment, EquipmentStatus, Task, TaskPriority, TaskStatus, Ticket, User, UserRole
+from app.models.core import Equipment, EquipmentStatus, EquipmentType, Task, TaskPriority, TaskStatus, Ticket, User, UserRole
 from app.schemas.equipment import PublicEquipmentOut
 from app.schemas.ticket import GuestTicketCreate, TicketAssign, TicketCreateResult, TicketOut
 
@@ -16,10 +16,22 @@ admin_router = APIRouter(prefix="/api/tickets", tags=["tickets"])
 
 @public_router.get("/{qr_token}", response_model=PublicEquipmentOut)
 async def get_public_equipment(qr_token: uuid.UUID, db: AsyncSession = Depends(get_db)):
-    equipment = await db.scalar(select(Equipment).where(Equipment.public_qr_token == qr_token))
-    if not equipment:
+    row = (
+        await db.execute(
+            select(Equipment, EquipmentType.name)
+            .join(EquipmentType, Equipment.equipment_type_id == EquipmentType.id)
+            .where(Equipment.public_qr_token == qr_token)
+        )
+    ).first()
+    if not row:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Оборудование не найдено")
-    return equipment
+    equipment, type_name = row
+    return PublicEquipmentOut(
+        name=type_name,
+        manufacturer=equipment.manufacturer,
+        model=equipment.model,
+        status=equipment.status,
+    )
 
 
 @public_router.post("/{qr_token}/tickets", response_model=TicketCreateResult, status_code=status.HTTP_201_CREATED)
