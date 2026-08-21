@@ -69,6 +69,25 @@ python scripts/seed.py   # тестовые admin/техник/оборудов�
 
 Swagger: `http://localhost:8000/docs`.
 
+## Автодеплой на VPS
+
+Workflow `.github/workflows/deploy.yml` запускается после каждого push в
+`main` (или вручную через **Actions → Deploy to VPS → Run workflow**). Он
+подключается к серверу по SSH, обновляет `/opt/fixit`, пересобирает контейнеры
+через `docker-compose.prod.yml` и ждёт успешного ответа `/health`.
+
+В GitHub Environment `production` должны быть настроены Secrets:
+
+- `VPS_HOST` — IP или DNS-имя сервера;
+- `VPS_USER` — SSH-пользователь с доступом к `/opt/fixit` и Docker;
+- `VPS_SSH_KEY` — приватный SSH-ключ без passphrase;
+- `VPS_KNOWN_HOSTS` — строка сервера из `ssh-keyscan`.
+
+Файл `/opt/fixit/.env` хранится только на сервере и при деплое не
+перезаписывается. Данные PostgreSQL остаются в Docker volume
+`postgres_data`. При ошибке health-check workflow завершается с ошибкой и
+выводит последние 100 строк лога API.
+
 ## Веб-панель администратора
 
 `app/static/` — небольшой vanilla-JS SPA (без сборки), который FastAPI отдаёт
