@@ -53,7 +53,7 @@ jobs:
           git pull --ff-only origin main
           docker compose -f docker-compose.prod.yml build api
           docker compose -f docker-compose.prod.yml run --rm api alembic upgrade head
-          docker compose -f docker-compose.prod.yml up -d
+          docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate api
 
           for attempt in $(seq 1 20); do
             if curl -fsS http://127.0.0.1:8000/health; then
