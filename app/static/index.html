@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Сервис и склад — панель администратора</title>
+<title>Fixit Pulse — сервисная платформа</title>
 <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
@@ -13,8 +13,9 @@
 <!-- Экран входа -->
 <div id="login-screen" class="login-screen hidden">
   <div class="login-card">
-    <div class="display">Сервис<span style="color:var(--accent)">.</span>Склад</div>
-    <div class="subtitle">Учёт ремонтов и складских остатков</div>
+    <div class="login-brand"><span class="pulse-logo-dot"></span><strong>FIXIT</strong><em>PULSE</em></div>
+    <div class="display">Сервис под контролем</div>
+    <div class="subtitle">Операционная платформа для сервисного бизнеса</div>
     <div id="login-error" class="login-error hidden"></div>
     <form id="login-form">
       <div class="field">
@@ -33,7 +34,8 @@
 <!-- Основное приложение -->
 <div id="app" class="hidden">
   <div class="sidebar">
-    <div class="brand">Сервис<span>.</span>Склад</div>
+    <div class="brand"><span class="pulse-logo-dot"></span><strong>FIXIT</strong><em>PULSE</em></div>
+    <div class="brand-caption">SERVICE OPERATIONS</div>
     <nav id="nav"></nav>
     <div class="sidebar-footer">
       <div class="sidebar-user">
@@ -44,10 +46,11 @@
     </div>
   </div>
   <div class="main">
+    <header class="app-topbar"><span>Сервисная платформа</span><div><i></i> Live operations</div></header>
     <div id="content"></div>
   </div>
 </div>
 
-<script src="/static/app.js?v=20260826-1"></script>
+<script src="/static/app.js?v=20260826-2"></script>
 </body>
 </html>

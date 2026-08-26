@@ -9,7 +9,7 @@ const state = {
   equipmentTypes: [],
   clients: [],
   sites: [],
-  route: location.hash.replace('#', '') || 'equipment',
+  route: location.hash.replace('#', '') || 'pulse',
 };
 
 let ticketsRefreshTimer = null;
@@ -122,10 +122,12 @@ function badge(map, key) {
 
 const NAV = {
   owner: [
+    ['pulse', 'Pulse'],
     ['clients', 'Клиенты и объекты'], ['equipment', 'Оборудование'], ['tasks', 'Наряды'], ['tickets', 'Заявки от гостей'],
     ['warehouse', 'Склад'], ['users', 'Пользователи'],
   ],
   admin: [
+    ['pulse', 'Pulse'],
     ['clients', 'Клиенты и объекты'],
     ['equipment', 'Оборудование'],
     ['tasks', 'Наряды'],
@@ -134,6 +136,7 @@ const NAV = {
     ['users', 'Пользователи'],
   ],
   dispatcher: [
+    ['pulse', 'Pulse'],
     ['clients', 'Клиенты и объекты'],
     ['equipment', 'Оборудование'],
     ['tasks', 'Наряды'],
@@ -149,7 +152,7 @@ const NAV = {
 function renderNav() {
   const items = NAV[state.me.role] || [];
   document.getElementById('nav').innerHTML = items
-    .map(([key, label]) => `<button class="nav-item ${state.route === key ? 'active' : ''}" data-route="${key}">${esc(label)}</button>`)
+    .map(([key, label]) => `<button class="nav-item ${state.route === key ? 'active' : ''}" data-route="${key}"><span class="nav-icon nav-icon-${key}"></span>${esc(label)}</button>`)
     .join('');
   document.querySelectorAll('.nav-item').forEach((btn) => {
     btn.addEventListener('click', () => { location.hash = btn.dataset.route; });
@@ -159,7 +162,13 @@ function renderNav() {
 }
 
 async function router() {
-  state.route = location.hash.replace('#', '') || 'equipment';
+  const defaultRoute = state.me?.role === 'technician' ? 'tasks' : 'pulse';
+  state.route = location.hash.replace('#', '') || defaultRoute;
+  const allowedRoutes = (NAV[state.me?.role] || []).map(([key]) => key);
+  if (!allowedRoutes.includes(state.route)) {
+    state.route = defaultRoute;
+    history.replaceState(null, '', `#${defaultRoute}`);
+  }
   if (state.route !== 'tickets' && ticketsRefreshTimer) {
     clearTimeout(ticketsRefreshTimer);
     ticketsRefreshTimer = null;
@@ -168,7 +177,8 @@ async function router() {
   const content = document.getElementById('content');
   content.innerHTML = '<div class="section-loading">Загрузка…</div>';
   try {
-    if (state.route === 'clients') await renderClients(content);
+    if (state.route === 'pulse') await renderPulse(content);
+    else if (state.route === 'clients') await renderClients(content);
     else if (state.route === 'equipment') await renderEquipment(content);
     else if (state.route === 'tasks') await renderTasks(content);
     else if (state.route === 'tickets') await renderTickets(content);
@@ -180,6 +190,61 @@ async function router() {
   }
 }
 window.addEventListener('hashchange', router);
+
+// ============================================================
+// Раздел: Fixit Pulse
+// ============================================================
+
+async function renderPulse(content) {
+  const [clients, sites, equipment, tasks, tickets] = await Promise.all([
+    api('/clients'), api('/sites'), api('/equipment'), api('/tasks'), api('/tickets'), ensureEquipmentTypes(),
+  ]);
+  state.clients = clients;
+  state.sites = sites;
+  const activeTasks = tasks.filter((task) => !['closed', 'cancelled'].includes(task.status));
+  const urgentTasks = activeTasks.filter((task) => task.priority === 'urgent');
+  const openTickets = tickets.filter((ticket) => ticket.status !== 'resolved');
+  const attentionEquipment = equipment.filter((item) => item.status === 'needs_repair');
+  const workingEquipment = equipment.filter((item) => item.status === 'working').length;
+  const uptime = equipment.length ? Math.round((workingEquipment / equipment.length) * 100) : 100;
+  const siteOf = (id) => sites.find((site) => site.id === id);
+  const clientOf = (id) => clients.find((client) => client.id === id);
+  const typeName = (id) => (state.equipmentTypes.find((type) => type.id === id) || {}).name || 'Оборудование';
+
+  content.innerHTML = `
+    <div class="pulse-hero">
+      <div><div class="eyebrow">FIXIT PULSE · LIVE</div><h1>Операционный пульс</h1><div class="page-subtitle">Вся сервисная сеть в одном рабочем ритме</div></div>
+      <div class="live-chip"><span></span>Система работает</div>
+    </div>
+    <div class="metric-grid">
+      <button class="metric-card metric-dark" data-jump="tasks"><span class="metric-label">Активные наряды</span><strong>${activeTasks.length}</strong><small>${urgentTasks.length ? `${urgentTasks.length} срочных` : 'Без срочных'}</small></button>
+      <button class="metric-card" data-jump="tickets"><span class="metric-label">Новые обращения</span><strong>${openTickets.length}</strong><small>из QR и диспетчерской</small></button>
+      <button class="metric-card" data-jump="equipment"><span class="metric-label">Требует внимания</span><strong>${attentionEquipment.length}</strong><small>единиц оборудования</small></button>
+      <button class="metric-card metric-accent" data-jump="equipment"><span class="metric-label">Техническая готовность</span><strong>${uptime}%</strong><small>${workingEquipment} из ${equipment.length} в работе</small></button>
+    </div>
+    <div class="pulse-grid">
+      <section class="card pulse-panel">
+        <div class="panel-head"><div><span class="eyebrow">СЕЙЧАС</span><h2>Приоритетная работа</h2></div><button class="text-link" data-jump="tasks">Все наряды →</button></div>
+        <div class="pulse-list">${activeTasks.length ? activeTasks.slice(0, 6).map((task) => {
+          const item = equipment.find((eq) => eq.id === task.equipment_id);
+          const site = item ? siteOf(item.site_id) : null;
+          return `<div class="pulse-row"><span class="priority-mark ${task.priority === 'urgent' ? 'urgent' : ''}"></span><div><strong>${esc(task.title)}</strong><small>${esc(site?.name || item?.location || 'Объект не указан')} · ${esc(item ? typeName(item.equipment_type_id) : '')}</small></div><div>${badge(TASK_STATUS, task.status)}</div></div>`;
+        }).join('') : '<div class="pulse-empty">Активных нарядов нет — система в норме</div>'}</div>
+      </section>
+      <section class="card pulse-panel">
+        <div class="panel-head"><div><span class="eyebrow">СЕТЬ</span><h2>Контур обслуживания</h2></div><button class="text-link" data-jump="clients">Открыть →</button></div>
+        <div class="network-score"><strong>${clients.length}</strong><span>клиентов</span><i></i><strong>${sites.length}</strong><span>объектов</span><i></i><strong>${equipment.length}</strong><span>единиц техники</span></div>
+        <div class="site-list">${sites.slice(0, 5).map((site) => {
+          const client = clientOf(site.client_id);
+          return `<div><span><strong>${esc(site.name)}</strong><small>${esc(client?.name || '')}</small></span><b>${site.equipment_count}</b></div>`;
+        }).join('')}</div>
+      </section>
+    </div>`;
+
+  content.querySelectorAll('[data-jump]').forEach((button) => {
+    button.addEventListener('click', () => { location.hash = button.dataset.jump; });
+  });
+}
 
 // ============================================================
 // Раздел: Клиенты и объекты обслуживания
