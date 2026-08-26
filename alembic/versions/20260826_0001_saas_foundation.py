@@ -30,7 +30,10 @@ def upgrade():
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.UniqueConstraint("slug"),
     )
-    op.execute(sa.text("INSERT INTO organizations (id, name, slug) VALUES (:id, 'Fixit Default', 'fixit-default')").bindparams(id=DEFAULT_ORG_ID))
+    op.execute(
+        f"INSERT INTO organizations (id, name, slug) "
+        f"VALUES ('{DEFAULT_ORG_ID}'::uuid, 'Fixit Default', 'fixit-default')"
+    )
 
     user_role = postgresql.ENUM(name="user_role", create_type=False)
     op.create_table(
