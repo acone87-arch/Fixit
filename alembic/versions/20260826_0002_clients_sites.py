@@ -52,7 +52,7 @@ def upgrade():
     # imported client per organization, so no existing equipment is orphaned.
     op.execute("""
         INSERT INTO clients (id, organization_id, name)
-        SELECT md5(e.organization_id::text || ':imported-client')::uuid,
+        SELECT md5(e.organization_id::text || '-imported-client')::uuid,
                e.organization_id,
                'Импортированные клиенты'
         FROM equipment e
@@ -66,9 +66,9 @@ def upgrade():
             FROM equipment
         )
         INSERT INTO sites (id, organization_id, client_id, name, address)
-        SELECT md5(organization_id::text || ':site:' || site_name)::uuid,
+        SELECT md5(organization_id::text || '-site-' || site_name)::uuid,
                organization_id,
-               md5(organization_id::text || ':imported-client')::uuid,
+               md5(organization_id::text || '-imported-client')::uuid,
                site_name,
                CASE WHEN site_name = 'Без объекта' THEN NULL ELSE site_name END
         FROM locations
@@ -78,7 +78,7 @@ def upgrade():
     op.execute("""
         UPDATE equipment e
         SET site_id = md5(
-            e.organization_id::text || ':site:' ||
+            e.organization_id::text || '-site-' ||
             COALESCE(NULLIF(btrim(e.location), ''), 'Без объекта')
         )::uuid
     """)
