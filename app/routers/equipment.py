@@ -11,6 +11,7 @@ from app.config import settings
 from app.core.deps import CurrentUser, get_current_user, require_roles
 from app.database import get_db
 from app.models.core import Equipment, EquipmentType, Task, Ticket, UserRole
+from app.models.customer import Site
 from app.models.repair import Repair
 from app.schemas.equipment import (
     EquipmentCreate,
@@ -73,10 +74,21 @@ async def create_equipment(
     ))
     if not equipment_type:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Тип оборудования не найден")
+    site = await db.scalar(select(Site).where(
+        Site.id == payload.site_id,
+        Site.organization_id == user.organization_id,
+        Site.is_active.is_(True),
+    ))
+    if not site:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Активный объект обслуживания не найден")
     # Не принимаем произвольное название из клиента: тип — единственное
     # название единицы оборудования во всех экранах.
-    equipment = Equipment(**payload.model_dump(exclude={"name"}), name=equipment_type.name,
-                          organization_id=user.organization_id)
+    equipment = Equipment(
+        **payload.model_dump(exclude={"name", "location"}),
+        name=equipment_type.name,
+        location=site.name,
+        organization_id=user.organization_id,
+    )
     db.add(equipment)
     try:
         await db.commit()
@@ -116,7 +128,17 @@ async def update_equipment(
     ))
     if not equipment:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Оборудование не найдено")
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    changes = payload.model_dump(exclude_unset=True)
+    if changes.get("site_id"):
+        site = await db.scalar(select(Site).where(
+            Site.id == changes["site_id"],
+            Site.organization_id == user.organization_id,
+            Site.is_active.is_(True),
+        ))
+        if not site:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Активный объект обслуживания не найден")
+        equipment.location = site.name
+    for field, value in changes.items():
         setattr(equipment, field, value)
     equipment.version += 1
     await db.commit()

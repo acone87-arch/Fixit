@@ -13,6 +13,7 @@ from sqlalchemy import select
 from app.core.security import hash_password
 from app.database import AsyncSessionLocal
 from app.models.core import Equipment, EquipmentType, User, UserRole
+from app.models.customer import Client, Site
 from app.models.organization import Organization, OrganizationMembership
 from app.models.warehouse import Part, Warehouse, WarehouseStock, WarehouseType
 
@@ -84,6 +85,28 @@ async def main() -> None:
             db.add(eq_type)
         await db.flush()
 
+        client = await db.scalar(select(Client).where(
+            Client.organization_id == organization.id, Client.name == "Демо-клиент",
+        ))
+        if not client:
+            client = Client(organization_id=organization.id, name="Демо-клиент")
+            db.add(client)
+            await db.flush()
+        site = await db.scalar(select(Site).where(
+            Site.organization_id == organization.id,
+            Site.client_id == client.id,
+            Site.name == "Склад «Северный», уч. 4",
+        ))
+        if not site:
+            site = Site(
+                organization_id=organization.id,
+                client_id=client.id,
+                name="Склад «Северный», уч. 4",
+                address="Склад «Северный», участок 4",
+            )
+            db.add(site)
+            await db.flush()
+
         equipment = await db.scalar(select(Equipment).where(
             Equipment.organization_id == organization.id,
             Equipment.serial_number == "KB-2201-4471",
@@ -91,6 +114,7 @@ async def main() -> None:
         if not equipment:
             equipment = Equipment(
                 organization_id=organization.id,
+                site_id=site.id,
                 equipment_type_id=eq_type.id,
                 name="Поломоечная машина",
                 manufacturer="Kärcher",

@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.routers import auth, equipment, organizations, sync, tasks, tickets, users, warehouses
+from app.routers import auth, customers, equipment, organizations, sync, tasks, tickets, users, warehouses
 
 app = FastAPI(title="Service & Warehouse Management API", version="0.1.0")
 
@@ -17,6 +17,8 @@ app.add_middleware(
 
 app.include_router(auth.router)
 app.include_router(organizations.router)
+app.include_router(customers.router)
+app.include_router(customers.sites_router)
 app.include_router(users.router)
 app.include_router(equipment.router)
 app.include_router(equipment.types_router)

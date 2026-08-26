@@ -87,6 +87,11 @@ alembic upgrade head
 пользователей и переносит существующее оборудование, заявки, ремонты и склад,
 не удаляя данные.
 
+Клиенты и объекты обслуживания образуют следующий уровень tenant-модели:
+`Organization → Client → Site → Equipment`. Миграция `20260826_0002`
+преобразует существующие текстовые расположения оборудования в объекты и
+привязывает их к импортированному клиенту соответствующей организации.
+
 ## Автодеплой на VPS
 
 Workflow `.github/workflows/deploy.yml` запускается после каждого push в
@@ -153,6 +158,8 @@ Workflow `.github/workflows/deploy.yml` запускается после каж
 | Auth | `POST /api/auth/login` | публично |
 | Пользователи | `GET /api/users/me` | любой авторизованный |
 | | `GET/POST /api/users` | admin (создание — только admin) |
+| Клиенты | `GET/POST /api/clients` | список — любой; создание — admin/dispatcher |
+| Объекты | `GET/POST /api/sites` | список — любой; создание — admin/dispatcher |
 | Оборудование | `GET/POST /api/equipment` | список — любой; создание — admin/dispatcher |
 | | `PATCH /api/equipment/{id}` | admin/dispatcher |
 | | `GET /api/equipment/{id}/passport` | любой (лента истории для карточки) |

@@ -7,6 +7,8 @@ const state = {
   token: localStorage.getItem('token') || null,
   me: null,
   equipmentTypes: [],
+  clients: [],
+  sites: [],
   route: location.hash.replace('#', '') || 'equipment',
 };
 
@@ -120,10 +122,11 @@ function badge(map, key) {
 
 const NAV = {
   owner: [
-    ['equipment', 'Оборудование'], ['tasks', 'Наряды'], ['tickets', 'Заявки от гостей'],
+    ['clients', 'Клиенты и объекты'], ['equipment', 'Оборудование'], ['tasks', 'Наряды'], ['tickets', 'Заявки от гостей'],
     ['warehouse', 'Склад'], ['users', 'Пользователи'],
   ],
   admin: [
+    ['clients', 'Клиенты и объекты'],
     ['equipment', 'Оборудование'],
     ['tasks', 'Наряды'],
     ['tickets', 'Заявки от гостей'],
@@ -131,6 +134,7 @@ const NAV = {
     ['users', 'Пользователи'],
   ],
   dispatcher: [
+    ['clients', 'Клиенты и объекты'],
     ['equipment', 'Оборудование'],
     ['tasks', 'Наряды'],
     ['tickets', 'Заявки от гостей'],
@@ -164,7 +168,8 @@ async function router() {
   const content = document.getElementById('content');
   content.innerHTML = '<div class="section-loading">Загрузка…</div>';
   try {
-    if (state.route === 'equipment') await renderEquipment(content);
+    if (state.route === 'clients') await renderClients(content);
+    else if (state.route === 'equipment') await renderEquipment(content);
     else if (state.route === 'tasks') await renderTasks(content);
     else if (state.route === 'tickets') await renderTickets(content);
     else if (state.route === 'warehouse') await renderWarehouse(content);
@@ -177,6 +182,117 @@ async function router() {
 window.addEventListener('hashchange', router);
 
 // ============================================================
+// Раздел: Клиенты и объекты обслуживания
+// ============================================================
+
+async function ensureCustomers(force = false) {
+  if (force || !state.clients.length || !state.sites.length) {
+    [state.clients, state.sites] = await Promise.all([api('/clients'), api('/sites')]);
+  }
+}
+
+async function renderClients(content) {
+  await ensureCustomers(true);
+  const canEdit = state.me.role !== 'technician';
+  const clientName = (id) => (state.clients.find((client) => client.id === id) || {}).name || '—';
+  content.innerHTML = `
+    <div class="page-header">
+      <div><h1>Клиенты и объекты</h1><div class="page-subtitle">Заказчики, площадки обслуживания и установленное оборудование</div></div>
+      ${canEdit ? `<div style="display:flex;gap:10px">
+        <button class="btn btn-secondary" id="add-client-btn">+ Клиент</button>
+        <button class="btn btn-primary" id="add-site-btn">+ Объект</button>
+      </div>` : ''}
+    </div>
+    <div class="card" style="padding:0;margin-bottom:18px">
+      <table>
+        <thead><tr><th>Клиент</th><th>Реквизиты и контакт</th><th>Объектов</th><th>Оборудования</th><th>Статус</th></tr></thead>
+        <tbody>${state.clients.length ? state.clients.map((client) => `
+          <tr>
+            <td><strong>${esc(client.name)}</strong>${client.legal_name ? `<div class="text-soft">${esc(client.legal_name)}</div>` : ''}</td>
+            <td>${client.tax_id ? `<div>ИНН ${esc(client.tax_id)}</div>` : ''}<div class="text-soft">${esc(client.contact_name || '')} ${esc(client.contact_phone || '')}</div></td>
+            <td>${client.site_count}</td><td>${client.equipment_count}</td>
+            <td>${client.is_active ? badge({ active: { label: 'Активен', cls: 'good' } }, 'active') : badge({ inactive: { label: 'Отключён', cls: 'idle' } }, 'inactive')}</td>
+          </tr>`).join('') : '<tr class="empty-row"><td colspan="5">Клиентов пока нет</td></tr>'}</tbody>
+      </table>
+    </div>
+    <div class="page-header" style="margin-bottom:10px"><div><h1 style="font-size:20px">Объекты обслуживания</h1></div></div>
+    <div class="card" style="padding:0">
+      <table>
+        <thead><tr><th>Клиент</th><th>Объект</th><th>Адрес</th><th>Контакт</th><th>Оборудования</th></tr></thead>
+        <tbody>${state.sites.length ? state.sites.map((site) => `
+          <tr>
+            <td>${esc(clientName(site.client_id))}</td><td><strong>${esc(site.name)}</strong></td>
+            <td>${esc(site.address || '—')}</td>
+            <td>${esc(site.contact_name || '')}<div class="text-soft">${esc(site.contact_phone || '')}</div></td>
+            <td>${site.equipment_count}</td>
+          </tr>`).join('') : '<tr class="empty-row"><td colspan="5">Объектов пока нет</td></tr>'}</tbody>
+      </table>
+    </div>`;
+
+  if (canEdit) {
+    document.getElementById('add-client-btn').addEventListener('click', openCreateClientModal);
+    document.getElementById('add-site-btn').addEventListener('click', openCreateSiteModal);
+  }
+}
+
+function openCreateClientModal() {
+  const backdrop = openModal('Новый клиент', `
+    <form id="client-form">
+      <div class="field"><label>Рабочее название</label><input id="f-client-name" required></div>
+      <div class="field"><label>Юридическое название</label><input id="f-client-legal"></div>
+      <div class="field-row"><div class="field"><label>ИНН</label><input id="f-client-tax"></div><div class="field"><label>Контактное лицо</label><input id="f-client-contact"></div></div>
+      <div class="field-row"><div class="field"><label>Телефон</label><input id="f-client-phone"></div><div class="field"><label>Email</label><input type="email" id="f-client-email"></div></div>
+    </form>`,
+    '<button class="btn btn-secondary" id="modal-cancel">Отмена</button><button class="btn btn-primary" id="modal-save">Создать</button>');
+  backdrop.querySelector('#modal-cancel').addEventListener('click', closeModal);
+  backdrop.querySelector('#modal-save').addEventListener('click', async () => {
+    const name = backdrop.querySelector('#f-client-name').value.trim();
+    if (name.length < 2) return toast('Укажите название клиента', 'error');
+    try {
+      await api('/clients', { method: 'POST', body: JSON.stringify({
+        name,
+        legal_name: backdrop.querySelector('#f-client-legal').value.trim() || null,
+        tax_id: backdrop.querySelector('#f-client-tax').value.trim() || null,
+        contact_name: backdrop.querySelector('#f-client-contact').value.trim() || null,
+        contact_phone: backdrop.querySelector('#f-client-phone').value.trim() || null,
+        contact_email: backdrop.querySelector('#f-client-email').value.trim() || null,
+      }) });
+      closeModal(); toast('Клиент создан'); router();
+    } catch (e) { toast(e.message, 'error'); }
+  });
+}
+
+function openCreateSiteModal() {
+  const activeClients = state.clients.filter((client) => client.is_active);
+  if (!activeClients.length) return toast('Сначала создайте активного клиента', 'error');
+  const backdrop = openModal('Новый объект обслуживания', `
+    <form id="site-form">
+      <div class="field"><label>Клиент</label><select id="f-site-client" required>${activeClients.map((client) => `<option value="${client.id}">${esc(client.name)}</option>`).join('')}</select></div>
+      <div class="field"><label>Название объекта</label><input id="f-site-name" required></div>
+      <div class="field"><label>Адрес</label><input id="f-site-address"></div>
+      <div class="field-row"><div class="field"><label>Контактное лицо</label><input id="f-site-contact"></div><div class="field"><label>Телефон</label><input id="f-site-phone"></div></div>
+      <div class="field"><label>Email</label><input type="email" id="f-site-email"></div>
+    </form>`,
+    '<button class="btn btn-secondary" id="modal-cancel">Отмена</button><button class="btn btn-primary" id="modal-save">Создать</button>');
+  backdrop.querySelector('#modal-cancel').addEventListener('click', closeModal);
+  backdrop.querySelector('#modal-save').addEventListener('click', async () => {
+    const name = backdrop.querySelector('#f-site-name').value.trim();
+    if (name.length < 2) return toast('Укажите название объекта', 'error');
+    try {
+      await api('/sites', { method: 'POST', body: JSON.stringify({
+        client_id: backdrop.querySelector('#f-site-client').value,
+        name,
+        address: backdrop.querySelector('#f-site-address').value.trim() || null,
+        contact_name: backdrop.querySelector('#f-site-contact').value.trim() || null,
+        contact_phone: backdrop.querySelector('#f-site-phone').value.trim() || null,
+        contact_email: backdrop.querySelector('#f-site-email').value.trim() || null,
+      }) });
+      closeModal(); toast('Объект создан'); router();
+    } catch (e) { toast(e.message, 'error'); }
+  });
+}
+
+// ============================================================
 // Раздел: Оборудование
 // ============================================================
 
@@ -187,23 +303,24 @@ async function ensureEquipmentTypes() {
 }
 
 async function renderEquipment(content) {
-  const [items] = await Promise.all([api('/equipment'), ensureEquipmentTypes()]);
+  const [items] = await Promise.all([api('/equipment'), ensureEquipmentTypes(), ensureCustomers()]);
   const typeName = (id) => (state.equipmentTypes.find((t) => t.id === id) || {}).name || '—';
+  const siteOf = (id) => state.sites.find((site) => site.id === id);
+  const clientOf = (id) => state.clients.find((client) => client.id === id);
   const canEdit = state.me.role !== 'technician';
-  const locations = [...new Set(items.map((eq) => (eq.location || '').trim() || 'Не указано'))]
-    .sort((a, b) => a.localeCompare(b, 'ru'));
+  const activeSites = state.sites.filter((site) => site.is_active);
 
   content.innerHTML = `
     <div class="page-header">
       <div><h1>Оборудование</h1><div class="page-subtitle">Цифровой паспорт и лента ремонтов по каждой единице техники</div></div>
       <div style="display:flex;gap:10px;align-items:center">
-        <select id="equipment-location-filter" aria-label="Фильтр по расположению"><option value="">Все расположения</option>${locations.map((location) => `<option value="${esc(location)}">${esc(location)}</option>`).join('')}</select>
+        <select id="equipment-location-filter" aria-label="Фильтр по объекту"><option value="">Все объекты</option>${activeSites.map((site) => `<option value="${site.id}">${esc(clientOf(site.client_id)?.name || '—')} · ${esc(site.name)}</option>`).join('')}</select>
         ${canEdit ? '<button class="btn btn-primary" id="add-equipment-btn">+ Добавить оборудование</button>' : ''}
       </div>
     </div>
     <div class="card" style="padding:0">
       <table>
-        <thead><tr><th>Тип оборудования</th><th>Серийный №</th><th>Статус</th><th>Расположение</th></tr></thead>
+        <thead><tr><th>Тип оборудования</th><th>Серийный №</th><th>Статус</th><th>Клиент и объект</th></tr></thead>
         <tbody id="equipment-rows"></tbody>
       </table>
     </div>`;
@@ -212,18 +329,22 @@ async function renderEquipment(content) {
   const renderRows = () => {
     const selectedLocation = document.getElementById('equipment-location-filter').value;
     const visibleItems = items
-      .filter((eq) => !selectedLocation || ((eq.location || '').trim() || 'Не указано') === selectedLocation)
+      .filter((eq) => !selectedLocation || eq.site_id === selectedLocation)
       .sort((a, b) => {
-        const byLocation = ((a.location || '').trim() || 'Не указано').localeCompare((b.location || '').trim() || 'Не указано', 'ru');
+        const byLocation = (siteOf(a.site_id)?.name || '').localeCompare(siteOf(b.site_id)?.name || '', 'ru');
         return byLocation || typeName(a.equipment_type_id).localeCompare(typeName(b.equipment_type_id), 'ru');
       });
-    rows.innerHTML = visibleItems.length ? visibleItems.map((eq) => `
+    rows.innerHTML = visibleItems.length ? visibleItems.map((eq) => {
+      const site = siteOf(eq.site_id);
+      const client = site ? clientOf(site.client_id) : null;
+      return `
       <tr class="clickable" data-id="${eq.id}">
       <td><strong>${esc(typeName(eq.equipment_type_id))}</strong><div class="text-soft">${esc(eq.manufacturer || '')} ${esc(eq.model || '')}</div></td>
       <td class="mono">${esc(eq.serial_number)}</td>
       <td>${badge(EQUIPMENT_STATUS, eq.status)}</td>
-      <td>${esc(eq.location || '—')}</td>
-      </tr>`).join('') : '<tr class="empty-row"><td colspan="4">В этом расположении оборудования нет</td></tr>';
+      <td>${esc(client?.name || '—')}<div class="text-soft">${esc(site?.name || eq.location || '—')}</div></td>
+      </tr>`;
+    }).join('') : '<tr class="empty-row"><td colspan="4">На этом объекте оборудования нет</td></tr>';
 
     rows.querySelectorAll('tr[data-id]').forEach((tr) => {
       tr.addEventListener('click', () => openEquipmentPassport(tr.dataset.id));
@@ -233,14 +354,18 @@ async function renderEquipment(content) {
   document.getElementById('equipment-location-filter').addEventListener('change', renderRows);
 
   if (canEdit) {
-    document.getElementById('add-equipment-btn').addEventListener('click', () => openCreateEquipmentModal(items));
+    document.getElementById('add-equipment-btn').addEventListener('click', openCreateEquipmentModal);
   }
 }
 
-function openCreateEquipmentModal(equipmentList) {
+function openCreateEquipmentModal() {
   const typeOptions = state.equipmentTypes.map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join('');
-  const locations = [...new Set(equipmentList.map((e) => (e.location || '').trim()).filter(Boolean))]
-    .sort((a, b) => a.localeCompare(b, 'ru'));
+  const activeSites = state.sites.filter((site) => site.is_active);
+  if (!activeSites.length) return toast('Сначала создайте объект обслуживания', 'error');
+  const siteOptions = activeSites.map((site) => {
+    const client = state.clients.find((item) => item.id === site.client_id);
+    return `<option value="${site.id}">${esc(client?.name || '—')} · ${esc(site.name)}</option>`;
+  }).join('');
   const backdrop = openModal('Новое оборудование', `
     <form id="equipment-form">
       <div class="field"><label>Тип оборудования</label>
@@ -252,10 +377,7 @@ function openCreateEquipmentModal(equipmentList) {
         <div class="field"><label>Модель</label><input id="f-model"></div>
       </div>
       <div class="field"><label>Серийный номер</label><input id="f-serial" required></div>
-      <div class="field"><label>Расположение</label>
-        <input id="f-location" list="location-options" placeholder="Выберите или введите новый объект">
-        <datalist id="location-options">${locations.map((location) => `<option value="${esc(location)}"></option>`).join('')}</datalist>
-      </div>
+      <div class="field"><label>Объект обслуживания</label><select id="f-site" required>${siteOptions}</select></div>
     </form>`,
     `<button class="btn btn-secondary" id="modal-cancel">Отмена</button>
      <button class="btn btn-primary" id="modal-save">Создать</button>`);
@@ -284,7 +406,7 @@ function openCreateEquipmentModal(equipmentList) {
           manufacturer: backdrop.querySelector('#f-manufacturer').value.trim() || null,
           model: backdrop.querySelector('#f-model').value.trim() || null,
           serial_number: serial,
-          location: backdrop.querySelector('#f-location').value.trim() || null,
+          site_id: backdrop.querySelector('#f-site').value,
         }),
       });
       closeModal();
@@ -299,6 +421,8 @@ function openCreateEquipmentModal(equipmentList) {
 async function openEquipmentPassport(id) {
   const passport = await api(`/equipment/${id}/passport`);
   const equipmentTypeName = (state.equipmentTypes.find((type) => type.id === passport.equipment_type_id) || {}).name || passport.name;
+  const site = state.sites.find((item) => item.id === passport.site_id);
+  const client = site ? state.clients.find((item) => item.id === site.client_id) : null;
   const canDelete = state.me.role === 'owner' || state.me.role === 'admin' || state.me.role === 'dispatcher';
   const historyHtml = passport.history.length ? passport.history.map((h) => `
     <div style="display:flex;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)">
@@ -319,6 +443,7 @@ async function openEquipmentPassport(id) {
       <div>
         <div>${esc(passport.manufacturer || '')} ${esc(passport.model || '')}</div>
         <div class="mono text-soft" style="margin-top:4px">${esc(passport.serial_number)}</div>
+        <div class="text-soft" style="margin-top:4px">${esc(client?.name || '')}${site ? ` · ${esc(site.name)}` : ''}</div>
         <div style="margin-top:8px">${badge(EQUIPMENT_STATUS, passport.status)}</div>
       </div>
     </div>

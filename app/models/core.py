@@ -76,6 +76,7 @@ class Equipment(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id"), index=True)
+    site_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("sites.id"), index=True)
     # Отдельный от id токен для публичного QR — так по ссылке нельзя подобрать/угадать
     # внутренний идентификатор и достучаться до админских выборок по id.
     public_qr_token: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), unique=True, default=uuid.uuid4)
@@ -97,6 +98,7 @@ class Equipment(Base):
     updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
 
     equipment_type: Mapped["EquipmentType"] = relationship()
+    site: Mapped["Site"] = relationship(back_populates="equipment")  # noqa: F821
     tasks: Mapped[list["Task"]] = relationship(back_populates="equipment")
     repairs: Mapped[list["Repair"]] = relationship(back_populates="equipment")
 

@@ -3,6 +3,7 @@ import uuid
 from app.core.deps import CurrentUser
 from app.core.security import create_access_token, decode_access_token
 from app.models.core import Equipment, EquipmentType, Task, Ticket, User, UserRole
+from app.models.customer import Client, Site
 from app.models.organization import Organization, OrganizationMembership
 from app.models.repair import Repair, RepairAttachment, SyncLog, SyncOperation
 from app.models.warehouse import Part, StockMovement, Warehouse
@@ -32,7 +33,7 @@ def test_membership_role_is_authoritative():
 def test_every_tenant_root_has_organization_key():
     tenant_models = (
         EquipmentType, Equipment, Task, Ticket, Repair, RepairAttachment,
-        SyncLog, SyncOperation, Warehouse, Part, StockMovement,
+        SyncLog, SyncOperation, Warehouse, Part, StockMovement, Client, Site,
     )
     for model in tenant_models:
         assert "organization_id" in model.__table__.columns, model.__name__
@@ -48,3 +49,14 @@ def test_business_uniqueness_is_scoped_to_tenant():
     assert "uq_equipment_org_serial" in constraints
     assert "uq_part_org_article" in constraints
     assert "uq_ticket_org_idempotency" in constraints
+
+
+def test_equipment_belongs_to_service_site():
+    assert "site_id" in Equipment.__table__.columns
+    constraints = {
+        constraint.name
+        for model in (Client, Site)
+        for constraint in model.__table__.constraints
+    }
+    assert "uq_client_org_name" in constraints
+    assert "uq_site_client_name" in constraints

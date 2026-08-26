@@ -18,6 +18,7 @@ class EquipmentTypeCreate(BaseModel):
 
 class EquipmentBase(BaseModel):
     equipment_type_id: int
+    site_id: uuid.UUID
     # Название больше не вводится пользователем: сервер берёт его из типа
     # оборудования, чтобы во всех разделах было единое обозначение.
     name: str | None = None
@@ -33,7 +34,7 @@ class EquipmentCreate(EquipmentBase):
 
 class EquipmentUpdate(BaseModel):
     status: EquipmentStatus | None = None
-    location: str | None = None
+    site_id: uuid.UUID | None = None
 
 
 class EquipmentOut(EquipmentBase):
