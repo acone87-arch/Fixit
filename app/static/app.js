@@ -40,6 +40,17 @@ async function api(path, options = {}) {
   return text ? JSON.parse(text) : null;
 }
 
+async function apiBlob(path) {
+  const headers = state.token ? { Authorization: `Bearer ${state.token}` } : {};
+  const res = await fetch('/api' + path, { headers });
+  if (res.status === 401) {
+    logout();
+    throw new Error('Сессия истекла, войдите заново');
+  }
+  if (!res.ok) throw new Error('Не удалось загрузить QR-код');
+  return res.blob();
+}
+
 // ---------- Утилиты ----------
 
 function esc(s) {
@@ -65,7 +76,13 @@ function toast(message, type = 'success') {
 
 function closeModal() {
   const el = document.querySelector('.modal-backdrop');
-  if (el) el.remove();
+  if (el) {
+    el.querySelectorAll('[data-object-url]').forEach((node) => {
+      const url = node.getAttribute('src') || node.getAttribute('href');
+      if (url?.startsWith('blob:')) URL.revokeObjectURL(url);
+    });
+    el.remove();
+  }
 }
 
 function openModal(title, bodyHtml, footerHtml) {
@@ -484,7 +501,11 @@ function openCreateEquipmentModal() {
 }
 
 async function openEquipmentPassport(id) {
-  const passport = await api(`/equipment/${id}/passport`);
+  const [passport, qrBlob] = await Promise.all([
+    api(`/equipment/${id}/passport`),
+    apiBlob(`/equipment/${id}/qr`),
+  ]);
+  const qrObjectUrl = URL.createObjectURL(qrBlob);
   const equipmentTypeName = (state.equipmentTypes.find((type) => type.id === passport.equipment_type_id) || {}).name || passport.name;
   const site = state.sites.find((item) => item.id === passport.site_id);
   const client = site ? state.clients.find((item) => item.id === site.client_id) : null;
@@ -504,7 +525,7 @@ async function openEquipmentPassport(id) {
   const qrFilename = `QR — ${qrFilenamePart(passport.location)} — ${qrFilenamePart(passport.model || equipmentTypeName)}.svg`;
   const backdrop = openModal(equipmentTypeName, `
     <div style="display:flex;gap:16px;align-items:flex-start;margin-bottom:16px">
-      <img src="/api/equipment/${id}/qr" alt="QR" style="width:96px;height:96px;border:1px solid var(--line);border-radius:8px;padding:6px;background:#fff">
+      <img src="${qrObjectUrl}" data-object-url alt="QR" style="width:96px;height:96px;border:1px solid var(--line);border-radius:8px;padding:6px;background:#fff">
       <div>
         <div>${esc(passport.manufacturer || '')} ${esc(passport.model || '')}</div>
         <div class="mono text-soft" style="margin-top:4px">${esc(passport.serial_number)}</div>
@@ -521,7 +542,7 @@ async function openEquipmentPassport(id) {
   backdrop.querySelector('#modal-close').addEventListener('click', closeModal);
   backdrop.querySelector('#download-qr-btn').addEventListener('click', () => {
     const link = document.createElement('a');
-    link.href = `/api/equipment/${id}/qr`;
+    link.href = qrObjectUrl;
     link.download = qrFilename;
     document.body.appendChild(link);
     link.click();
