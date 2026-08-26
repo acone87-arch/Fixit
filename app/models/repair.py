@@ -20,6 +20,7 @@ class Repair(Base):
     __tablename__ = "repairs"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id"), index=True)
     # Сгенерирован на устройстве техника в offline-режиме. Ключ идемпотентности при синхронизации.
     local_uuid: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), unique=True)
     equipment_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("equipment.id"))
@@ -54,6 +55,7 @@ class RepairAttachment(Base):
     __tablename__ = "repair_attachments"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id"), index=True)
     repair_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("repairs.id"))
     file_url: Mapped[str] = mapped_column(Text)
     uploaded_at: Mapped[datetime] = mapped_column(server_default=func.now())
@@ -63,6 +65,7 @@ class SyncLog(Base):
     __tablename__ = "sync_log"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id"), index=True)
     device_id: Mapped[str] = mapped_column(String(255))
     user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
     entity_type: Mapped[str] = mapped_column(String(50))
@@ -85,6 +88,7 @@ class SyncOperation(Base):
     __tablename__ = "sync_operations"
 
     operation_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id"), index=True)
     repair_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("repairs.id"))
     # 'applied' — принято и применено штатно;
     # 'applied_with_conflict' — принято, но версия оборудования разошлась, нужна ручная проверка;

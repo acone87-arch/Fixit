@@ -16,8 +16,10 @@ parts_router = APIRouter(prefix="/api/parts", tags=["parts"])
 
 
 @router.get("", response_model=list[WarehouseOut])
-async def list_warehouses(db: AsyncSession = Depends(get_db)):
-    return (await db.scalars(select(Warehouse).order_by(Warehouse.name))).all()
+async def list_warehouses(db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    return (await db.scalars(select(Warehouse).where(
+        Warehouse.organization_id == user.organization_id
+    ).order_by(Warehouse.name))).all()
 
 
 @router.get("/mine/stock", response_model=list[StockItem])
@@ -25,7 +27,7 @@ async def my_warehouse_stock(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_roles(UserRole.technician)),
 ):
-    warehouse_id = await get_technician_mobile_warehouse_id(db, user.id)
+    warehouse_id = await get_technician_mobile_warehouse_id(db, user.id, user.organization_id)
     rows = (
         await db.execute(
             select(WarehouseStock, Part)
@@ -55,7 +57,9 @@ async def warehouse_stock(
 ):
     # Техник может смотреть только свой мобильный склад; админ/диспетчер — любой.
     if user.role == UserRole.technician:
-        warehouse = await db.get(Warehouse, warehouse_id)
+        warehouse = await db.scalar(select(Warehouse).where(
+            Warehouse.id == warehouse_id, Warehouse.organization_id == user.organization_id
+        ))
         if not warehouse or warehouse.owner_user_id != user.id:
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Доступен только собственный склад")
 
@@ -63,7 +67,9 @@ async def warehouse_stock(
         await db.execute(
             select(WarehouseStock, Part)
             .join(Part, Part.id == WarehouseStock.part_id)
-            .where(WarehouseStock.warehouse_id == warehouse_id)
+            .join(Warehouse, Warehouse.id == WarehouseStock.warehouse_id)
+            .where(WarehouseStock.warehouse_id == warehouse_id,
+                   Warehouse.organization_id == user.organization_id)
             .order_by(Part.name)
         )
     ).all()
@@ -88,7 +94,16 @@ async def receive_movement(
 ):
     if payload.type != "receipt" or not payload.to_warehouse_id:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Некорректный тип операции")
-    await receive_stock(db, payload.to_warehouse_id, payload.part_id, payload.quantity, user.id)
+    warehouse_ok = await db.scalar(select(Warehouse.id).where(
+        Warehouse.id == payload.to_warehouse_id, Warehouse.organization_id == user.organization_id
+    ))
+    part_ok = await db.scalar(select(Part.id).where(
+        Part.id == payload.part_id, Part.organization_id == user.organization_id
+    ))
+    if not warehouse_ok or not part_ok:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Склад или запчасть не найдены в организации")
+    await receive_stock(db, payload.to_warehouse_id, payload.part_id, payload.quantity, user.id,
+                        user.organization_id)
     await db.commit()
     return {"status": "ok"}
 
@@ -101,9 +116,19 @@ async def transfer_movement(
 ):
     if payload.type != "transfer" or not payload.from_warehouse_id or not payload.to_warehouse_id:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Некорректный тип операции")
+    warehouse_count = len((await db.scalars(select(Warehouse.id).where(
+        Warehouse.id.in_([payload.from_warehouse_id, payload.to_warehouse_id]),
+        Warehouse.organization_id == user.organization_id,
+    ))).all())
+    part_ok = await db.scalar(select(Part.id).where(
+        Part.id == payload.part_id, Part.organization_id == user.organization_id
+    ))
+    if warehouse_count != 2 or not part_ok:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Склад или запчасть не найдены в организации")
     try:
         await transfer_stock(
-            db, payload.from_warehouse_id, payload.to_warehouse_id, payload.part_id, payload.quantity, user.id
+            db, payload.from_warehouse_id, payload.to_warehouse_id, payload.part_id, payload.quantity,
+            user.id, user.organization_id
         )
     except InsufficientStockError as exc:
         raise HTTPException(
@@ -115,17 +140,19 @@ async def transfer_movement(
 
 
 @parts_router.get("", response_model=list[PartOut])
-async def list_parts(db: AsyncSession = Depends(get_db)):
-    return (await db.scalars(select(Part).order_by(Part.name))).all()
+async def list_parts(db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+    return (await db.scalars(select(Part).where(
+        Part.organization_id == user.organization_id
+    ).order_by(Part.name))).all()
 
 
 @parts_router.post("", response_model=PartOut, status_code=status.HTTP_201_CREATED)
 async def create_part(
     payload: PartCreate,
     db: AsyncSession = Depends(get_db),
-    _user=Depends(require_roles(UserRole.admin, UserRole.dispatcher)),
+    user=Depends(require_roles(UserRole.admin, UserRole.dispatcher)),
 ):
-    part = Part(**payload.model_dump())
+    part = Part(**payload.model_dump(), organization_id=user.organization_id)
     db.add(part)
     await db.commit()
     await db.refresh(part)

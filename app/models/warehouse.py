@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, Enum, ForeignKey, Integer, String
+from sqlalchemy import CheckConstraint, Enum, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -25,6 +25,7 @@ class Warehouse(Base):
     __tablename__ = "warehouses"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id"), index=True)
     type: Mapped[WarehouseType] = mapped_column(Enum(WarehouseType, name="warehouse_type"))
     name: Mapped[str] = mapped_column(String(255))
     owner_user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
@@ -34,9 +35,11 @@ class Warehouse(Base):
 
 class Part(Base):
     __tablename__ = "parts"
+    __table_args__ = (UniqueConstraint("organization_id", "article", name="uq_part_org_article"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    article: Mapped[str] = mapped_column(String(100), unique=True)
+    organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id"), index=True)
+    article: Mapped[str] = mapped_column(String(100))
     name: Mapped[str] = mapped_column(String(255))
     unit: Mapped[str] = mapped_column(String(20), default="шт")
     min_critical_qty: Mapped[int] = mapped_column(Integer, default=0)
@@ -63,6 +66,7 @@ class StockMovement(Base):
     __tablename__ = "stock_movements"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id"), index=True)
     type: Mapped[StockMovementType] = mapped_column(Enum(StockMovementType, name="stock_movement_type"))
     part_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("parts.id"))
     from_warehouse_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("warehouses.id"))

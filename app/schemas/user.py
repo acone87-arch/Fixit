@@ -26,13 +26,17 @@ class UserOut(UserBase):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
     is_active: bool
+    organization_id: uuid.UUID | None = None
 
 
 class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"
+    organization_id: uuid.UUID
+    role: UserRole
 
 
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
+    organization_slug: str | None = None

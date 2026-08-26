@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Enum, ForeignKey, String, Text
+from sqlalchemy import Enum, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -11,6 +11,7 @@ from app.database import Base
 
 
 class UserRole(str, enum.Enum):
+    owner = "owner"
     admin = "admin"
     dispatcher = "dispatcher"
     technician = "technician"
@@ -62,15 +63,19 @@ class User(Base):
 
 class EquipmentType(Base):
     __tablename__ = "equipment_types"
+    __table_args__ = (UniqueConstraint("organization_id", "name", name="uq_equipment_type_org_name"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(String(100), unique=True)
+    organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id"), index=True)
+    name: Mapped[str] = mapped_column(String(100))
 
 
 class Equipment(Base):
     __tablename__ = "equipment"
+    __table_args__ = (UniqueConstraint("organization_id", "serial_number", name="uq_equipment_org_serial"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id"), index=True)
     # Отдельный от id токен для публичного QR — так по ссылке нельзя подобрать/угадать
     # внутренний идентификатор и достучаться до админских выборок по id.
     public_qr_token: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), unique=True, default=uuid.uuid4)
@@ -78,7 +83,7 @@ class Equipment(Base):
     name: Mapped[str] = mapped_column(String(255))
     manufacturer: Mapped[str | None] = mapped_column(String(255))
     model: Mapped[str | None] = mapped_column(String(255))
-    serial_number: Mapped[str] = mapped_column(String(255), unique=True)
+    serial_number: Mapped[str] = mapped_column(String(255))
     status: Mapped[EquipmentStatus] = mapped_column(
         Enum(EquipmentStatus, name="equipment_status"), default=EquipmentStatus.working
     )
@@ -100,6 +105,7 @@ class Task(Base):
     __tablename__ = "tasks"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id"), index=True)
     equipment_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("equipment.id"))
     # Заполнено, если наряд оформлен диспетчером из гостевой заявки, а не создан вручную.
     ticket_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("tickets.id"))
@@ -123,8 +129,12 @@ class Ticket(Base):
     напрямую (см. assigned_technician_id) либо оформляет в полноценный Task."""
 
     __tablename__ = "tickets"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "idempotency_key", name="uq_ticket_org_idempotency"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id"), index=True)
     equipment_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("equipment.id"), index=True)
     severity: Mapped[TicketSeverity] = mapped_column(Enum(TicketSeverity, name="ticket_severity"))
     symptom_tags: Mapped[list[str]] = mapped_column(ARRAY(String), default=list)
@@ -136,7 +146,7 @@ class Ticket(Base):
     # Ключ идемпотентности на создание: гостевая страница может отправить один и тот
     # же POST дважды (двойной тап, разрыв связи прямо на объекте) — сервер должен
     # вернуть уже созданную заявку, а не наплодить дублей.
-    idempotency_key: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), unique=True)
+    idempotency_key: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
     equipment: Mapped["Equipment"] = relationship()

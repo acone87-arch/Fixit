@@ -13,6 +13,7 @@ from sqlalchemy import select
 from app.core.security import hash_password
 from app.database import AsyncSessionLocal
 from app.models.core import Equipment, EquipmentType, User, UserRole
+from app.models.organization import Organization, OrganizationMembership
 from app.models.warehouse import Part, Warehouse, WarehouseStock, WarehouseType
 
 ADMIN_EMAIL = "admin@example.com"
@@ -23,6 +24,11 @@ TECH_PASSWORD = os.getenv("INITIAL_TECH_PASSWORD", "tech12345")
 
 async def main() -> None:
     async with AsyncSessionLocal() as db:
+        organization = await db.scalar(select(Organization).where(Organization.slug == "fixit-default"))
+        if not organization:
+            organization = Organization(name="Fixit Default", slug="fixit-default")
+            db.add(organization)
+            await db.flush()
         admin = await db.scalar(select(User).where(User.email == ADMIN_EMAIL))
         if not admin:
             admin = User(
@@ -44,25 +50,47 @@ async def main() -> None:
             db.add(technician)
         await db.flush()  # получаем technician.id для мобильного склада ниже
 
-        central = await db.scalar(select(Warehouse).where(Warehouse.type == WarehouseType.central))
+        for user, role in ((admin, UserRole.owner), (technician, UserRole.technician)):
+            membership = await db.scalar(select(OrganizationMembership).where(
+                OrganizationMembership.organization_id == organization.id,
+                OrganizationMembership.user_id == user.id,
+            ))
+            if not membership:
+                db.add(OrganizationMembership(
+                    organization_id=organization.id, user_id=user.id, role=role,
+                ))
+
+        central = await db.scalar(select(Warehouse).where(
+            Warehouse.organization_id == organization.id, Warehouse.type == WarehouseType.central
+        ))
         if not central:
-            central = Warehouse(type=WarehouseType.central, name="Центральный склад")
+            central = Warehouse(organization_id=organization.id, type=WarehouseType.central, name="Центральный склад")
             db.add(central)
 
-        mobile = await db.scalar(select(Warehouse).where(Warehouse.owner_user_id == technician.id))
+        mobile = await db.scalar(select(Warehouse).where(
+            Warehouse.organization_id == organization.id,
+            Warehouse.owner_user_id == technician.id,
+        ))
         if not mobile:
-            mobile = Warehouse(type=WarehouseType.mobile, name="Склад техника (авто)", owner_user_id=technician.id)
+            mobile = Warehouse(organization_id=organization.id, type=WarehouseType.mobile,
+                               name="Склад техника (авто)", owner_user_id=technician.id)
             db.add(mobile)
 
-        eq_type = await db.scalar(select(EquipmentType).where(EquipmentType.name == "Поломоечная машина"))
+        eq_type = await db.scalar(select(EquipmentType).where(
+            EquipmentType.organization_id == organization.id, EquipmentType.name == "Поломоечная машина"
+        ))
         if not eq_type:
-            eq_type = EquipmentType(name="Поломоечная машина")
+            eq_type = EquipmentType(organization_id=organization.id, name="Поломоечная машина")
             db.add(eq_type)
         await db.flush()
 
-        equipment = await db.scalar(select(Equipment).where(Equipment.serial_number == "KB-2201-4471"))
+        equipment = await db.scalar(select(Equipment).where(
+            Equipment.organization_id == organization.id,
+            Equipment.serial_number == "KB-2201-4471",
+        ))
         if not equipment:
             equipment = Equipment(
+                organization_id=organization.id,
                 equipment_type_id=eq_type.id,
                 name="Поломоечная машина",
                 manufacturer="Kärcher",
@@ -72,9 +100,13 @@ async def main() -> None:
             )
             db.add(equipment)
 
-        part = await db.scalar(select(Part).where(Part.article == "KB-PUMP-70"))
+        part = await db.scalar(select(Part).where(
+            Part.organization_id == organization.id,
+            Part.article == "KB-PUMP-70",
+        ))
         if not part:
-            part = Part(article="KB-PUMP-70", name="Насос подачи воды", min_critical_qty=1)
+            part = Part(organization_id=organization.id, article="KB-PUMP-70",
+                        name="Насос подачи воды", min_critical_qty=1)
             db.add(part)
         await db.flush()
 

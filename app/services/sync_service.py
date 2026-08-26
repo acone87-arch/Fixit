@@ -19,12 +19,16 @@ class _SyncFailure(Exception):
         self.message = message
 
 
-async def sync_one_repair(db: AsyncSession, technician_id: uuid.UUID, payload: RepairCreate) -> SyncItemResult:
+async def sync_one_repair(db: AsyncSession, technician_id: uuid.UUID, organization_id: uuid.UUID,
+                          payload: RepairCreate) -> SyncItemResult:
     # local_uuid служит и первичным ключом идемпотентности синка (через
     # sync_operations), и уникальным ключом самой записи repairs — при повторной
     # отправке того же пакета сервер не создаёт дубликат, а возвращает то же
     # самое решение, что было принято в первый раз.
-    existing_op = await db.get(SyncOperation, payload.local_uuid)
+    existing_op = await db.scalar(select(SyncOperation).where(
+        SyncOperation.operation_id == payload.local_uuid,
+        SyncOperation.organization_id == organization_id,
+    ))
     if existing_op:
         return SyncItemResult(
             local_uuid=payload.local_uuid,
@@ -42,7 +46,7 @@ async def sync_one_repair(db: AsyncSession, technician_id: uuid.UUID, payload: R
             # Для акта без запчастей склад вообще не нужен. Раньше именно это
             # лишнее требование не давало технику закрыть выполненный ремонт.
             if payload.parts_used:
-                mobile_warehouse_id = await get_technician_mobile_warehouse_id(db, technician_id)
+                mobile_warehouse_id = await get_technician_mobile_warehouse_id(db, technician_id, organization_id)
                 for item in payload.parts_used:
                     try:
                         await decrement_stock(
@@ -52,6 +56,7 @@ async def sync_one_repair(db: AsyncSession, technician_id: uuid.UUID, payload: R
                             quantity=item.quantity,
                             repair_id=None,
                             created_by=technician_id,
+                            organization_id=organization_id,
                         )
                     except InsufficientStockError as exc:
                         raise _SyncFailure(
@@ -60,7 +65,8 @@ async def sync_one_repair(db: AsyncSession, technician_id: uuid.UUID, payload: R
                         ) from exc
 
             equipment = await db.scalar(
-                select(Equipment).where(Equipment.id == payload.equipment_id).with_for_update()
+                select(Equipment).where(Equipment.id == payload.equipment_id,
+                                        Equipment.organization_id == organization_id).with_for_update()
             )
             if not equipment:
                 raise _SyncFailure("Оборудование не найдено")
@@ -70,7 +76,8 @@ async def sync_one_repair(db: AsyncSession, technician_id: uuid.UUID, payload: R
             if payload.task_id:
                 task = await db.scalar(
                     select(Task)
-                    .where(Task.id == payload.task_id, Task.assigned_to == technician_id)
+                    .where(Task.id == payload.task_id, Task.assigned_to == technician_id,
+                           Task.organization_id == organization_id)
                     .with_for_update()
                 )
                 if not task:
@@ -82,6 +89,7 @@ async def sync_one_repair(db: AsyncSession, technician_id: uuid.UUID, payload: R
             conflict = equipment.version != payload.base_equipment_version
 
             repair = Repair(
+                organization_id=organization_id,
                 id=uuid.uuid4(),
                 local_uuid=payload.local_uuid,
                 equipment_id=equipment.id,
@@ -118,7 +126,8 @@ async def sync_one_repair(db: AsyncSession, technician_id: uuid.UUID, payload: R
                 equipment.version += 1
 
             resolved_as = "applied_with_conflict" if conflict else "applied"
-            db.add(SyncOperation(operation_id=payload.local_uuid, repair_id=repair.id, resolved_as=resolved_as))
+            db.add(SyncOperation(organization_id=organization_id, operation_id=payload.local_uuid,
+                                 repair_id=repair.id, resolved_as=resolved_as))
             result = SyncItemResult(local_uuid=payload.local_uuid, server_id=repair.id, resolved_as=resolved_as)
 
     except _SyncFailure as exc:

@@ -35,6 +35,7 @@ async def decrement_stock(
     quantity: int,
     repair_id: uuid.UUID | None,
     created_by: uuid.UUID | None,
+    organization_id: uuid.UUID,
 ) -> None:
     row = await _lock_stock_row(db, warehouse_id, part_id)
     available = row.quantity if row else 0
@@ -44,6 +45,7 @@ async def decrement_stock(
     row.version += 1
     db.add(
         StockMovement(
+            organization_id=organization_id,
             type=StockMovementType.writeoff,
             part_id=part_id,
             from_warehouse_id=warehouse_id,
@@ -62,6 +64,7 @@ async def transfer_stock(
     part_id: uuid.UUID,
     quantity: int,
     created_by: uuid.UUID | None,
+    organization_id: uuid.UUID,
 ) -> None:
     if from_warehouse_id == to_warehouse_id:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Склады должны отличаться")
@@ -88,6 +91,7 @@ async def transfer_stock(
 
     db.add(
         StockMovement(
+            organization_id=organization_id,
             type=StockMovementType.transfer,
             part_id=part_id,
             from_warehouse_id=from_warehouse_id,
@@ -104,6 +108,7 @@ async def receive_stock(
     part_id: uuid.UUID,
     quantity: int,
     created_by: uuid.UUID | None,
+    organization_id: uuid.UUID,
 ) -> None:
     row = await _lock_stock_row(db, to_warehouse_id, part_id)
     if row:
@@ -113,6 +118,7 @@ async def receive_stock(
         db.add(WarehouseStock(warehouse_id=to_warehouse_id, part_id=part_id, quantity=quantity))
     db.add(
         StockMovement(
+            organization_id=organization_id,
             type=StockMovementType.receipt,
             part_id=part_id,
             from_warehouse_id=None,

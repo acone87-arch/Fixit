@@ -6,7 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, require_roles
 from app.database import get_db
-from app.models.core import Task, TaskStatus, Ticket, TicketStatus, User, UserRole
+from app.models.core import Equipment, Task, TaskStatus, Ticket, TicketStatus, User, UserRole
+from app.models.organization import OrganizationMembership
 from app.models.repair import Repair
 from app.schemas.equipment import TaskCreate, TaskOut, TaskUpdate
 
@@ -21,7 +22,7 @@ async def list_tasks(db: AsyncSession = Depends(get_db), user: User = Depends(ge
         (Task.status.in_((TaskStatus.closed, TaskStatus.cancelled)), 1),
         else_=0,
     )
-    query = select(Task).order_by(closed_last, Task.created_at.desc())
+    query = select(Task).where(Task.organization_id == user.organization_id).order_by(closed_last, Task.created_at.desc())
     # Техник видит только свои назначенные заявки — так же, как в мобильном
     # клиенте (см. экран "Мои заявки" в мокапе); админ/диспетчер видят всё.
     if user.role == UserRole.technician:
@@ -35,7 +36,12 @@ async def create_task(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_roles(UserRole.admin, UserRole.dispatcher)),
 ):
-    task = Task(**payload.model_dump(), created_by=user.id)
+    equipment = await db.scalar(select(Equipment.id).where(
+        Equipment.id == payload.equipment_id, Equipment.organization_id == user.organization_id
+    ))
+    if not equipment:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Оборудование не найдено в организации")
+    task = Task(**payload.model_dump(), created_by=user.id, organization_id=user.organization_id)
     db.add(task)
     await db.commit()
     await db.refresh(task)
@@ -47,15 +53,22 @@ async def update_task(
     task_id: uuid.UUID,
     payload: TaskUpdate,
     db: AsyncSession = Depends(get_db),
-    _user=Depends(require_roles(UserRole.admin, UserRole.dispatcher)),
+    user=Depends(require_roles(UserRole.admin, UserRole.dispatcher)),
 ):
-    task = await db.get(Task, task_id)
+    task = await db.scalar(select(Task).where(Task.id == task_id, Task.organization_id == user.organization_id))
     if not task:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Наряд не найден")
     changes = payload.model_dump(exclude_unset=True)
     if changes.get("assigned_to"):
-        technician = await db.get(User, changes["assigned_to"])
-        if not technician or technician.role != UserRole.technician or not technician.is_active:
+        technician = await db.scalar(select(User).join(
+            OrganizationMembership, OrganizationMembership.user_id == User.id
+        ).where(
+            User.id == changes["assigned_to"], User.is_active.is_(True),
+            OrganizationMembership.organization_id == user.organization_id,
+            OrganizationMembership.role == UserRole.technician,
+            OrganizationMembership.is_active.is_(True),
+        ))
+        if not technician:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Можно назначить только активного техника")
     if changes.get('assigned_to') and task.status == TaskStatus.new:
         changes['status'] = TaskStatus.assigned
@@ -70,10 +83,10 @@ async def update_task(
 async def delete_task(
     task_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user=Depends(require_roles(UserRole.admin, UserRole.dispatcher)),
+    user=Depends(require_roles(UserRole.admin, UserRole.dispatcher)),
 ):
     """Deletes a work order while preserving completed repair-act history."""
-    task = await db.get(Task, task_id)
+    task = await db.scalar(select(Task).where(Task.id == task_id, Task.organization_id == user.organization_id))
     if not task:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Наряд не найден")
     if task.status not in (TaskStatus.closed, TaskStatus.cancelled) and not (
@@ -102,13 +115,20 @@ async def assign_task(
     task_id: uuid.UUID,
     technician_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user=Depends(require_roles(UserRole.admin, UserRole.dispatcher)),
+    user=Depends(require_roles(UserRole.admin, UserRole.dispatcher)),
 ):
-    task = await db.get(Task, task_id)
+    task = await db.scalar(select(Task).where(Task.id == task_id, Task.organization_id == user.organization_id))
     if not task:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Заявка не найдена")
-    technician = await db.get(User, technician_id)
-    if not technician or technician.role != UserRole.technician or not technician.is_active:
+    technician = await db.scalar(select(User).join(
+        OrganizationMembership, OrganizationMembership.user_id == User.id
+    ).where(
+        User.id == technician_id, User.is_active.is_(True),
+        OrganizationMembership.organization_id == user.organization_id,
+        OrganizationMembership.role == UserRole.technician,
+        OrganizationMembership.is_active.is_(True),
+    ))
+    if not technician:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Можно назначить только активного техника")
     task.assigned_to = technician_id
     task.status = TaskStatus.assigned
@@ -126,7 +146,7 @@ async def close_own_task(
     """Allows a technician to close only a work order assigned to them."""
     task = await db.scalar(
         select(Task)
-        .where(Task.id == task_id, Task.assigned_to == user.id)
+        .where(Task.id == task_id, Task.assigned_to == user.id, Task.organization_id == user.organization_id)
         .with_for_update()
     )
     if not task:

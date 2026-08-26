@@ -109,7 +109,7 @@ const TICKET_SEVERITY = {
   not_working: 'Не работает',
   partially_working: 'Работает с перебоями',
 };
-const ROLE_LABEL = { admin: 'Администратор', dispatcher: 'Диспетчер', technician: 'Техник' };
+const ROLE_LABEL = { owner: 'Владелец', admin: 'Администратор', dispatcher: 'Диспетчер', technician: 'Техник' };
 
 function badge(map, key) {
   const info = map[key] || { label: key, cls: 'idle' };
@@ -119,6 +119,10 @@ function badge(map, key) {
 // ---------- Навигация ----------
 
 const NAV = {
+  owner: [
+    ['equipment', 'Оборудование'], ['tasks', 'Наряды'], ['tickets', 'Заявки от гостей'],
+    ['warehouse', 'Склад'], ['users', 'Пользователи'],
+  ],
   admin: [
     ['equipment', 'Оборудование'],
     ['tasks', 'Наряды'],
@@ -295,7 +299,7 @@ function openCreateEquipmentModal(equipmentList) {
 async function openEquipmentPassport(id) {
   const passport = await api(`/equipment/${id}/passport`);
   const equipmentTypeName = (state.equipmentTypes.find((type) => type.id === passport.equipment_type_id) || {}).name || passport.name;
-  const canDelete = state.me.role === 'admin' || state.me.role === 'dispatcher';
+  const canDelete = state.me.role === 'owner' || state.me.role === 'admin' || state.me.role === 'dispatcher';
   const historyHtml = passport.history.length ? passport.history.map((h) => `
     <div style="display:flex;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)">
       <div style="width:8px;height:8px;border-radius:50%;background:var(--accent);margin-top:6px;flex-shrink:0"></div>

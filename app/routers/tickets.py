@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import require_roles
 from app.database import get_db
 from app.models.core import Equipment, EquipmentStatus, EquipmentType, Task, TaskPriority, TaskStatus, Ticket, User, UserRole
+from app.models.organization import OrganizationMembership
 from app.schemas.equipment import PublicEquipmentOut
 from app.schemas.ticket import GuestTicketCreate, TicketAssign, TicketCreateResult, TicketOut
 
@@ -39,17 +40,20 @@ async def create_guest_ticket(qr_token: uuid.UUID, payload: GuestTicketCreate, d
     # Идемпотентность по ключу, который сгенерировала гостевая страница, а не по
     # заголовку — гостевая форма может быть открыта в обычном браузере без
     # контроля над HTTP-заголовками, а поле в теле запроса гарантированно дойдёт.
-    existing = await db.scalar(select(Ticket).where(Ticket.idempotency_key == payload.idempotency_key))
-    if existing:
-        return TicketCreateResult(ticket_id=existing.id, status=existing.status, duplicate=True)
-
     equipment = await db.scalar(
         select(Equipment).where(Equipment.public_qr_token == qr_token).with_for_update()
     )
     if not equipment:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Оборудование не найдено")
+    existing = await db.scalar(select(Ticket).where(
+        Ticket.organization_id == equipment.organization_id,
+        Ticket.idempotency_key == payload.idempotency_key,
+    ))
+    if existing:
+        return TicketCreateResult(ticket_id=existing.id, status=existing.status, duplicate=True)
 
     ticket = Ticket(
+        organization_id=equipment.organization_id,
         equipment_id=equipment.id,
         severity=payload.severity,
         symptom_tags=payload.symptom_tags,
@@ -74,9 +78,11 @@ async def create_guest_ticket(qr_token: uuid.UUID, payload: GuestTicketCreate, d
 @admin_router.get("", response_model=list[TicketOut])
 async def list_tickets(
     db: AsyncSession = Depends(get_db),
-    _user=Depends(require_roles(UserRole.admin, UserRole.dispatcher)),
+    user=Depends(require_roles(UserRole.admin, UserRole.dispatcher)),
 ):
-    rows = (await db.scalars(select(Ticket).order_by(Ticket.created_at.desc()).limit(50))).all()
+    rows = (await db.scalars(select(Ticket).where(
+        Ticket.organization_id == user.organization_id
+    ).order_by(Ticket.created_at.desc()).limit(50))).all()
     return rows
 
 
@@ -89,9 +95,18 @@ async def assign_ticket(
 ):
     from app.models.core import TicketSeverity, TicketStatus
 
-    ticket = await db.get(Ticket, ticket_id)
-    technician = await db.get(User, payload.technician_id)
-    if not ticket or not technician or technician.role != UserRole.technician:
+    ticket = await db.scalar(select(Ticket).where(
+        Ticket.id == ticket_id, Ticket.organization_id == user.organization_id
+    ))
+    technician = await db.scalar(select(User).join(
+        OrganizationMembership, OrganizationMembership.user_id == User.id
+    ).where(
+        User.id == payload.technician_id,
+        OrganizationMembership.organization_id == user.organization_id,
+        OrganizationMembership.role == UserRole.technician,
+        OrganizationMembership.is_active.is_(True),
+    ))
+    if not ticket or not technician:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Заявка или техник не найдены")
     if not technician.is_active:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Нельзя назначить неактивного техника")
@@ -108,6 +123,7 @@ async def assign_ticket(
         task.description = task_description
     else:
         task = Task(
+            organization_id=user.organization_id,
             ticket_id=ticket.id,
             equipment_id=ticket.equipment_id,
             assigned_to=technician.id,

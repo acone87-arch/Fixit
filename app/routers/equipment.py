@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.core.deps import get_current_user, require_roles
+from app.core.deps import CurrentUser, get_current_user, require_roles
 from app.database import get_db
 from app.models.core import Equipment, EquipmentType, Task, Ticket, UserRole
 from app.models.repair import Repair
@@ -27,17 +27,19 @@ types_router = APIRouter(prefix="/api/equipment-types", tags=["equipment"])
 
 
 @types_router.get("", response_model=list[EquipmentTypeOut])
-async def list_equipment_types(db: AsyncSession = Depends(get_db)):
-    return (await db.scalars(select(EquipmentType).order_by(EquipmentType.name))).all()
+async def list_equipment_types(db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    return (await db.scalars(select(EquipmentType).where(
+        EquipmentType.organization_id == user.organization_id
+    ).order_by(EquipmentType.name))).all()
 
 
 @types_router.post("", response_model=EquipmentTypeOut, status_code=status.HTTP_201_CREATED)
 async def create_equipment_type(
     payload: EquipmentTypeCreate,
     db: AsyncSession = Depends(get_db),
-    _user=Depends(require_roles(UserRole.admin, UserRole.dispatcher)),
+    user=Depends(require_roles(UserRole.admin, UserRole.dispatcher)),
 ):
-    eq_type = EquipmentType(name=payload.name)
+    eq_type = EquipmentType(organization_id=user.organization_id, name=payload.name)
     db.add(eq_type)
     await db.commit()
     await db.refresh(eq_type)
@@ -45,11 +47,12 @@ async def create_equipment_type(
 
 
 @router.get("", response_model=list[EquipmentOut])
-async def list_equipment(db: AsyncSession = Depends(get_db)):
+async def list_equipment(db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     rows = (
         await db.execute(
             select(Equipment, EquipmentType.name)
             .join(EquipmentType, Equipment.equipment_type_id == EquipmentType.id)
+            .where(Equipment.organization_id == user.organization_id)
             .order_by(Equipment.updated_at.desc())
         )
     ).all()
@@ -62,14 +65,18 @@ async def list_equipment(db: AsyncSession = Depends(get_db)):
 async def create_equipment(
     payload: EquipmentCreate,
     db: AsyncSession = Depends(get_db),
-    _user=Depends(require_roles(UserRole.admin, UserRole.dispatcher)),
+    user=Depends(require_roles(UserRole.admin, UserRole.dispatcher)),
 ):
-    equipment_type = await db.get(EquipmentType, payload.equipment_type_id)
+    equipment_type = await db.scalar(select(EquipmentType).where(
+        EquipmentType.id == payload.equipment_type_id,
+        EquipmentType.organization_id == user.organization_id,
+    ))
     if not equipment_type:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Тип оборудования не найден")
     # Не принимаем произвольное название из клиента: тип — единственное
     # название единицы оборудования во всех экранах.
-    equipment = Equipment(**payload.model_dump(exclude={"name"}), name=equipment_type.name)
+    equipment = Equipment(**payload.model_dump(exclude={"name"}), name=equipment_type.name,
+                          organization_id=user.organization_id)
     db.add(equipment)
     try:
         await db.commit()
@@ -84,15 +91,17 @@ async def create_equipment(
 async def get_equipment_by_qr(
     qr_token: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user=Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user),
 ):
     """Для мобильного приложения техника — в отличие от /api/public/equipment/{qr_token}
     (гостевой, без авторизации, отдаёт минимум полей), тут нужен именно внутренний id,
     чтобы дальше открыть полный паспорт и создать акт ремонта."""
-    equipment = await db.scalar(select(Equipment).where(Equipment.public_qr_token == qr_token))
+    equipment = await db.scalar(select(Equipment).where(
+        Equipment.public_qr_token == qr_token, Equipment.organization_id == user.organization_id
+    ))
     if not equipment:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Оборудование не найдено")
-    return await get_passport(equipment.id, db)
+    return await get_passport(equipment.id, db, user)
 
 
 @router.patch("/{equipment_id}", response_model=EquipmentOut)
@@ -100,9 +109,11 @@ async def update_equipment(
     equipment_id: uuid.UUID,
     payload: EquipmentUpdate,
     db: AsyncSession = Depends(get_db),
-    _user=Depends(require_roles(UserRole.admin, UserRole.dispatcher)),
+    user=Depends(require_roles(UserRole.admin, UserRole.dispatcher)),
 ):
-    equipment = await db.get(Equipment, equipment_id)
+    equipment = await db.scalar(select(Equipment).where(
+        Equipment.id == equipment_id, Equipment.organization_id == user.organization_id
+    ))
     if not equipment:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Оборудование не найдено")
     for field, value in payload.model_dump(exclude_unset=True).items():
@@ -117,10 +128,12 @@ async def update_equipment(
 async def delete_equipment(
     equipment_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _user=Depends(require_roles(UserRole.admin, UserRole.dispatcher)),
+    user=Depends(require_roles(UserRole.admin, UserRole.dispatcher)),
 ):
     """Удаляет ошибочно заведённую единицу оборудования без сервисной истории."""
-    equipment = await db.get(Equipment, equipment_id)
+    equipment = await db.scalar(select(Equipment).where(
+        Equipment.id == equipment_id, Equipment.organization_id == user.organization_id
+    ))
     if not equipment:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Оборудование не найдено")
 
@@ -142,8 +155,11 @@ async def delete_equipment(
 
 
 @router.get("/{equipment_id}/passport", response_model=EquipmentPassport)
-async def get_passport(equipment_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
-    equipment = await db.get(Equipment, equipment_id)
+async def get_passport(equipment_id: uuid.UUID, db: AsyncSession = Depends(get_db),
+                       user: CurrentUser = Depends(get_current_user)):
+    equipment = await db.scalar(select(Equipment).where(
+        Equipment.id == equipment_id, Equipment.organization_id == user.organization_id
+    ))
     if not equipment:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Оборудование не найдено")
 
@@ -189,8 +205,11 @@ async def get_passport(equipment_id: uuid.UUID, db: AsyncSession = Depends(get_d
 
 
 @router.get("/{equipment_id}/qr", response_class=Response)
-async def equipment_qr(equipment_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
-    equipment = await db.get(Equipment, equipment_id)
+async def equipment_qr(equipment_id: uuid.UUID, db: AsyncSession = Depends(get_db),
+                       user: CurrentUser = Depends(get_current_user)):
+    equipment = await db.scalar(select(Equipment).where(
+        Equipment.id == equipment_id, Equipment.organization_id == user.organization_id
+    ))
     if not equipment:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Оборудование не найдено")
     public_url = f"{settings.public_app_url.rstrip('/')}/e/{equipment.public_qr_token}"
