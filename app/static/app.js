@@ -176,6 +176,46 @@ function renderNav() {
   });
   document.getElementById('user-name').textContent = state.me.full_name;
   document.getElementById('user-role').textContent = ROLE_LABEL[state.me.role] || state.me.role;
+  renderMobileNav(items);
+}
+
+function renderMobileNav(items) {
+  const mobileNav = document.getElementById('mobile-nav');
+  const moreMenu = document.getElementById('more-menu');
+  const primary = [
+    ['pulse', 'Пульс', 'pulse'], ['tasks', 'Заявки', 'tasks'], ['qr', 'QR', 'qr'],
+    ['equipment', 'Оборудование', 'equipment'], ['more', 'Ещё', 'more'],
+  ];
+  mobileNav.innerHTML = primary.map(([route, label, icon]) => `
+    <button class="mobile-nav-item ${state.route === route ? 'active' : ''}" data-mobile-route="${route}">
+      <span class="mobile-nav-icon icon-${icon}"></span><span>${label}</span>
+    </button>`).join('');
+  moreMenu.innerHTML = `<div class="more-menu-head"><span>Разделы</span><button id="more-close-btn">Закрыть</button></div>${items
+    .filter(([route]) => !['pulse', 'tasks', 'equipment'].includes(route))
+    .map(([route, label]) => `<button data-more-route="${route}">${esc(label)}<span>→</span></button>`).join('')}
+    <button id="more-logout-btn" class="more-logout">Выйти<span>↗</span></button>`;
+  document.querySelectorAll('[data-mobile-route]').forEach((button) => button.addEventListener('click', () => {
+    const route = button.dataset.mobileRoute;
+    if (route === 'more') { moreMenu.classList.toggle('hidden'); return; }
+    if (route === 'qr') { openQrQuickAction(); return; }
+    moreMenu.classList.add('hidden');
+    location.hash = route;
+  }));
+  moreMenu.querySelectorAll('[data-more-route]').forEach((button) => button.addEventListener('click', () => {
+    moreMenu.classList.add('hidden'); location.hash = button.dataset.moreRoute;
+  }));
+  moreMenu.querySelector('#more-close-btn').addEventListener('click', () => moreMenu.classList.add('hidden'));
+  moreMenu.querySelector('#more-logout-btn').addEventListener('click', logout);
+  document.getElementById('mobile-profile-btn').onclick = () => moreMenu.classList.toggle('hidden');
+}
+
+function openQrQuickAction() {
+  const backdrop = openModal('QR в Fixit Pulse', `
+    <div class="qr-quick-mark">⌘</div>
+    <p class="text-soft" style="line-height:1.6">QR-коды привязаны к оборудованию. Откройте паспорт единицы, чтобы скачать наклейку или перейти к истории сервисных актов.</p>`,
+    '<button class="btn btn-secondary" id="modal-cancel">Закрыть</button><button class="btn btn-primary" id="qr-open-equipment">Открыть оборудование</button>');
+  backdrop.querySelector('#modal-cancel').addEventListener('click', closeModal);
+  backdrop.querySelector('#qr-open-equipment').addEventListener('click', () => { closeModal(); location.hash = 'equipment'; });
 }
 
 async function router() {
@@ -213,14 +253,21 @@ window.addEventListener('hashchange', router);
 // ============================================================
 
 async function renderPulse(content) {
-  const [clients, sites, equipment, tasks, tickets] = await Promise.all([
-    api('/clients'), api('/sites'), api('/equipment'), api('/tasks'), api('/tickets'), ensureEquipmentTypes(),
+  const [clients, sites, equipment, tasks, tickets, users] = await Promise.all([
+    api('/clients'), api('/sites'), api('/equipment'), api('/tasks'), api('/tickets'), api('/users'), ensureEquipmentTypes(),
   ]);
   state.clients = clients;
   state.sites = sites;
   const activeTasks = tasks.filter((task) => !['closed', 'cancelled'].includes(task.status));
+  const workTasks = activeTasks.filter((task) => ['assigned', 'in_progress'].includes(task.status));
   const urgentTasks = activeTasks.filter((task) => task.priority === 'urgent');
-  const openTickets = tickets.filter((ticket) => ticket.status !== 'resolved');
+  const newTickets = tickets.filter((ticket) => ticket.status === 'new');
+  const now = new Date();
+  const overdueTasks = activeTasks.filter((task) => task.due_at && new Date(task.due_at) < now);
+  const technicians = users.filter((user) => user.role === 'technician' && user.is_active);
+  const activeTechIds = new Set(workTasks.map((task) => task.assigned_to).filter(Boolean));
+  const activeTechnicians = technicians.filter((tech) => activeTechIds.has(tech.id));
+  const teamRoute = state.me.role === 'dispatcher' ? 'tasks' : 'users';
   const attentionEquipment = equipment.filter((item) => item.status === 'needs_repair');
   const workingEquipment = equipment.filter((item) => item.status === 'working').length;
   const uptime = equipment.length ? Math.round((workingEquipment / equipment.length) * 100) : 100;
@@ -228,39 +275,49 @@ async function renderPulse(content) {
   const clientOf = (id) => clients.find((client) => client.id === id);
   const typeName = (id) => (state.equipmentTypes.find((type) => type.id === id) || {}).name || 'Оборудование';
 
+  const taskRows = activeTasks.sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
   content.innerHTML = `
-    <div class="pulse-hero">
-      <div><div class="eyebrow">FIXIT PULSE · LIVE</div><h1>Операционный пульс</h1><div class="page-subtitle">Вся сервисная сеть в одном рабочем ритме</div></div>
-      <div class="live-chip"><span></span>Система работает</div>
-    </div>
+    <section class="pulse-command">
+      <div class="pulse-command-copy"><div class="eyebrow">FIXIT PULSE · LIVE CONTROL</div><h1>Пульс сервиса</h1><p>Заявки, объекты и команда в одном рабочем контуре.</p></div>
+      <div class="pulse-command-live"><span></span><div><b>Онлайн</b><small>${activeTasks.length} активных работ</small></div></div>
+      <div class="pulse-orbit orbit-a"></div><div class="pulse-orbit orbit-b"></div>
+    </section>
     <div class="metric-grid">
-      <button class="metric-card metric-dark" data-jump="tasks"><span class="metric-label">Активные наряды</span><strong>${activeTasks.length}</strong><small>${urgentTasks.length ? `${urgentTasks.length} срочных` : 'Без срочных'}</small></button>
-      <button class="metric-card" data-jump="tickets"><span class="metric-label">Новые обращения</span><strong>${openTickets.length}</strong><small>из QR и диспетчерской</small></button>
-      <button class="metric-card" data-jump="equipment"><span class="metric-label">Требует внимания</span><strong>${attentionEquipment.length}</strong><small>единиц оборудования</small></button>
-      <button class="metric-card metric-accent" data-jump="equipment"><span class="metric-label">Техническая готовность</span><strong>${uptime}%</strong><small>${workingEquipment} из ${equipment.length} в работе</small></button>
+      <button class="metric-card metric-new" data-jump="tickets"><span class="metric-label">Новые заявки</span><strong>${newTickets.length}</strong><small>из QR и гостевой формы</small></button>
+      <button class="metric-card metric-dark" data-jump="tasks"><span class="metric-label">В работе</span><strong>${workTasks.length}</strong><small>${urgentTasks.length ? `${urgentTasks.length} срочных` : 'спокойная очередь'}</small></button>
+      <button class="metric-card metric-alert" data-jump="tasks"><span class="metric-label">Просрочено</span><strong>${overdueTasks.length}</strong><small>нужна реакция диспетчера</small></button>
+      <button class="metric-card metric-accent" data-jump="${teamRoute}"><span class="metric-label">Мастера в работе</span><strong>${activeTechnicians.length}</strong><small>из ${technicians.length} активных</small></button>
     </div>
+    <section class="quick-actions"><div class="section-caption">Быстрые действия</div><div class="quick-action-grid">
+      <button data-jump="tickets"><span class="quick-action-icon qa-ticket">+</span><b>Разобрать заявки</b><small>${newTickets.length} новых</small></button>
+      <button data-jump="tasks"><span class="quick-action-icon qa-task">↗</span><b>Открыть наряды</b><small>${workTasks.length} в работе</small></button>
+      <button data-quick="qr"><span class="quick-action-icon qa-qr">⌘</span><b>QR оборудования</b><small>Наклейки и паспорта</small></button>
+      <button data-jump="equipment"><span class="quick-action-icon qa-equipment">◌</span><b>Оборудование</b><small>${attentionEquipment.length} требует внимания</small></button>
+    </div></section>
     <div class="pulse-grid">
       <section class="card pulse-panel">
-        <div class="panel-head"><div><span class="eyebrow">СЕЙЧАС</span><h2>Приоритетная работа</h2></div><button class="text-link" data-jump="tasks">Все наряды →</button></div>
-        <div class="pulse-list">${activeTasks.length ? activeTasks.slice(0, 6).map((task) => {
+        <div class="panel-head"><div><span class="eyebrow">АКТИВНО</span><h2>Последние активные заявки</h2></div><button class="text-link" data-jump="tasks">Все наряды →</button></div>
+        <div class="pulse-list">${taskRows.length ? taskRows.slice(0, 6).map((task) => {
           const item = equipment.find((eq) => eq.id === task.equipment_id);
           const site = item ? siteOf(item.site_id) : null;
-          return `<div class="pulse-row"><span class="priority-mark ${task.priority === 'urgent' ? 'urgent' : ''}"></span><div><strong>${esc(task.title)}</strong><small>${esc(site?.name || item?.location || 'Объект не указан')} · ${esc(item ? typeName(item.equipment_type_id) : '')}</small></div><div>${badge(TASK_STATUS, task.status)}</div></div>`;
-        }).join('') : '<div class="pulse-empty">Активных нарядов нет — система в норме</div>'}</div>
+          const overdue = task.due_at && new Date(task.due_at) < now;
+          return `<button class="pulse-row" data-jump="tasks"><span class="priority-mark ${task.priority === 'urgent' || overdue ? 'urgent' : ''}"></span><div><strong>${esc(task.title)}</strong><small>${esc(site?.name || item?.location || 'Объект не указан')} · ${esc(item ? typeName(item.equipment_type_id) : '')}</small></div><div>${overdue ? '<span class="overdue-tag">Просрочено</span>' : badge(TASK_STATUS, task.status)}</div></button>`;
+        }).join('') : '<div class="pulse-empty">Активных нарядов нет — сервис работает штатно</div>'}</div>
       </section>
       <section class="card pulse-panel">
-        <div class="panel-head"><div><span class="eyebrow">СЕТЬ</span><h2>Контур обслуживания</h2></div><button class="text-link" data-jump="clients">Открыть →</button></div>
-        <div class="network-score"><strong>${clients.length}</strong><span>клиентов</span><i></i><strong>${sites.length}</strong><span>объектов</span><i></i><strong>${equipment.length}</strong><span>единиц техники</span></div>
-        <div class="site-list">${sites.slice(0, 5).map((site) => {
-          const client = clientOf(site.client_id);
-          return `<div><span><strong>${esc(site.name)}</strong><small>${esc(client?.name || '')}</small></span><b>${site.equipment_count}</b></div>`;
-        }).join('')}</div>
+        <div class="panel-head"><div><span class="eyebrow">КОМАНДА</span><h2>Мастера на линии</h2></div><button class="text-link" data-jump="${teamRoute}">Команда →</button></div>
+        <div class="team-list">${technicians.length ? technicians.slice(0, 6).map((tech) => {
+          const count = workTasks.filter((task) => task.assigned_to === tech.id).length;
+          return `<div class="team-row"><span class="team-avatar">${esc(tech.full_name.split(/\s+/).slice(0, 2).map((part) => part[0]).join(''))}</span><div><strong>${esc(tech.full_name)}</strong><small>${count ? `${count} активн. ${count === 1 ? 'наряд' : 'наряда'}` : 'Свободен'}</small></div><span class="team-state ${count ? 'busy' : ''}">${count ? 'В работе' : 'Свободен'}</span></div>`;
+        }).join('') : '<div class="pulse-empty">Добавьте мастеров, чтобы видеть загрузку</div>'}</div>
+        <div class="network-strip"><span>${clients.length}<small>клиентов</small></span><span>${sites.length}<small>объектов</small></span><span>${uptime}%<small>готовность</small></span></div>
       </section>
     </div>`;
 
   content.querySelectorAll('[data-jump]').forEach((button) => {
     button.addEventListener('click', () => { location.hash = button.dataset.jump; });
   });
+  content.querySelectorAll('[data-quick="qr"]').forEach((button) => button.addEventListener('click', openQrQuickAction));
 }
 
 // ============================================================
