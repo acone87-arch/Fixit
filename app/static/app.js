@@ -538,6 +538,12 @@ async function renderEquipment(content) {
       <div><h1>Оборудование</h1><div class="page-subtitle">Цифровой паспорт и лента ремонтов по каждой единице техники</div></div>
       <div style="display:flex;gap:10px;align-items:center">
         <select id="equipment-location-filter" aria-label="Фильтр по объекту"><option value="">Все объекты</option>${activeSites.map((site) => `<option value="${site.id}">${esc(clientOf(site.client_id)?.name || '—')} · ${esc(site.name)}</option>`).join('')}</select>
+        <div class="site-picker" id="equipment-site-picker">
+          <button type="button" class="site-picker-trigger" id="equipment-site-trigger"><span id="equipment-site-label">Все объекты</span><i>⌄</i></button>
+          <div class="site-picker-menu hidden" id="equipment-site-menu">
+            <button type="button" data-site-value="">Все объекты</button>${activeSites.map((site) => `<button type="button" data-site-value="${site.id}"><small>${esc(clientOf(site.client_id)?.name || '—')}</small>${esc(site.name)}</button>`).join('')}
+          </div>
+        </div>
         ${canEdit ? '<button class="btn btn-primary" id="add-equipment-btn">+ Добавить оборудование</button>' : ''}
       </div>
     </div>
@@ -581,6 +587,18 @@ async function renderEquipment(content) {
   };
   renderRows();
   document.getElementById('equipment-location-filter').addEventListener('change', renderRows);
+  const sitePicker = document.getElementById('equipment-site-picker');
+  const siteMenu = document.getElementById('equipment-site-menu');
+  document.getElementById('equipment-site-trigger').addEventListener('click', () => siteMenu.classList.toggle('hidden'));
+  siteMenu.querySelectorAll('[data-site-value]').forEach((button) => button.addEventListener('click', () => {
+    const select = document.getElementById('equipment-location-filter');
+    select.value = button.dataset.siteValue;
+    document.getElementById('equipment-site-label').textContent = button.textContent.trim().replace(/\s+/g, ' ');
+    siteMenu.classList.add('hidden'); renderRows();
+  }));
+  content.addEventListener('click', (event) => {
+    if (!sitePicker.contains(event.target)) siteMenu.classList.add('hidden');
+  });
 
   if (canEdit) {
     document.getElementById('add-equipment-btn').addEventListener('click', openCreateEquipmentModal);
