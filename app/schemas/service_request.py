@@ -14,6 +14,16 @@ class ServiceRequestApproval(BaseModel):
     action: Literal["approved", "rejected"]
     comment: str | None = Field(default=None, max_length=1000)
 
+
+class ServiceRequestAttachmentOut(BaseModel):
+    id: uuid.UUID
+    kind: str
+    original_name: str | None = None
+    media_type: str | None = None
+    byte_size: int | None = None
+    created_at: datetime | None = None
+    download_url: str
+
 class ServiceRequestOut(BaseModel):
     id: uuid.UUID; number: int; ticket_id: uuid.UUID | None; task_id: uuid.UUID | None; equipment_id: uuid.UUID
     client_name: str | None; site_name: str | None; equipment_name: str; serial_number: str
@@ -23,4 +33,5 @@ class ServiceRequestOut(BaseModel):
     site_address: str | None = None; contact_name: str | None = None; contact_phone: str | None = None
     equipment_type: str | None = None; manufacturer: str | None = None; model: str | None = None; equipment_status: str | None = None; equipment_version: int | None = None
     attachments: list[dict] = []
+    request_attachments: list[dict] = []
     primary_photo: dict | None = None

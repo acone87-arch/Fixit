@@ -2,8 +2,9 @@ import uuid
 from datetime import datetime, timezone
 
 from app.models.core import EquipmentAttachment
+from app.models.service_request import ServiceRequestAttachment
 from app.schemas.equipment import EquipmentPhotoOut
-from app.schemas.service_request import ServiceRequestOut
+from app.schemas.service_request import ServiceRequestAttachmentOut, ServiceRequestOut
 
 
 def test_equipment_primary_photo_is_tenant_scoped_and_one_per_equipment():
@@ -35,3 +36,15 @@ def test_equipment_photo_contract_keeps_file_out_of_database_payload():
     )
     assert "file_url" not in photo.model_dump()
     assert photo.media_type.startswith("image/")
+
+
+def test_service_request_attachment_is_tenant_scoped_and_has_no_base64_payload():
+    columns = set(ServiceRequestAttachment.__table__.columns.keys())
+    assert {"id", "organization_id", "service_request_id", "uploaded_by_user_id", "kind", "file_url", "original_name", "media_type", "byte_size", "created_at"} <= columns
+    assert "data" not in columns and "base64" not in columns
+    attachment = ServiceRequestAttachmentOut(
+        id=uuid.uuid4(), kind="approval", original_name="evidence.jpg", media_type="image/jpeg",
+        byte_size=123, created_at=datetime.now(timezone.utc),
+        download_url="/api/service-requests/attachments/example",
+    )
+    assert attachment.download_url.startswith("/api/service-requests/attachments/")

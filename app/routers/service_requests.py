@@ -1,6 +1,8 @@
 import uuid
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException
+from pathlib import Path
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import CurrentUser, get_current_user, require_roles
@@ -9,12 +11,15 @@ from app.models.core import Equipment, EquipmentAttachment, EquipmentType, Task,
 from app.models.customer import Client, Site
 from app.models.organization import OrganizationMembership
 from app.models.repair import Repair, RepairAttachment, RepairPart
-from app.models.service_request import ServiceRequest, ServiceRequestEvent
+from app.models.service_request import ServiceRequest, ServiceRequestAttachment, ServiceRequestEvent
 from app.models.warehouse import Part
-from app.schemas.service_request import REQUEST_STATUSES, ServiceRequestApproval, ServiceRequestOut, ServiceRequestStatusUpdate
+from app.schemas.service_request import REQUEST_STATUSES, ServiceRequestApproval, ServiceRequestAttachmentOut, ServiceRequestOut, ServiceRequestStatusUpdate
 from app.services.service_requests import event
 
 router = APIRouter(prefix="/api/service-requests", tags=["service requests"])
+UPLOAD_ROOT = Path("uploads")
+MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024
+REQUEST_ATTACHMENT_KINDS = {"problem", "diagnostic", "approval", "work", "other"}
 
 TECHNICIAN_TRANSITIONS = {
     "assigned": {"on_the_way"}, "on_the_way": {"arrived"}, "arrived": {"in_progress"},
@@ -25,6 +30,24 @@ TECHNICIAN_TRANSITIONS = {
 def client_label(client: Client, site: Site) -> str:
     name = (client.legal_name or client.name or "").strip()
     return site.name if name.lower() == "импортированные клиенты" else (name or site.name)
+
+
+def attachment_out(item: ServiceRequestAttachment) -> ServiceRequestAttachmentOut:
+    return ServiceRequestAttachmentOut(
+        id=item.id, kind=item.kind, original_name=item.original_name, media_type=item.media_type,
+        byte_size=item.byte_size, created_at=item.created_at,
+        download_url=f"/api/service-requests/attachments/{item.id}",
+    )
+
+
+async def request_for_user(request_id: uuid.UUID, db: AsyncSession, user: CurrentUser) -> ServiceRequest:
+    request = await db.scalar(select(ServiceRequest).where(
+        ServiceRequest.id == request_id,
+        ServiceRequest.organization_id == user.organization_id,
+    ))
+    if not request or (user.role == UserRole.technician and request.assigned_technician_id != user.id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Заявка не найдена")
+    return request
 
 
 async def serialize(db, request, org):
@@ -53,6 +76,10 @@ async def serialize(db, request, org):
     attachments = []
     if repair:
         attachments = [{"id": item.id, "kind": item.kind, "name": item.original_name, "media_type": item.media_type, "at": item.uploaded_at} for item in (await db.scalars(select(RepairAttachment).where(RepairAttachment.organization_id == org, RepairAttachment.repair_id == repair.id).order_by(RepairAttachment.uploaded_at))).all()]
+    request_attachments = [attachment_out(item).model_dump() for item in (await db.scalars(select(ServiceRequestAttachment).where(
+        ServiceRequestAttachment.organization_id == org,
+        ServiceRequestAttachment.service_request_id == request.id,
+    ).order_by(ServiceRequestAttachment.created_at))).all()]
     events = (await db.scalars(select(ServiceRequestEvent).where(
         ServiceRequestEvent.organization_id == org,
         ServiceRequestEvent.service_request_id == request.id,
@@ -74,7 +101,68 @@ async def serialize(db, request, org):
     if not any(item["type"] == "request.created" for item in history):
         history.insert(0, {"at": request.created_at, "type": "request.created", "message": "Заявка создана", "details": {}, "actor": None})
     photo_out = {"id": primary_photo.id, "original_name": primary_photo.original_name, "media_type": primary_photo.media_type, "byte_size": primary_photo.byte_size, "uploaded_at": primary_photo.uploaded_at, "download_url": f"/api/equipment/{equipment.id}/photo"} if primary_photo else None
-    return ServiceRequestOut(id=request.id, number=request.number, ticket_id=request.ticket_id, task_id=request.task_id, equipment_id=request.equipment_id, client_name=client_label(client, site), site_name=site.name, equipment_name=equipment.name, serial_number=equipment.serial_number, description=request.description, priority=request.priority, assigned_technician_id=request.assigned_technician_id, assigned_technician_name=technician_name, status=request.status, created_at=request.created_at, completed_at=request.completed_at, repair_id=repair.id if repair else None, parts_used=parts, outcome=repair.description if repair else None, history=history, site_address=site.address, contact_name=site.contact_name or client.contact_name, contact_phone=site.contact_phone or client.contact_phone, equipment_type=equipment_type, manufacturer=equipment.manufacturer, model=equipment.model, equipment_status=equipment.status.value, equipment_version=equipment.version, attachments=attachments, primary_photo=photo_out)
+    return ServiceRequestOut(id=request.id, number=request.number, ticket_id=request.ticket_id, task_id=request.task_id, equipment_id=request.equipment_id, client_name=client_label(client, site), site_name=site.name, equipment_name=equipment.name, serial_number=equipment.serial_number, description=request.description, priority=request.priority, assigned_technician_id=request.assigned_technician_id, assigned_technician_name=technician_name, status=request.status, created_at=request.created_at, completed_at=request.completed_at, repair_id=repair.id if repair else None, parts_used=parts, outcome=repair.description if repair else None, history=history, site_address=site.address, contact_name=site.contact_name or client.contact_name, contact_phone=site.contact_phone or client.contact_phone, equipment_type=equipment_type, manufacturer=equipment.manufacturer, model=equipment.model, equipment_status=equipment.status.value, equipment_version=equipment.version, attachments=attachments, request_attachments=request_attachments, primary_photo=photo_out)
+
+
+@router.post("/{request_id}/attachments", response_model=ServiceRequestAttachmentOut, status_code=status.HTTP_201_CREATED)
+async def upload_request_attachment(
+    request_id: uuid.UUID,
+    kind: str = Form(...),
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    request = await request_for_user(request_id, db, user)
+    if kind not in REQUEST_ATTACHMENT_KINDS:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Неизвестный тип вложения")
+    content = await file.read(MAX_ATTACHMENT_BYTES + 1)
+    media_type = file.content_type or ""
+    if not content or len(content) > MAX_ATTACHMENT_BYTES:
+        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Файл должен быть не больше 8 МБ")
+    if not media_type.startswith("image/"):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Для заявки можно загрузить только изображение")
+    attachment_id = uuid.uuid4()
+    suffix = Path(file.filename or "attachment").suffix.lower()
+    if len(suffix) > 10 or not suffix.replace(".", "").isalnum():
+        suffix = ""
+    relative_path = Path(str(user.organization_id)) / "service-requests" / str(request.id) / f"{attachment_id}{suffix}"
+    destination = UPLOAD_ROOT / relative_path
+    await run_in_threadpool(destination.parent.mkdir, parents=True, exist_ok=True)
+    await run_in_threadpool(destination.write_bytes, content)
+    attachment = ServiceRequestAttachment(
+        id=attachment_id, organization_id=user.organization_id, service_request_id=request.id,
+        uploaded_by_user_id=user.id, kind=kind, file_url=str(relative_path).replace("\\", "/"),
+        original_name=(file.filename or "фото заявки")[:255], media_type=media_type[:100], byte_size=len(content),
+    )
+    db.add(attachment)
+    await db.commit()
+    await db.refresh(attachment)
+    return attachment_out(attachment)
+
+
+@router.get("/{request_id}/attachments", response_model=list[ServiceRequestAttachmentOut])
+async def list_request_attachments(request_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    await request_for_user(request_id, db, user)
+    items = (await db.scalars(select(ServiceRequestAttachment).where(
+        ServiceRequestAttachment.organization_id == user.organization_id,
+        ServiceRequestAttachment.service_request_id == request_id,
+    ).order_by(ServiceRequestAttachment.created_at))).all()
+    return [attachment_out(item) for item in items]
+
+
+@router.get("/attachments/{attachment_id}")
+async def download_request_attachment(attachment_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    attachment = await db.scalar(select(ServiceRequestAttachment).where(
+        ServiceRequestAttachment.id == attachment_id,
+        ServiceRequestAttachment.organization_id == user.organization_id,
+    ))
+    if not attachment:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Вложение заявки не найдено")
+    await request_for_user(attachment.service_request_id, db, user)
+    path = UPLOAD_ROOT / attachment.file_url
+    if not path.is_file():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Файл вложения не найден")
+    return Response(await run_in_threadpool(path.read_bytes), media_type=attachment.media_type or "image/jpeg")
 
 @router.get("", response_model=list[ServiceRequestOut])
 async def list_requests(db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(get_current_user)):

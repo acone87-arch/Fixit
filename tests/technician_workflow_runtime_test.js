@@ -42,4 +42,8 @@ const technicianWorkspaceStart = source.indexOf('async function openTechnicianRe
 const technicianWorkspaceEnd = source.indexOf('// ============================================================\n// Раздел: Fixit Pulse', technicianWorkspaceStart);
 const technicianWorkspaceSource = source.slice(technicianWorkspaceStart, technicianWorkspaceEnd);
 assert.doesNotMatch(technicianWorkspaceSource, /capture="environment"/);
+assert.match(technicianWorkspaceSource, /form\.append\('kind', 'approval'\)/);
+assert.match(technicianWorkspaceSource, /\/service-requests\/\$\{request\.id\}\/attachments/);
+assert.match(technicianWorkspaceSource, /photo\.approvalAttachmentId = attachment\.id/);
+assert.ok(source.includes('data-request-photo'), 'Dispatcher request detail must render request photo thumbnails');
 console.log('technician workflow runtime: ok');

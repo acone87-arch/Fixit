@@ -7,7 +7,7 @@ from app.models.core import Equipment, EquipmentAttachment, EquipmentType, Task,
 from app.models.customer import Client, Site
 from app.models.organization import Organization, OrganizationMembership
 from app.models.repair import Repair, RepairAttachment, SyncLog, SyncOperation
-from app.models.service_request import ServiceRequest, ServiceRequestEvent
+from app.models.service_request import ServiceRequest, ServiceRequestAttachment, ServiceRequestEvent
 from app.models.warehouse import Part, StockMovement, Warehouse
 from app.schemas.service_request import REQUEST_STATUSES
 from app.routers.service_requests import TECHNICIAN_TRANSITIONS
@@ -37,7 +37,7 @@ def test_membership_role_is_authoritative():
 def test_every_tenant_root_has_organization_key():
     tenant_models = (
         EquipmentType, Equipment, EquipmentAttachment, Task, Ticket, Repair, RepairAttachment,
-        SyncLog, SyncOperation, ServiceRequest, ServiceRequestEvent, Warehouse, Part, StockMovement, Client, Site,
+        SyncLog, SyncOperation, ServiceRequest, ServiceRequestAttachment, ServiceRequestEvent, Warehouse, Part, StockMovement, Client, Site,
     )
     for model in tenant_models:
         assert "organization_id" in model.__table__.columns, model.__name__
