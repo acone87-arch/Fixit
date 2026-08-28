@@ -8,6 +8,8 @@ from app.models.core import Equipment, EquipmentStatus, Task, TaskStatus, Ticket
 from app.models.repair import Repair, RepairPart, SyncOperation, SyncStatus
 from app.schemas.repair import RepairCreate, SyncItemResult
 from app.services.stock_service import InsufficientStockError, decrement_stock
+from app.models.service_request import ServiceRequest
+from app.services.service_requests import event
 
 
 class _SyncFailure(Exception):
@@ -111,6 +113,18 @@ async def sync_one_repair(db: AsyncSession, technician_id: uuid.UUID, organizati
 
             for item in payload.parts_used:
                 db.add(RepairPart(repair_id=repair.id, part_id=item.part_id, quantity=item.quantity))
+
+            request_query = select(ServiceRequest).where(ServiceRequest.organization_id == organization_id)
+            if payload.task_id:
+                request_query = request_query.where(ServiceRequest.task_id == payload.task_id)
+            elif ticket_id:
+                request_query = request_query.where(ServiceRequest.ticket_id == ticket_id)
+            else:
+                request_query = request_query.where(ServiceRequest.equipment_id == equipment.id).order_by(ServiceRequest.created_at.desc())
+            service_request = await db.scalar(request_query)
+            if service_request:
+                service_request.status = "completed"
+                db.add(event(organization_id, service_request.id, technician_id, "repair.completed", "Ремонт выполнен, сервисный акт оформлен", {"repair_id": str(repair.id)}))
 
             if task:
                 task.status = TaskStatus.closed

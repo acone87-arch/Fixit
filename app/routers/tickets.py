@@ -10,6 +10,8 @@ from app.models.core import Equipment, EquipmentStatus, EquipmentType, Task, Tas
 from app.models.organization import OrganizationMembership
 from app.schemas.equipment import PublicEquipmentOut
 from app.schemas.ticket import GuestTicketCreate, TicketAssign, TicketCreateResult, TicketOut
+from app.models.service_request import ServiceRequest
+from app.services.service_requests import event, next_number
 
 public_router = APIRouter(prefix="/api/public/equipment", tags=["guest"])
 admin_router = APIRouter(prefix="/api/tickets", tags=["tickets"])
@@ -63,6 +65,10 @@ async def create_guest_ticket(qr_token: uuid.UUID, payload: GuestTicketCreate, d
         idempotency_key=payload.idempotency_key,
     )
     db.add(ticket)
+    await db.flush()
+    request = ServiceRequest(organization_id=equipment.organization_id, number=await next_number(db, equipment.organization_id), ticket_id=ticket.id, equipment_id=equipment.id, status="new", priority="urgent" if payload.severity.value == "not_working" else "planned", title=(payload.comment or ", ".join(payload.symptom_tags) or "Новая заявка")[:255], description=payload.comment)
+    db.add(request); await db.flush()
+    db.add(event(equipment.organization_id, request.id, None, "request.created", "Заявка создана через QR", {"ticket_id": str(ticket.id)}))
 
     # Гостевая заявка не должна тихо перезаписать более серьёзный статус
     # (например, "списано") — поднимаем в "требует ремонта" только из рабочего состояния.
@@ -114,6 +120,7 @@ async def assign_ticket(
     problem = (ticket.comment or '').strip() or ", ".join(ticket.symptom_tags) or "Не указано"
     task_description = ticket.comment or problem
     task = await db.scalar(select(Task).where(Task.ticket_id == ticket.id))
+    request = await db.scalar(select(ServiceRequest).where(ServiceRequest.ticket_id == ticket.id))
     if task:
         task.assigned_to = technician.id
         task.status = TaskStatus.assigned
@@ -137,6 +144,12 @@ async def assign_ticket(
 
     ticket.assigned_technician_id = technician.id
     ticket.status = TicketStatus.assigned
+    if request:
+        request.task_id = task.id
+        request.assigned_technician_id = technician.id
+        request.status = "assigned"
+        request.priority = task.priority.value
+        db.add(event(user.organization_id, request.id, user.id, "technician.assigned", f"Назначен мастер: {technician.full_name}", {"technician_id": str(technician.id)}))
     await db.commit()
     await db.refresh(ticket)
     return ticket

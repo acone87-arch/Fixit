@@ -158,12 +158,12 @@ function badge(map, key) {
 
 const NAV = {
   owner: [
-    ['pulse', 'Pulse'],
+    ['pulse', 'Pulse'], ['requests', 'Заявки'],
     ['clients', 'Клиенты и объекты'], ['equipment', 'Оборудование'], ['tasks', 'Наряды'], ['tickets', 'Заявки от гостей'],
     ['warehouse', 'Склад'], ['users', 'Пользователи'],
   ],
   admin: [
-    ['pulse', 'Pulse'],
+    ['pulse', 'Pulse'], ['requests', 'Заявки'],
     ['clients', 'Клиенты и объекты'],
     ['equipment', 'Оборудование'],
     ['tasks', 'Наряды'],
@@ -172,7 +172,7 @@ const NAV = {
     ['users', 'Пользователи'],
   ],
   dispatcher: [
-    ['pulse', 'Pulse'],
+    ['pulse', 'Pulse'], ['requests', 'Заявки'],
     ['clients', 'Клиенты и объекты'],
     ['equipment', 'Оборудование'],
     ['tasks', 'Наряды'],
@@ -180,7 +180,7 @@ const NAV = {
     ['warehouse', 'Склад и запчасти'],
   ],
   technician: [
-    ['tasks', 'Мои наряды'],
+    ['requests', 'Мои заявки'], ['tasks', 'Мои наряды'],
     ['warehouse', 'Мой склад'],
   ],
 };
@@ -202,7 +202,7 @@ function renderMobileNav(items) {
   const mobileNav = document.getElementById('mobile-nav');
   const moreMenu = document.getElementById('more-menu');
   const primary = [
-    ['pulse', 'Пульс', 'pulse'], ['tasks', 'Заявки', 'tasks'], ['qr', 'QR', 'qr'],
+    ['pulse', 'Пульс', 'pulse'], ['requests', 'Заявки', 'tasks'], ['qr', 'QR', 'qr'],
     ['equipment', 'Оборудование', 'equipment'], ['more', 'Ещё', 'more'],
   ];
   mobileNav.innerHTML = primary.map(([route, label, icon]) => `
@@ -210,7 +210,7 @@ function renderMobileNav(items) {
       <span class="mobile-nav-icon icon-${icon}"></span><span>${label}</span>
     </button>`).join('');
   moreMenu.innerHTML = `<div class="more-menu-head"><span>Разделы</span><button id="more-close-btn">Закрыть</button></div>${items
-    .filter(([route]) => !['pulse', 'tasks', 'equipment'].includes(route))
+    .filter(([route]) => !['pulse', 'requests', 'equipment'].includes(route))
     .map(([route, label]) => `<button data-more-route="${route}">${esc(label)}<span>→</span></button>`).join('')}
     <button id="more-logout-btn" class="more-logout">Выйти<span>↗</span></button>`;
   document.querySelectorAll('[data-mobile-route]').forEach((button) => button.addEventListener('click', () => {
@@ -306,6 +306,7 @@ async function router() {
   content.innerHTML = '<div class="section-loading">Загрузка…</div>';
   try {
     if (state.route === 'pulse') await renderPulse(content);
+    else if (state.route === 'requests') await renderServiceRequests(content);
     else if (state.route === 'clients') await renderClients(content);
     else if (state.route === 'equipment') await renderEquipment(content);
     else if (state.route === 'tasks') await renderTasks(content);
@@ -318,6 +319,18 @@ async function router() {
   }
 }
 window.addEventListener('hashchange', router);
+
+async function renderServiceRequests(content) {
+  const requests = await api('/service-requests');
+  const statusLabel = { new: 'Новая', assigned: 'Назначена', on_the_way: 'В пути', in_progress: 'В работе', waiting_parts: 'Ждёт запчасти', waiting_approval: 'Ждёт согласование', completed: 'Выполнена', closed: 'Закрыта', cancelled: 'Отменена' };
+  content.innerHTML = `<div class="page-header"><div><h1>Заявки</h1><div class="page-subtitle">Единый путь обращения: от QR до сервисного акта</div></div></div><div class="card" style="padding:0"><table><thead><tr><th>№ / проблема</th><th>Клиент и объект</th><th>Оборудование</th><th>Мастер</th><th>Статус</th><th>Итог</th></tr></thead><tbody>${requests.length ? requests.map((item) => `<tr class="clickable request-row" data-id="${item.id}"><td><strong>SR-${String(item.number).padStart(5, '0')}</strong><div class="text-soft">${esc(item.description || 'Без описания')}</div></td><td>${esc(item.client_name || '—')}<div class="text-soft">${esc(item.site_name || '')}</div></td><td>${esc(item.equipment_name)}<div class="text-soft mono">${esc(item.serial_number)}</div></td><td>${esc(item.assigned_technician_name || 'Не назначен')}</td><td><span class="badge badge-${['completed','closed'].includes(item.status) ? 'good' : item.status.startsWith('waiting') ? 'amber' : item.status === 'cancelled' ? 'idle' : 'warn'}"><span class="badge-dot"></span>${esc(statusLabel[item.status] || item.status)}</span></td><td>${esc(item.outcome || '—')}</td></tr>`).join('') : '<tr class="empty-row"><td colspan="6">Заявок пока нет</td></tr>'}</tbody></table></div>`;
+  content.querySelectorAll('.request-row').forEach((row) => row.addEventListener('click', async () => {
+    const item = await api(`/service-requests/${row.dataset.id}`);
+    const history = item.history.map((entry) => `<div class="timeline-item"><div class="timeline-dot"></div><div><strong>${esc(entry.message)}</strong><div class="text-soft">${fmtDate(entry.at)}</div></div></div>`).join('') || '<div class="text-soft">История пока пуста</div>';
+    openModal(`Заявка SR-${String(item.number).padStart(5, '0')}`, `<div class="text-soft">${esc(item.client_name || '')} · ${esc(item.site_name || '')}</div><h3 style="margin-top:12px">${esc(item.equipment_name)} · ${esc(item.serial_number)}</h3><p>${esc(item.description || 'Без описания')}</p><h3 style="margin-top:16px">История</h3>${history}`, '<button class="btn btn-secondary" id="modal-cancel">Закрыть</button>');
+    document.querySelector('#modal-cancel').addEventListener('click', closeModal);
+  }));
+}
 
 // ============================================================
 // Раздел: Fixit Pulse

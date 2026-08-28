@@ -10,6 +10,8 @@ from app.models.core import Equipment, Task, TaskStatus, Ticket, TicketStatus, U
 from app.models.organization import OrganizationMembership
 from app.models.repair import Repair
 from app.schemas.equipment import TaskCreate, TaskOut, TaskUpdate
+from app.models.service_request import ServiceRequest
+from app.services.service_requests import event, next_number
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
@@ -43,6 +45,9 @@ async def create_task(
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Оборудование не найдено в организации")
     task = Task(**payload.model_dump(), created_by=user.id, organization_id=user.organization_id)
     db.add(task)
+    await db.flush()
+    request = ServiceRequest(organization_id=user.organization_id, number=await next_number(db, user.organization_id), task_id=task.id, equipment_id=task.equipment_id, status="assigned" if task.assigned_to else "new", priority=task.priority.value, assigned_technician_id=task.assigned_to, title=task.title, description=task.description)
+    db.add(request); await db.flush(); db.add(event(user.organization_id, request.id, user.id, "request.created", "Заявка создана диспетчером", {"task_id": str(task.id)}))
     await db.commit()
     await db.refresh(task)
     return task
@@ -74,6 +79,11 @@ async def update_task(
         changes['status'] = TaskStatus.assigned
     for field, value in changes.items():
         setattr(task, field, value)
+    request = await db.scalar(select(ServiceRequest).where(ServiceRequest.task_id == task.id))
+    if request:
+        request.title, request.description, request.priority, request.assigned_technician_id = task.title, task.description, task.priority.value, task.assigned_to
+        if task.status == TaskStatus.closed: request.status = "closed"
+        elif task.status == TaskStatus.cancelled: request.status = "cancelled"
     await db.commit()
     await db.refresh(task)
     return task
@@ -132,6 +142,10 @@ async def assign_task(
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Можно назначить только активного техника")
     task.assigned_to = technician_id
     task.status = TaskStatus.assigned
+    request = await db.scalar(select(ServiceRequest).where(ServiceRequest.task_id == task.id))
+    if request:
+        request.assigned_technician_id = technician_id; request.status = "assigned"
+        db.add(event(user.organization_id, request.id, user.id, "technician.assigned", "Назначен мастер", {"technician_id": str(technician_id)}))
     await db.commit()
     await db.refresh(task)
     return task
@@ -157,6 +171,10 @@ async def close_own_task(
         raise HTTPException(status.HTTP_409_CONFLICT, "Этот наряд нельзя закрыть")
 
     task.status = TaskStatus.closed
+    request = await db.scalar(select(ServiceRequest).where(ServiceRequest.task_id == task.id))
+    if request:
+        request.status = "closed"
+        db.add(event(user.organization_id, request.id, user.id, "request.closed", "Наряд закрыт"))
     if task.ticket_id:
         ticket = await db.get(Ticket, task.ticket_id, with_for_update=True)
         if ticket and ticket.status != TicketStatus.resolved:
