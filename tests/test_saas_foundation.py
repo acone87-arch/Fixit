@@ -113,3 +113,24 @@ def test_service_request_list_executes_one_joined_query_not_detail_serializer_pe
     assert "select(ServiceRequest, Equipment, EquipmentType.name, Site, Client, User.full_name)" in list_section
     assert "Repair" not in list_section
     assert "ServiceRequestEvent" not in list_section
+
+
+def test_staff_service_request_detail_is_a_route_screen_with_back_navigation():
+    source = (Path(__file__).parents[1] / "app" / "static" / "app.js").read_text(encoding="utf-8")
+    detail_section = source.split("function renderServiceRequestDetail", 1)[1].split("async function openTechnicianRequestWorkspace", 1)[0]
+    assert "content.innerHTML" in detail_section
+    assert "service-request-screen" in detail_section
+    assert "request-detail-back" in detail_section
+    assert "location.hash = 'requests'" in detail_section
+    assert "openModal(" not in detail_section
+
+
+def test_request_photo_lightbox_and_approval_dialog_do_not_replace_detail_screen():
+    source = (Path(__file__).parents[1] / "app" / "static" / "app.js").read_text(encoding="utf-8")
+    image_section = source.split("async function openProtectedImage", 1)[1].split("function openApprovalDialog", 1)[0]
+    dialog_section = source.split("function openApprovalDialog", 1)[1].split("async function uploadEquipmentPhoto", 1)[0]
+    assert "image-lightbox" in image_section and "openModal(" not in image_section
+    assert "activeImageLightbox" in image_section and "URL.revokeObjectURL" in source
+    assert "pulse-dialog-backdrop" in dialog_section
+    assert "prompt(" not in dialog_section
+    assert "await openServiceRequest(item.id);" in source
