@@ -327,23 +327,41 @@ async function renderServiceRequests(content) {
   const requestRows = requests.length ? requests.map((item) => `<tr class="clickable request-row" data-id="${item.id}"><td><strong>SR-${String(item.number).padStart(5, '0')}</strong><div class="text-soft">${esc(item.description || 'Без описания')}</div></td><td>${esc(item.client_name || '—')}<div class="text-soft">${esc(item.site_name || '')}</div></td><td>${esc(item.equipment_name)}<div class="text-soft mono">${esc(item.serial_number)}</div></td><td>${esc(item.assigned_technician_name || 'Не назначен')}</td><td>${requestBadge(item)}</td><td>${esc(item.outcome || '—')}</td></tr>`).join('') : '<tr class="empty-row"><td colspan="6">Заявок пока нет</td></tr>';
   const requestCards = requests.length ? requests.map((item) => `<button class="mobile-info-card request-card request-row" data-id="${item.id}"><div class="mobile-card-top"><span class="request-number">SR-${String(item.number).padStart(5, '0')}</span>${requestBadge(item)}</div><strong>${esc(item.description || 'Без описания')}</strong><span class="text-soft">${esc(item.equipment_name || 'Оборудование не указано')} · <span class="mono">${esc(item.serial_number || '—')}</span></span><div class="request-card-detail"><span>${esc(item.client_name || 'Клиент не указан')}<small>${esc(item.site_name || 'Объект не указан')}</small></span><span class="assigned-master">${esc(item.assigned_technician_name || 'Мастер не назначен')}</span></div>${item.outcome ? `<div class="request-outcome">${esc(item.outcome)}</div>` : ''}</button>`).join('') : '<div class="mobile-empty">Заявок пока нет</div>';
   content.innerHTML = `<div class="page-header"><div><h1>Заявки</h1><div class="page-subtitle">Единый путь обращения: от QR до сервисного акта</div></div></div><div class="card mobile-table" style="padding:0"><table><thead><tr><th>№ / проблема</th><th>Клиент и объект</th><th>Оборудование</th><th>Мастер</th><th>Статус</th><th>Итог</th></tr></thead><tbody>${requestRows}</tbody></table></div><div class="mobile-card-list" id="request-cards">${requestCards}</div>`;
-  content.querySelectorAll('.request-row').forEach((row) => row.addEventListener('click', () => openServiceRequestModal(row.dataset.id)));
+  content.querySelectorAll('.request-row').forEach((row) => row.addEventListener('click', () => openServiceRequest(row.dataset.id)));
 }
 
-async function openServiceRequestModal(id) {
-  if (state.me.role === 'technician') return openTechnicianRequestWorkspace(id);
+async function openServiceRequest(id) {
+  if (!id) {
+    toast('Не удалось определить заявку', 'error');
+    return;
+  }
   try {
     const item = await api(`/service-requests/${id}`);
-    const history = item.history.map((entry) => `<div class="timeline-item"><div class="timeline-dot"></div><div><strong>${esc(entry.message)}</strong><div class="text-soft">${fmtDate(entry.at)}</div></div></div>`).join('') || '<div class="text-soft">История пока пуста</div>';
-    const backdrop = openModal(`Заявка SR-${String(item.number).padStart(5, '0')}`, `<div class="text-soft">${esc(item.client_name || '')} · ${esc(item.site_name || '')}</div><h3 style="margin-top:12px">${esc(item.equipment_name)} · ${esc(item.serial_number)}</h3><p>${esc(item.description || 'Без описания')}</p><h3 style="margin-top:16px">История</h3>${history}`, '<button class="btn btn-secondary" id="modal-cancel">Закрыть</button>');
+    if (!item || !item.id) throw new Error('Сервис не вернул данные заявки');
+    // Passport is itself a modal. Replace it explicitly instead of relying on
+    // openModal side effects; otherwise it can remain above the technician workspace.
+    closeModal();
+    if (state.me?.role === 'technician') return openTechnicianRequestWorkspace(id, item);
+    const historyItems = Array.isArray(item.history) ? item.history : [];
+    const history = historyItems.map((entry) => `<div class="timeline-item"><div class="timeline-dot"></div><div><strong>${esc(entry.message || 'Событие заявки')}</strong><div class="text-soft">${fmtDate(entry.at)}</div></div></div>`).join('') || '<div class="text-soft">История пока пуста</div>';
+    const statusLabel = { new: 'Новая', assigned: 'Назначена', on_the_way: 'В пути', arrived: 'На объекте', in_progress: 'В работе', waiting_parts: 'Ждёт запчасти', waiting_approval: 'Ждёт согласование', completed: 'Выполнена', closed: 'Закрыта', cancelled: 'Отменена' };
+    const statusClass = ['completed', 'closed'].includes(item.status) ? 'good' : item.status?.startsWith('waiting') ? 'amber' : item.status === 'cancelled' ? 'idle' : 'warn';
+    const statusBadge = `<span class="badge badge-${statusClass}"><span class="badge-dot"></span>${esc(statusLabel[item.status] || item.status || '—')}</span>`;
+    const backdrop = openModal(`Заявка SR-${String(item.number).padStart(5, '0')}`, `<div class="passport-status-row">${statusBadge}</div><div class="text-soft" style="margin-top:10px">${esc(item.client_name || 'Клиент не указан')} · ${esc(item.site_name || 'Объект не указан')}</div><h3 style="margin-top:12px">${esc(item.equipment_name || 'Оборудование не указано')} · ${esc(item.serial_number || '—')}</h3><p>${esc(item.description || 'Без описания')}</p><div class="text-soft">Мастер: ${esc(item.assigned_technician_name || 'Не назначен')}</div><h3 style="margin-top:16px">История</h3>${history}`, '<button class="btn btn-secondary" id="modal-cancel">Закрыть</button>');
     backdrop.querySelector('#modal-cancel').addEventListener('click', closeModal);
-  } catch (e) { toast(e.message, 'error'); }
+  } catch (e) {
+    toast(`Не удалось открыть заявку: ${e.message || 'неизвестная ошибка'}`, 'error');
+  }
 }
 
-async function openTechnicianRequestWorkspace(id) {
+async function openTechnicianRequestWorkspace(id, loadedRequest = null) {
   const content = document.getElementById('content');
-  let request;
-  try { request = await api(`/service-requests/${id}`); } catch (e) { return toast(e.message, 'error'); }
+  let request = loadedRequest;
+  if (!request) {
+    try { request = await api(`/service-requests/${id}`); } catch (e) { return toast(`Не удалось открыть заявку: ${e.message}`, 'error'); }
+  }
+  request.history = Array.isArray(request.history) ? request.history : [];
+  request.attachments = Array.isArray(request.attachments) ? request.attachments : [];
   let usedParts = {};
   let photos = [];
   const statusText = { assigned: 'Назначена', on_the_way: 'В пути', arrived: 'На объекте', in_progress: 'В работе', waiting_parts: 'Ждёт запчасти', waiting_approval: 'Ждёт согласование', completed: 'Выполнена' };
@@ -852,8 +870,8 @@ async function openEquipmentPassport(id) {
       backdrop.querySelectorAll('[data-passport-tab]').forEach((item) => item.classList.toggle('active', item === tab));
       backdrop.querySelectorAll('[data-passport-panel]').forEach((panel) => panel.classList.toggle('hidden', panel.dataset.passportPanel !== tab.dataset.passportTab));
     }));
-    backdrop.querySelectorAll('.open-request-btn').forEach((button) => button.addEventListener('click', () => openServiceRequestModal(button.dataset.requestId)));
-    backdrop.querySelector('#passport-primary-request')?.addEventListener('click', () => openServiceRequestModal(passport.active_request.id));
+    backdrop.querySelectorAll('.open-request-btn').forEach((button) => button.addEventListener('click', () => openServiceRequest(button.dataset.requestId)));
+    backdrop.querySelector('#passport-primary-request')?.addEventListener('click', () => openServiceRequest(passport.active_request.id));
     backdrop.querySelector('#passport-create-request')?.addEventListener('click', () => openCreateTaskForEquipment(passport));
     backdrop.querySelector('#passport-manage')?.addEventListener('click', () => openEquipmentManageModal(passport));
     backdrop.querySelector('#passport-archive')?.addEventListener('click', async () => {

@@ -1,4 +1,5 @@
 import uuid
+from pathlib import Path
 
 from app.core.deps import CurrentUser
 from app.core.security import create_access_token, decode_access_token
@@ -66,3 +67,12 @@ def test_equipment_belongs_to_service_site():
 
 def test_service_request_workflow_supports_arrival_stage():
     assert {"assigned", "on_the_way", "arrived", "in_progress", "waiting_parts", "waiting_approval", "completed"} <= REQUEST_STATUSES
+
+
+def test_service_request_opening_uses_one_safe_modal_transition():
+    source = (Path(__file__).parents[1] / "app" / "static" / "app.js").read_text(encoding="utf-8")
+    assert "async function openServiceRequest(id)" in source
+    assert "openServiceRequest(row.dataset.id)" in source
+    assert "openServiceRequest(passport.active_request.id)" in source
+    assert "closeModal();\n    if (state.me?.role === 'technician')" in source
+    assert "openServiceRequestModal" not in source
