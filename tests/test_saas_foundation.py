@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 from app.core.deps import CurrentUser
@@ -9,7 +10,7 @@ from app.models.organization import Organization, OrganizationMembership
 from app.models.repair import Repair, RepairAttachment, SyncLog, SyncOperation
 from app.models.service_request import ServiceRequest, ServiceRequestAttachment, ServiceRequestEvent
 from app.models.warehouse import Part, StockMovement, Warehouse
-from app.schemas.service_request import REQUEST_STATUSES
+from app.schemas.service_request import REQUEST_STATUSES, ServiceRequestListItem
 from app.routers.service_requests import TECHNICIAN_TRANSITIONS
 
 
@@ -90,3 +91,25 @@ def test_technician_workspace_does_not_reference_action_inside_its_initializer()
     assert 'data-status="${nextAction[0]}">${nextAction[1]}' in source
     assert "const action = statusAction[request.status]" not in source
     assert "data-status=\"${action[0]}\">${action[1]}" not in source
+
+
+def test_service_request_list_has_a_compact_read_model_without_detail_payloads():
+    item = ServiceRequestListItem(
+        id=uuid.uuid4(), number=1, status="assigned", priority="planned", title="Не работает",
+        description="Не включается", client_name="Клиент", site_name="Объект",
+        equipment_name="Nilfisk SC450", equipment_type="Поломоечная машина",
+        manufacturer="Nilfisk", model="SC450", serial_number="111",
+        assigned_technician_id=None, assigned_technician_name=None,
+        created_at=datetime.now(timezone.utc),
+    )
+    assert {"history", "attachments", "request_attachments", "parts_used", "outcome", "repair_id"}.isdisjoint(item.model_dump())
+
+
+def test_service_request_list_executes_one_joined_query_not_detail_serializer_per_row():
+    source = (Path(__file__).parents[1] / "app" / "routers" / "service_requests.py").read_text(encoding="utf-8")
+    list_section = source.split("async def list_requests", 1)[1].split('@router.get("/{request_id}"', 1)[0]
+    assert "await serialize" not in list_section
+    assert list_section.count("await db.execute(query)") == 1
+    assert "select(ServiceRequest, Equipment, EquipmentType.name, Site, Client, User.full_name)" in list_section
+    assert "Repair" not in list_section
+    assert "ServiceRequestEvent" not in list_section

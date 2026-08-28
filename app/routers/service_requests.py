@@ -13,7 +13,7 @@ from app.models.organization import OrganizationMembership
 from app.models.repair import Repair, RepairAttachment, RepairPart
 from app.models.service_request import ServiceRequest, ServiceRequestAttachment, ServiceRequestEvent
 from app.models.warehouse import Part
-from app.schemas.service_request import REQUEST_STATUSES, ServiceRequestApproval, ServiceRequestAttachmentOut, ServiceRequestOut, ServiceRequestStatusUpdate
+from app.schemas.service_request import REQUEST_STATUSES, ServiceRequestApproval, ServiceRequestAttachmentOut, ServiceRequestDetail, ServiceRequestListItem, ServiceRequestOut, ServiceRequestStatusUpdate
 from app.services.service_requests import event
 
 router = APIRouter(prefix="/api/service-requests", tags=["service requests"])
@@ -101,7 +101,7 @@ async def serialize(db, request, org):
     if not any(item["type"] == "request.created" for item in history):
         history.insert(0, {"at": request.created_at, "type": "request.created", "message": "Заявка создана", "details": {}, "actor": None})
     photo_out = {"id": primary_photo.id, "original_name": primary_photo.original_name, "media_type": primary_photo.media_type, "byte_size": primary_photo.byte_size, "uploaded_at": primary_photo.uploaded_at, "download_url": f"/api/equipment/{equipment.id}/photo"} if primary_photo else None
-    return ServiceRequestOut(id=request.id, number=request.number, ticket_id=request.ticket_id, task_id=request.task_id, equipment_id=request.equipment_id, client_name=client_label(client, site), site_name=site.name, equipment_name=equipment.name, serial_number=equipment.serial_number, description=request.description, priority=request.priority, assigned_technician_id=request.assigned_technician_id, assigned_technician_name=technician_name, status=request.status, created_at=request.created_at, completed_at=request.completed_at, repair_id=repair.id if repair else None, parts_used=parts, outcome=repair.description if repair else None, history=history, site_address=site.address, contact_name=site.contact_name or client.contact_name, contact_phone=site.contact_phone or client.contact_phone, equipment_type=equipment_type, manufacturer=equipment.manufacturer, model=equipment.model, equipment_status=equipment.status.value, equipment_version=equipment.version, attachments=attachments, request_attachments=request_attachments, primary_photo=photo_out)
+    return ServiceRequestDetail(id=request.id, number=request.number, ticket_id=request.ticket_id, task_id=request.task_id, equipment_id=request.equipment_id, title=request.title, client_name=client_label(client, site), site_name=site.name, equipment_name=equipment.name, serial_number=equipment.serial_number, description=request.description, priority=request.priority, assigned_technician_id=request.assigned_technician_id, assigned_technician_name=technician_name, status=request.status, created_at=request.created_at, completed_at=request.completed_at, repair_id=repair.id if repair else None, parts_used=parts, outcome=repair.description if repair else None, history=history, site_address=site.address, contact_name=site.contact_name or client.contact_name, contact_phone=site.contact_phone or client.contact_phone, equipment_type=equipment_type, manufacturer=equipment.manufacturer, model=equipment.model, equipment_status=equipment.status.value, equipment_version=equipment.version, attachments=attachments, request_attachments=request_attachments, primary_photo=photo_out)
 
 
 @router.post("/{request_id}/attachments", response_model=ServiceRequestAttachmentOut, status_code=status.HTTP_201_CREATED)
@@ -164,13 +164,41 @@ async def download_request_attachment(attachment_id: uuid.UUID, db: AsyncSession
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Файл вложения не найден")
     return Response(await run_in_threadpool(path.read_bytes), media_type=attachment.media_type or "image/jpeg")
 
-@router.get("", response_model=list[ServiceRequestOut])
+@router.get("", response_model=list[ServiceRequestListItem])
 async def list_requests(db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
-    query = select(ServiceRequest).where(ServiceRequest.organization_id == user.organization_id).order_by(ServiceRequest.created_at.desc())
-    if user.role == UserRole.technician: query = query.where(ServiceRequest.assigned_technician_id == user.id)
-    return [await serialize(db, item, user.organization_id) for item in (await db.scalars(query)).all()]
+    # The queue deliberately has no repair, attachment, or event data.  Detail is
+    # fetched only after a user opens a particular request.
+    query = (
+        select(ServiceRequest, Equipment, EquipmentType.name, Site, Client, User.full_name)
+        .join(Equipment, Equipment.id == ServiceRequest.equipment_id)
+        .outerjoin(EquipmentType, EquipmentType.id == Equipment.equipment_type_id)
+        .join(Site, Site.id == Equipment.site_id)
+        .join(Client, Client.id == Site.client_id)
+        .outerjoin(User, User.id == ServiceRequest.assigned_technician_id)
+        .where(
+            ServiceRequest.organization_id == user.organization_id,
+            Equipment.organization_id == user.organization_id,
+            Site.organization_id == user.organization_id,
+            Client.organization_id == user.organization_id,
+        )
+        .order_by(ServiceRequest.created_at.desc())
+    )
+    if user.role == UserRole.technician:
+        query = query.where(ServiceRequest.assigned_technician_id == user.id)
+    rows = (await db.execute(query)).all()
+    return [
+        ServiceRequestListItem(
+            id=request.id, number=request.number, status=request.status, priority=request.priority,
+            title=request.title, description=request.description, client_name=client_label(client, site),
+            site_name=site.name, equipment_name=equipment.name, equipment_type=equipment_type,
+            manufacturer=equipment.manufacturer, model=equipment.model, serial_number=equipment.serial_number,
+            assigned_technician_id=request.assigned_technician_id, assigned_technician_name=technician_name,
+            created_at=request.created_at, completed_at=request.completed_at,
+        )
+        for request, equipment, equipment_type, site, client, technician_name in rows
+    ]
 
-@router.get("/{request_id}", response_model=ServiceRequestOut)
+@router.get("/{request_id}", response_model=ServiceRequestDetail)
 async def get_request(request_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     request = await db.scalar(select(ServiceRequest).where(ServiceRequest.id == request_id, ServiceRequest.organization_id == user.organization_id))
     if not request or (user.role == UserRole.technician and request.assigned_technician_id != user.id): raise HTTPException(404, "Заявка не найдена")

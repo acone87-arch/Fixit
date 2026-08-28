@@ -24,8 +24,31 @@ class ServiceRequestAttachmentOut(BaseModel):
     created_at: datetime | None = None
     download_url: str
 
-class ServiceRequestOut(BaseModel):
+class ServiceRequestListItem(BaseModel):
+    """The compact read model used by the request queue."""
+
+    id: uuid.UUID
+    number: int
+    status: str
+    priority: str
+    title: str
+    description: str | None
+    client_name: str | None
+    site_name: str | None
+    equipment_name: str
+    equipment_type: str | None = None
+    manufacturer: str | None = None
+    model: str | None = None
+    serial_number: str
+    assigned_technician_id: uuid.UUID | None = None
+    assigned_technician_name: str | None = None
+    created_at: datetime
+    completed_at: datetime | None = None
+
+
+class ServiceRequestDetail(BaseModel):
     id: uuid.UUID; number: int; ticket_id: uuid.UUID | None; task_id: uuid.UUID | None; equipment_id: uuid.UUID
+    title: str = ""
     client_name: str | None; site_name: str | None; equipment_name: str; serial_number: str
     description: str | None; priority: str; assigned_technician_id: uuid.UUID | None; assigned_technician_name: str | None
     status: str; created_at: datetime; completed_at: datetime | None; repair_id: uuid.UUID | None = None
@@ -35,3 +58,7 @@ class ServiceRequestOut(BaseModel):
     attachments: list[dict] = []
     request_attachments: list[dict] = []
     primary_photo: dict | None = None
+
+
+# Keep imports in integrations backward-compatible while endpoints use explicit DTOs.
+ServiceRequestOut = ServiceRequestDetail
