@@ -13,6 +13,7 @@ const state = {
 };
 
 let ticketsRefreshTimer = null;
+let adminScanStream = null;
 
 // ---------- API-клиент ----------
 
@@ -75,6 +76,7 @@ function toast(message, type = 'success') {
 }
 
 function closeModal() {
+  stopAdminQrScan();
   const el = document.querySelector('.modal-backdrop');
   if (el) {
     el.querySelectorAll('[data-object-url]').forEach((node) => {
@@ -83,6 +85,23 @@ function closeModal() {
     });
     el.remove();
   }
+}
+
+function stopAdminQrScan() {
+  if (adminScanStream) {
+    adminScanStream.getTracks().forEach((track) => track.stop());
+    adminScanStream = null;
+  }
+}
+
+function qrTokenFromValue(rawValue) {
+  let token = String(rawValue || '').trim();
+  try {
+    const url = new URL(token);
+    const parts = url.pathname.split('/').filter(Boolean);
+    token = parts[parts.length - 1] || token;
+  } catch (_) {}
+  return token;
 }
 
 function openModal(title, bodyHtml, footerHtml) {
@@ -210,12 +229,64 @@ function renderMobileNav(items) {
 }
 
 function openQrQuickAction() {
-  const backdrop = openModal('QR в Fixit Pulse', `
-    <div class="qr-quick-mark">⌘</div>
-    <p class="text-soft" style="line-height:1.6">QR-коды привязаны к оборудованию. Откройте паспорт единицы, чтобы скачать наклейку или перейти к истории сервисных актов.</p>`,
-    '<button class="btn btn-secondary" id="modal-cancel">Закрыть</button><button class="btn btn-primary" id="qr-open-equipment">Открыть оборудование</button>');
+  const httpsUrl = location.href.replace(/^http:/, 'https:');
+  const secureWarning = !window.isSecureContext
+    ? `<div class="qr-security-note">Камера блокируется браузером на HTTP. Откройте <a href="${esc(httpsUrl)}">защищённую версию HTTPS</a>.</div>`
+    : '';
+  const backdrop = openModal('Сканировать QR', `
+    <div class="admin-qr-scanner"><video id="admin-qr-video" autoplay muted playsinline></video><div class="admin-qr-frame"></div></div>
+    <p class="text-soft" id="admin-qr-hint" style="line-height:1.55">Наведите камеру на QR-код оборудования.</p>${secureWarning}
+    <div class="field" style="margin-top:14px"><label>Или вставьте ссылку / код вручную</label><input id="admin-qr-manual" placeholder="https://…/e/…"></div>`,
+    '<button class="btn btn-secondary" id="modal-cancel">Закрыть</button><button class="btn btn-secondary" id="admin-qr-start">Включить камеру</button><button class="btn btn-primary" id="admin-qr-open">Открыть</button>');
   backdrop.querySelector('#modal-cancel').addEventListener('click', closeModal);
-  backdrop.querySelector('#qr-open-equipment').addEventListener('click', () => { closeModal(); location.hash = 'equipment'; });
+  const hint = backdrop.querySelector('#admin-qr-hint');
+  const openScannedEquipment = async (rawValue) => {
+    const token = qrTokenFromValue(rawValue);
+    if (!token) return toast('Считайте QR-код или вставьте ссылку', 'error');
+    try {
+      const equipment = await api(`/equipment/by-qr/${encodeURIComponent(token)}`);
+      closeModal();
+      await openEquipmentPassport(equipment.id);
+    } catch (error) { toast(error.message || 'Оборудование по QR не найдено', 'error'); }
+  };
+  const startCamera = async () => {
+    if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+      hint.textContent = 'Камера доступна только через HTTPS. Откройте защищённую версию сайта.';
+      return;
+    }
+    if (!('BarcodeDetector' in window)) {
+      hint.textContent = 'В этом браузере нет встроенного QR-сканера. Вставьте ссылку из QR вручную.';
+      return;
+    }
+    try {
+      stopAdminQrScan();
+      adminScanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+      const video = backdrop.querySelector('#admin-qr-video');
+      video.srcObject = adminScanStream;
+      await video.play();
+      hint.textContent = 'Камера включена. Наведите её на QR-код оборудования.';
+      const detector = new BarcodeDetector({ formats: ['qr_code'] });
+      const scanFrame = async () => {
+        if (!adminScanStream || !document.body.contains(backdrop)) return;
+        try {
+          const codes = await detector.detect(video);
+          if (codes.length) { await openScannedEquipment(codes[0].rawValue); return; }
+        } catch (_) {}
+        requestAnimationFrame(scanFrame);
+      };
+      requestAnimationFrame(scanFrame);
+    } catch (error) {
+      hint.textContent = error.name === 'NotAllowedError'
+        ? 'Доступ к камере запрещён. Разрешите камеру в настройках браузера и повторите.'
+        : 'Не удалось включить камеру. Проверьте разрешение и подключение.';
+    }
+  };
+  backdrop.querySelector('#admin-qr-start').addEventListener('click', startCamera);
+  backdrop.querySelector('#admin-qr-open').addEventListener('click', () => openScannedEquipment(backdrop.querySelector('#admin-qr-manual').value));
+  backdrop.querySelector('#admin-qr-manual').addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') { event.preventDefault(); openScannedEquipment(event.currentTarget.value); }
+  });
+  startCamera();
 }
 
 async function router() {

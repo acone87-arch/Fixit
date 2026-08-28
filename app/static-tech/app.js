@@ -538,8 +538,14 @@ async function renderScanScreen(screen) {
     if (serial) findEquipmentBySerial(serial.trim());
   });
 
+  const hint = document.getElementById('scan-hint');
+  if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+    const httpsUrl = location.href.replace(/^http:/, 'https:');
+    hint.innerHTML = `Камера заблокирована, потому что приложение открыто без HTTPS. <a href="${esc(httpsUrl)}" style="color:var(--accent);font-weight:700">Открыть защищённую версию</a> или введите серийный номер ниже.`;
+    return;
+  }
   if (!('BarcodeDetector' in window)) {
-    document.getElementById('scan-hint').textContent = 'Этот браузер не поддерживает сканирование камерой — используйте ручной ввод ниже.';
+    hint.textContent = 'Этот браузер не поддерживает встроенное QR-сканирование — используйте ручной ввод ниже.';
     return;
   }
 
@@ -558,7 +564,9 @@ async function renderScanScreen(screen) {
     };
     requestAnimationFrame(loop);
   } catch (e) {
-    document.getElementById('scan-hint').textContent = 'Нет доступа к камере — используйте ручной ввод ниже.';
+    hint.textContent = e.name === 'NotAllowedError'
+      ? 'Доступ к камере запрещён. Разрешите камеру в настройках браузера и повторите.'
+      : 'Не удалось включить камеру — используйте ручной ввод ниже.';
   }
 }
 
