@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -124,7 +125,11 @@ async def sync_one_repair(db: AsyncSession, technician_id: uuid.UUID, organizati
             service_request = await db.scalar(request_query)
             if service_request:
                 service_request.status = "completed"
+                service_request.completed_at = datetime.now(timezone.utc)
                 db.add(event(organization_id, service_request.id, technician_id, "repair.completed", "Ремонт выполнен, сервисный акт оформлен", {"repair_id": str(repair.id)}))
+                if payload.parts_used:
+                    db.add(event(organization_id, service_request.id, technician_id, "parts.used", "Использованы запчасти", {"repair_id": str(repair.id), "parts": [{"part_id": str(item.part_id), "quantity": item.quantity} for item in payload.parts_used]}))
+                db.add(event(organization_id, service_request.id, technician_id, "service_act.generated", "Сервисный акт сформирован", {"repair_id": str(repair.id)}))
 
             if task:
                 task.status = TaskStatus.closed

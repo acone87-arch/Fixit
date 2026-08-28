@@ -14,7 +14,9 @@ from app.models.core import Equipment, User, UserRole
 from app.models.customer import Client, Site
 from app.models.repair import Repair, RepairAttachment, RepairPart
 from app.models.warehouse import Part
+from app.models.service_request import ServiceRequest
 from app.schemas.repair import RepairAttachmentOut
+from app.services.service_requests import event
 from app.services.service_act_pdf import build_service_act
 
 router = APIRouter(prefix="/api/repairs", tags=["repairs"])
@@ -76,6 +78,17 @@ async def upload_attachment(
         original_name=(file.filename or "вложение")[:255], media_type=media_type[:100], byte_size=len(content),
     )
     db.add(attachment)
+    request_query = select(ServiceRequest).where(
+        ServiceRequest.organization_id == user.organization_id,
+        ServiceRequest.equipment_id == repair.equipment_id,
+    )
+    if repair.task_id:
+        request_query = request_query.where(ServiceRequest.task_id == repair.task_id)
+    elif repair.ticket_id:
+        request_query = request_query.where(ServiceRequest.ticket_id == repair.ticket_id)
+    service_request = await db.scalar(request_query.order_by(ServiceRequest.created_at.desc()))
+    if service_request:
+        db.add(event(user.organization_id, service_request.id, user.id, "photos.added" if kind in IMAGE_KINDS else "document.added", "Добавлены фотографии работ" if kind in IMAGE_KINDS else "Добавлен документ", {"attachment_id": str(attachment.id), "kind": kind}))
     await db.commit()
     await db.refresh(attachment)
     return _attachment_out(attachment)

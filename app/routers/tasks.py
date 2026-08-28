@@ -48,6 +48,8 @@ async def create_task(
     await db.flush()
     request = ServiceRequest(organization_id=user.organization_id, number=await next_number(db, user.organization_id), task_id=task.id, equipment_id=task.equipment_id, status="assigned" if task.assigned_to else "new", priority=task.priority.value, assigned_technician_id=task.assigned_to, title=task.title, description=task.description)
     db.add(request); await db.flush(); db.add(event(user.organization_id, request.id, user.id, "request.created", "Заявка создана диспетчером", {"task_id": str(task.id)}))
+    if task.assigned_to:
+        db.add(event(user.organization_id, request.id, user.id, "technician.assigned", "Назначен мастер", {"technician_id": str(task.assigned_to)}))
     await db.commit()
     await db.refresh(task)
     return task

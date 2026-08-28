@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from pydantic import BaseModel, Field
 
-REQUEST_STATUSES = {"new", "assigned", "on_the_way", "in_progress", "waiting_parts", "waiting_approval", "completed", "closed", "cancelled"}
+REQUEST_STATUSES = {"new", "assigned", "on_the_way", "arrived", "in_progress", "waiting_parts", "waiting_approval", "completed", "closed", "cancelled"}
 
 class ServiceRequestStatusUpdate(BaseModel):
     status: str
@@ -14,3 +14,6 @@ class ServiceRequestOut(BaseModel):
     description: str | None; priority: str; assigned_technician_id: uuid.UUID | None; assigned_technician_name: str | None
     status: str; created_at: datetime; completed_at: datetime | None; repair_id: uuid.UUID | None = None
     parts_used: list[dict] = []; outcome: str | None = None; history: list[dict] = []
+    site_address: str | None = None; contact_name: str | None = None; contact_phone: str | None = None
+    equipment_type: str | None = None; manufacturer: str | None = None; model: str | None = None; equipment_status: str | None = None; equipment_version: int | None = None
+    attachments: list[dict] = []

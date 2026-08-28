@@ -8,6 +8,7 @@ from app.models.organization import Organization, OrganizationMembership
 from app.models.repair import Repair, RepairAttachment, SyncLog, SyncOperation
 from app.models.service_request import ServiceRequest, ServiceRequestEvent
 from app.models.warehouse import Part, StockMovement, Warehouse
+from app.schemas.service_request import REQUEST_STATUSES
 
 
 def test_access_token_is_bound_to_organization():
@@ -61,3 +62,7 @@ def test_equipment_belongs_to_service_site():
     }
     assert "uq_client_org_name" in constraints
     assert "uq_site_client_name" in constraints
+
+
+def test_service_request_workflow_supports_arrival_stage():
+    assert {"assigned", "on_the_way", "arrived", "in_progress", "waiting_parts", "waiting_approval", "completed"} <= REQUEST_STATUSES

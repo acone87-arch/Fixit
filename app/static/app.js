@@ -331,12 +331,60 @@ async function renderServiceRequests(content) {
 }
 
 async function openServiceRequestModal(id) {
+  if (state.me.role === 'technician') return openTechnicianRequestWorkspace(id);
   try {
     const item = await api(`/service-requests/${id}`);
     const history = item.history.map((entry) => `<div class="timeline-item"><div class="timeline-dot"></div><div><strong>${esc(entry.message)}</strong><div class="text-soft">${fmtDate(entry.at)}</div></div></div>`).join('') || '<div class="text-soft">История пока пуста</div>';
     const backdrop = openModal(`Заявка SR-${String(item.number).padStart(5, '0')}`, `<div class="text-soft">${esc(item.client_name || '')} · ${esc(item.site_name || '')}</div><h3 style="margin-top:12px">${esc(item.equipment_name)} · ${esc(item.serial_number)}</h3><p>${esc(item.description || 'Без описания')}</p><h3 style="margin-top:16px">История</h3>${history}`, '<button class="btn btn-secondary" id="modal-cancel">Закрыть</button>');
     backdrop.querySelector('#modal-cancel').addEventListener('click', closeModal);
   } catch (e) { toast(e.message, 'error'); }
+}
+
+async function openTechnicianRequestWorkspace(id) {
+  const content = document.getElementById('content');
+  let request;
+  try { request = await api(`/service-requests/${id}`); } catch (e) { return toast(e.message, 'error'); }
+  let usedParts = {};
+  let photos = [];
+  const statusText = { assigned: 'Назначена', on_the_way: 'В пути', arrived: 'На объекте', in_progress: 'В работе', waiting_parts: 'Ждёт запчасти', waiting_approval: 'Ждёт согласование', completed: 'Выполнена' };
+  const statusAction = { assigned: ['on_the_way', 'Выехал'], on_the_way: ['arrived', 'Я на объекте'], arrived: ['in_progress', 'Начать работу'] };
+  const statusBadge = () => `<span class="badge badge-${request.status === 'completed' ? 'good' : request.status.startsWith('waiting') ? 'amber' : 'warn'}"><span class="badge-dot"></span>${esc(statusText[request.status] || request.status)}</span>`;
+  const eventLabels = { 'request.created': 'Заявка создана', 'technician.assigned': 'Мастер назначен', 'technician.on_the_way': 'Мастер выехал', 'technician.arrived': 'Мастер прибыл на объект', 'work.started': 'Работа начата', 'parts.used': 'Использованы запчасти', 'photos.added': 'Добавлены фотографии', 'request.waiting_parts': 'Ожидание запчастей', 'request.waiting_approval': 'Ожидание согласования', 'repair.completed': 'Ремонт завершён', 'service_act.generated': 'Сервисный акт сформирован' };
+  let stock = request.status === 'in_progress' ? await api('/warehouses/mine/stock').catch(() => []) : [];
+  const draw = () => {
+    const timeline = request.history.map((item) => `<div class="tech-request-timeline"><span></span><div><strong>${esc(eventLabels[item.type] || item.message)}</strong><small>${fmtDate(item.at)}</small></div></div>`).join('');
+    const attachments = request.attachments?.length ? request.attachments.map((item) => `<button class="tech-request-file" data-attachment="${item.id}">${item.kind === 'before' || item.kind === 'after' ? 'Фото работ' : 'Документ'} · ${esc(item.name || 'вложение')}</button>`).join('') : '<div class="tech-request-empty">Фотографии пока не добавлены</div>';
+    const parts = stock.length ? stock.map((part) => `<div class="tech-request-part"><span><b>${esc(part.name)}</b><small>${esc(part.article)} · остаток ${part.quantity}</small></span><div><button data-part-minus="${part.part_id}">−</button><b id="part-${part.part_id}">${usedParts[part.part_id] || 0}</b><button data-part-plus="${part.part_id}" ${(usedParts[part.part_id] || 0) >= part.quantity ? 'disabled' : ''}>+</button></div></div>`).join('') : '<div class="tech-request-empty">На мобильном складе нет доступных запчастей</div>';
+    const action = statusAction[request.status]
+      ? `<button class="btn btn-primary tech-request-main" id="request-next" data-status="${action[0]}">${action[1]}</button>`
+      : request.status === 'in_progress' ? '<button class="btn btn-primary tech-request-main" id="request-complete">Завершить работу</button>'
+      : request.status.startsWith('waiting') ? '<button class="btn btn-primary tech-request-main" id="request-resume">Продолжить работу</button>' : '';
+    content.innerHTML = `<section class="tech-request-workspace"><header class="tech-request-header"><button class="tech-request-back" id="request-back">←</button><div><span>Заявка SR-${String(request.number).padStart(5, '0')}</span><h1>${esc(request.title || request.description || 'Сервисная заявка')}</h1></div>${statusBadge()}</header><div class="tech-request-scroll"><section class="tech-request-meta"><div><small>Приоритет</small><strong>${request.priority === 'urgent' ? 'Срочно' : 'Плановая'}</strong></div><div><small>Создана</small><strong>${fmtDate(request.created_at)}</strong></div></section><section class="tech-request-section"><h2>Клиент и объект</h2><strong>${esc(request.client_name || request.site_name || 'Клиент')}</strong><p>${esc(request.site_name || 'Объект не указан')}${request.site_address ? ` · ${esc(request.site_address)}` : ''}</p>${request.contact_name || request.contact_phone ? `<a href="tel:${esc(request.contact_phone || '')}">${esc(request.contact_name || 'Контакт')} · ${esc(request.contact_phone || '')}</a>` : ''}</section><section class="tech-request-section tech-request-equipment"><div><h2>Оборудование</h2><button class="btn btn-ghost btn-sm" id="request-passport">Открыть паспорт</button></div><strong>${esc(request.equipment_type || request.equipment_name)}</strong><p>${esc([request.manufacturer, request.model].filter(Boolean).join(' ') || 'Модель не указана')} · <span class="mono">S/N ${esc(request.serial_number)}</span></p>${badge(EQUIPMENT_STATUS, request.equipment_status || 'working')}</section><section class="tech-request-section"><h2>Проблема</h2><p>${esc(request.description || 'Описание не добавлено')}</p><div class="tech-request-files">${attachments}</div></section>${request.status === 'in_progress' ? `<section class="tech-request-section tech-request-work"><h2>Рабочая зона</h2><label>Диагностика<textarea id="request-diagnostic" placeholder="Что обнаружено"></textarea></label><label>Выполненные работы<textarea id="request-work" placeholder="Что сделано"></textarea></label><label>Комментарий<textarea id="request-comment" placeholder="Комментарий для диспетчера"></textarea></label><h3>Использованные запчасти</h3>${parts}<label>Фотографии<input id="request-photos" type="file" accept="image/*" capture="environment" multiple></label><div class="tech-request-secondary"><button id="request-wait-parts">Жду запчасти</button><button id="request-wait-approval">Жду согласование</button></div></section>` : ''}<section class="tech-request-section"><h2>История</h2><div class="tech-request-timeline-list">${timeline}</div></section></div><footer>${action}</footer></section>`;
+    content.querySelector('#request-back').addEventListener('click', () => { location.hash = 'requests'; });
+    content.querySelector('#request-passport').addEventListener('click', () => openEquipmentPassport(request.equipment_id));
+    content.querySelectorAll('[data-attachment]').forEach((button) => button.addEventListener('click', async () => { try { downloadBlob(await apiBlob(`/repairs/attachments/${button.dataset.attachment}`), button.textContent.trim()); } catch (e) { toast(e.message, 'error'); } }));
+    const transition = async (status, note = null) => { try { request = await api(`/service-requests/${request.id}/status`, { method: 'PATCH', body: JSON.stringify({ status, note }) }); if (status === 'in_progress') stock = await api('/warehouses/mine/stock').catch(() => []); draw(); } catch (e) { toast(e.message, 'error'); } };
+    content.querySelector('#request-next')?.addEventListener('click', () => transition(content.querySelector('#request-next').dataset.status));
+    content.querySelector('#request-resume')?.addEventListener('click', () => transition('in_progress'));
+    content.querySelector('#request-wait-parts')?.addEventListener('click', () => transition('waiting_parts', content.querySelector('#request-comment').value.trim() || null));
+    content.querySelector('#request-wait-approval')?.addEventListener('click', () => transition('waiting_approval', content.querySelector('#request-comment').value.trim() || null));
+    content.querySelectorAll('[data-part-plus]').forEach((button) => button.addEventListener('click', () => { const part = stock.find((item) => item.part_id === button.dataset.partPlus); usedParts[part.part_id] = Math.min(part.quantity, (usedParts[part.part_id] || 0) + 1); draw(); }));
+    content.querySelectorAll('[data-part-minus]').forEach((button) => button.addEventListener('click', () => { const key = button.dataset.partMinus; usedParts[key] = Math.max(0, (usedParts[key] || 0) - 1); draw(); }));
+    content.querySelector('#request-photos')?.addEventListener('change', (event) => { photos = [...event.target.files].slice(0, 5); toast(`Фото выбрано: ${photos.length}`); });
+    content.querySelector('#request-complete')?.addEventListener('click', async () => {
+      const diagnostic = content.querySelector('#request-diagnostic').value.trim(); const work = content.querySelector('#request-work').value.trim(); const comment = content.querySelector('#request-comment').value.trim();
+      if (!work) return toast('Опишите выполненные работы', 'error');
+      const parts_used = Object.entries(usedParts).filter(([, quantity]) => quantity > 0).map(([part_id, quantity]) => ({ part_id, quantity }));
+      const started = request.history.find((item) => item.type === 'work.started')?.at || new Date().toISOString();
+      try {
+        const result = await api('/v1/sync/repairs', { method: 'POST', body: JSON.stringify({ device_id: 'web-technician-workspace', repairs: [{ local_uuid: createUuid(), equipment_id: request.equipment_id, task_id: request.task_id, ticket_id: request.ticket_id, fault_type: diagnostic || null, description: [diagnostic && `Диагностика: ${diagnostic}`, `Работы: ${work}`, comment && `Комментарий: ${comment}`].filter(Boolean).join('\n'), labor_minutes: 0, client_signer_name: null, client_signed_at: null, started_at: started, closed_at: new Date().toISOString(), device_updated_at: new Date().toISOString(), base_equipment_version: request.equipment_version || 1, parts_used }] }) });
+        const repairId = result.results?.[0]?.server_id; if (!repairId || result.results?.[0]?.resolved_as === 'failed') throw new Error(result.results?.[0]?.error || 'Не удалось завершить работы');
+        for (const photo of photos) { const form = new FormData(); form.append('kind', 'after'); form.append('file', photo); await api(`/repairs/${repairId}/attachments`, { method: 'POST', body: form }); }
+        request = await api(`/service-requests/${request.id}`); toast('Работы завершены, сервисный акт сформирован'); draw();
+      } catch (e) { toast(e.message, 'error'); }
+    });
+  };
+  draw();
 }
 
 // ============================================================
