@@ -203,3 +203,47 @@ th { background: #10221d; color: #8fa79d; border-color: var(--line); } td { bord
 }
 @media (max-width: 380px) { .metric-card strong { font-size: 27px; }.metric-card small { font-size: 9px; }.quick-action-grid b { font-size: 11px; }.quick-action-grid small { font-size: 9px; } }
 @media (max-width: 480px) { .modal:has(.equipment-passport) { width:calc(100vw - 20px); max-width:none; padding:16px; }.passport-overview-grid { grid-template-columns:repeat(2, 1fr); }.passport-data:last-child { grid-column:span 2; }.passport-context { gap:7px; }.passport-context div { padding:9px; }.passport-hero h2 { font-size:21px; }.passport-active-request { align-items:flex-start; flex-direction:column; }.passport-tabs button { padding:8px 3px; font-size:10px; } }
+
+/* Keep the equipment passport action menu independent from global button styles. */
+.equipment-passport .passport-more {
+  appearance: none;
+  -webkit-appearance: none;
+  background: #10271f;
+}
+.equipment-passport .passport-more-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: min(224px, calc(100vw - 62px));
+  padding: 6px;
+  background: #10271f !important;
+  color: #e7f5ee;
+}
+.equipment-passport .passport-more-menu.hidden {
+  display: none !important;
+}
+.equipment-passport .passport-more-menu button {
+  appearance: none;
+  -webkit-appearance: none;
+  display: block;
+  width: 100%;
+  min-height: 40px;
+  margin: 0;
+  padding: 10px 11px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent !important;
+  color: #e7f5ee !important;
+  opacity: 1;
+  text-align: left;
+  font: 800 12px/1.25 'Manrope', sans-serif;
+}
+.equipment-passport .passport-more-menu button:hover,
+.equipment-passport .passport-more-menu button:focus-visible {
+  outline: none;
+  background: rgba(53,230,156,.12) !important;
+  color: #8bf2bd !important;
+}
+.equipment-passport .passport-more-menu .passport-menu-danger {
+  color: #ffaaa1 !important;
+}
