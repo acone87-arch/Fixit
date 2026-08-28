@@ -541,14 +541,15 @@ async function renderEquipment(content) {
         ${canEdit ? '<button class="btn btn-primary" id="add-equipment-btn">+ Добавить оборудование</button>' : ''}
       </div>
     </div>
-    <div class="card" style="padding:0">
+    <div class="card mobile-table" style="padding:0">
       <table>
         <thead><tr><th>Тип оборудования</th><th>Серийный №</th><th>Статус</th><th>Клиент и объект</th></tr></thead>
         <tbody id="equipment-rows"></tbody>
       </table>
-    </div>`;
+    </div><div class="mobile-card-list" id="equipment-cards"></div>`;
 
   const rows = document.getElementById('equipment-rows');
+  const cards = document.getElementById('equipment-cards');
   const renderRows = () => {
     const selectedLocation = document.getElementById('equipment-location-filter').value;
     const visibleItems = items
@@ -568,10 +569,15 @@ async function renderEquipment(content) {
       <td>${esc(client?.name || '—')}<div class="text-soft">${esc(site?.name || eq.location || '—')}</div></td>
       </tr>`;
     }).join('') : '<tr class="empty-row"><td colspan="4">На этом объекте оборудования нет</td></tr>';
+    cards.innerHTML = visibleItems.length ? visibleItems.map((eq) => {
+      const site = siteOf(eq.site_id); const client = site ? clientOf(site.client_id) : null;
+      return `<button class="mobile-info-card equipment-card" data-id="${eq.id}"><div class="mobile-card-top"><span class="equipment-glyph">◌</span>${badge(EQUIPMENT_STATUS, eq.status)}</div><strong>${esc(typeName(eq.equipment_type_id))}</strong><span class="text-soft">${esc(eq.manufacturer || '')} ${esc(eq.model || '')}</span><div class="mobile-card-meta"><span class="mono">${esc(eq.serial_number)}</span><span>${esc(client?.name || '—')} · ${esc(site?.name || eq.location || '—')}</span></div></button>`;
+    }).join('') : '<div class="mobile-empty">На этом объекте оборудования нет</div>';
 
     rows.querySelectorAll('tr[data-id]').forEach((tr) => {
       tr.addEventListener('click', () => openEquipmentPassport(tr.dataset.id));
     });
+    cards.querySelectorAll('[data-id]').forEach((card) => card.addEventListener('click', () => openEquipmentPassport(card.dataset.id)));
   };
   renderRows();
   document.getElementById('equipment-location-filter').addEventListener('change', renderRows);
@@ -954,14 +960,15 @@ async function renderTickets(content) {
     <div class="page-header">
       <div><h1>Заявки от гостей</h1><div class="page-subtitle">Обращения, оставленные через QR на оборудовании, без входа в систему</div></div>
     </div>
-    <div class="card" style="padding:0">
+    <div class="card mobile-table" style="padding:0">
       <table>
         <thead><tr><th>Что сообщили</th><th>Серьёзность</th><th>Оборудование</th><th>Расположение</th><th>Статус</th><th>Когда</th><th>Назначить</th></tr></thead>
         <tbody id="ticket-rows"></tbody>
       </table>
-    </div>`;
+    </div><div class="mobile-card-list" id="ticket-cards"></div>`;
 
   const rows = document.getElementById('ticket-rows');
+  const cards = document.getElementById('ticket-cards');
   rows.innerHTML = tickets.length ? tickets.map((t) => {
     const equipment = equipmentOf(t.equipment_id);
     return `
@@ -975,8 +982,12 @@ async function renderTickets(content) {
       <td>${t.status === 'resolved' ? '—' : `<select class="ticket-assign" data-id="${t.id}"><option value="">— выбрать —</option>${technicians.map((tech) => `<option value="${tech.id}" ${t.assigned_technician_id === tech.id ? 'selected' : ''}>${esc(tech.full_name)}</option>`).join('')}</select>`}</td>
     </tr>`;
   }).join('') : '<tr class="empty-row"><td colspan="7">Гостевых заявок пока нет</td></tr>';
+  cards.innerHTML = tickets.length ? tickets.map((t) => {
+    const equipment = equipmentOf(t.equipment_id);
+    return `<article class="mobile-info-card ticket-card"><div class="mobile-card-top">${badge(TICKET_STATUS, t.status)}<time>${fmtDate(t.created_at)}</time></div><strong>${esc(t.comment || t.symptom_tags.join(', ') || 'Без описания')}</strong><span class="text-soft">${esc(TICKET_SEVERITY[t.severity] || t.severity)} · ${esc(typeName(equipment?.equipment_type_id))} ${esc(equipment?.serial_number || '')}</span><div class="ticket-assignment"><label>Назначить мастера</label>${t.status === 'resolved' ? '<span class="assigned-master">Заявка решена</span>' : `<select class="ticket-assign" data-id="${t.id}"><option value="">Выберите мастера</option>${technicians.map((tech) => `<option value="${tech.id}" ${t.assigned_technician_id === tech.id ? 'selected' : ''}>${esc(tech.full_name)}</option>`).join('')}</select>`}</div></article>`;
+  }).join('') : '<div class="mobile-empty">Гостевых заявок пока нет</div>';
 
-  rows.querySelectorAll('.ticket-assign').forEach((sel) => {
+  document.querySelectorAll('.ticket-assign').forEach((sel) => {
     sel.addEventListener('change', async () => {
       if (!sel.value) return;
       try {
