@@ -269,15 +269,13 @@ function badge(map, key) {
 const NAV = {
   owner: [
     ['pulse', 'Pulse'], ['requests', 'Заявки'],
-    ['clients', 'Клиенты и объекты'], ['equipment', 'Оборудование'], ['tasks', 'Наряды'], ['tickets', 'Заявки от гостей'],
+    ['clients', 'Клиенты и объекты'], ['equipment', 'Оборудование'],
     ['warehouse', 'Склад'], ['users', 'Пользователи'],
   ],
   admin: [
     ['pulse', 'Pulse'], ['requests', 'Заявки'],
     ['clients', 'Клиенты и объекты'],
     ['equipment', 'Оборудование'],
-    ['tasks', 'Наряды'],
-    ['tickets', 'Заявки от гостей'],
     ['warehouse', 'Склад и запчасти'],
     ['users', 'Пользователи'],
   ],
@@ -285,12 +283,10 @@ const NAV = {
     ['pulse', 'Pulse'], ['requests', 'Заявки'],
     ['clients', 'Клиенты и объекты'],
     ['equipment', 'Оборудование'],
-    ['tasks', 'Наряды'],
-    ['tickets', 'Заявки от гостей'],
     ['warehouse', 'Склад и запчасти'],
   ],
   technician: [
-    ['pulse', 'Pulse'], ['requests', 'Мои заявки'], ['equipment', 'Оборудование'], ['tasks', 'Мои наряды'],
+    ['pulse', 'Pulse'], ['requests', 'Мои заявки'], ['equipment', 'Оборудование'],
     ['warehouse', 'Мой склад'],
   ],
 };
@@ -404,8 +400,9 @@ async function router() {
   const defaultRoute = 'pulse';
   const hashRoute = location.hash.replace('#', '') || defaultRoute;
   const [route, requestId] = hashRoute.split('/');
-  state.route = route;
+  state.route = route === 'tasks' ? 'requests' : route;
   state.requestId = route === 'requests' && requestId ? requestId : null;
+  if (route === 'tasks') history.replaceState(null, '', '#requests');
   const allowedRoutes = (NAV[state.me?.role] || []).map(([key]) => key);
   if (!allowedRoutes.includes(state.route)) {
     state.route = defaultRoute;
@@ -432,8 +429,8 @@ async function router() {
     else if (state.route === 'requests') await renderServiceRequests(content);
     else if (state.route === 'clients') await renderClients(content);
     else if (state.route === 'equipment') await renderEquipment(content);
-    else if (state.route === 'tasks') await renderTasks(content);
-    else if (state.route === 'tickets') await renderTickets(content);
+    else if (state.route === 'tasks') await renderServiceRequests(content);
+    else if (state.route === 'tickets') await renderServiceRequests(content);
     else if (state.route === 'warehouse') await renderWarehouse(content);
     else if (state.route === 'users') await renderUsers(content);
     else content.innerHTML = '<div class="section-loading">Раздел не найден</div>';
@@ -575,6 +572,7 @@ async function openTechnicianRequestWorkspace(id, loadedRequest = null) {
   }
   let completionLocalUuid = persistedDraft?.completionLocalUuid || null;
   let completionRepairId = persistedDraft?.completionRepairId || null;
+  let completionQueued = persistedDraft?.completionQueued || false;
   let completionInFlight = false;
   let draftCompleted = false;
   const statusText = { assigned: 'Назначена', on_the_way: 'В пути', arrived: 'На объекте', in_progress: 'В работе', waiting_parts: 'Ждёт запчасти', waiting_approval: 'Ждёт согласование', completed: 'Выполнена' };
@@ -591,7 +589,7 @@ async function openTechnicianRequestWorkspace(id, loadedRequest = null) {
   const persistDraft = async () => {
     if (draftCompleted) return;
     rememberDraft();
-    await RequestDraftStore.put({ key: draftKey, diagnostic: draft.diagnostic, work: draft.work, comment: draft.comment, usedParts: draft.usedParts, photos: draft.photos.filter(hasDraftPhotoFile).map(({ file, approvalAttachmentId }) => ({ blob: file, name: file.name, type: file.type, approvalAttachmentId })), completionLocalUuid, completionRepairId, timestamp: new Date().toISOString() }).catch(() => null);
+    await RequestDraftStore.put({ key: draftKey, diagnostic: draft.diagnostic, work: draft.work, comment: draft.comment, usedParts: draft.usedParts, photos: draft.photos.filter(hasDraftPhotoFile).map(({ file, approvalAttachmentId }) => ({ blob: file, name: file.name, type: file.type, approvalAttachmentId })), completionLocalUuid, completionRepairId, completionQueued, timestamp: new Date().toISOString() }).catch(() => null);
   };
   const releasePhotos = () => draft.photos.forEach((photo) => URL.revokeObjectURL(photo.url));
   let workCameraStream = null;
@@ -656,6 +654,38 @@ async function openTechnicianRequestWorkspace(id, loadedRequest = null) {
     request.attachments = Array.isArray(request.attachments) ? request.attachments : [];
     request.request_attachments = Array.isArray(request.request_attachments) ? request.request_attachments : [];
   };
+  const completeWithOfflineQueue = async () => {
+    rememberDraft();
+    if (!draft.work.trim()) return toast('Опишите выполненные работы', 'error');
+    if (completionInFlight) return;
+    completionInFlight = true;
+    const parts_used = Object.entries(draft.usedParts).filter(([, quantity]) => quantity > 0).map(([part_id, quantity]) => ({ part_id, quantity }));
+    const started = request.history.find((item) => item.type === 'work.started')?.at || new Date().toISOString();
+    try {
+      completionLocalUuid ||= window.FixitOffline?.uuid?.() || createUuid();
+      await persistDraft();
+      if (!window.FixitOffline) throw new Error('Офлайн-движок недоступен; обновите приложение');
+      const payload = { local_uuid: completionLocalUuid, equipment_id: request.equipment_id, service_request_id: request.id, task_id: request.task_id, ticket_id: request.ticket_id, fault_type: draft.diagnostic.trim() || null, description: [draft.diagnostic.trim() && `Диагностика: ${draft.diagnostic.trim()}`, `Работы: ${draft.work.trim()}`, draft.comment.trim() && `Комментарий: ${draft.comment.trim()}`].filter(Boolean).join('\n'), labor_minutes: 0, client_signer_name: null, client_signed_at: null, started_at: started, closed_at: new Date().toISOString(), device_updated_at: new Date().toISOString(), base_equipment_version: request.equipment_version || 1, parts_used };
+      if (!completionQueued) {
+        await window.FixitOffline.enqueueRepair(payload, draft.photos.map((photo) => ({ file: photo.file, kind: 'after' })));
+        completionQueued = true;
+        await persistDraft();
+      }
+      const results = await window.FixitOffline.sync({ token: state.token, deviceId: 'fixit-pulse', onError: () => null });
+      const result = results.get(completionLocalUuid);
+      if (!result || result.resolved_as === 'failed') {
+        toast(navigator.onLine ? 'Ремонт сохранён локально и будет повторён автоматически.' : 'Ремонт и фото сохранены на устройстве и будут отправлены при появлении сети.', 'info');
+        return;
+      }
+      completionRepairId = result.server_id;
+      await refreshCompletedRequest();
+      releasePhotos(); draft.photos = []; draftCompleted = true;
+      await RequestDraftStore.remove(draftKey).catch(() => null);
+      toast('Работы завершены, сервисный акт сформирован');
+      draw();
+    } catch (error) { toast(error.message || 'Не удалось завершить работы', 'error'); }
+    finally { completionInFlight = false; }
+  };
   const draw = () => {
     const timeline = request.history.map((item) => {
       const resumedAfterParts = item.type === 'work.started' && item.details?.from === 'waiting_parts';
@@ -718,6 +748,7 @@ async function openTechnicianRequestWorkspace(id, loadedRequest = null) {
     content.querySelector('#request-gallery-open')?.addEventListener('click', () => content.querySelector('#request-gallery').click());
     content.querySelector('#request-gallery')?.addEventListener('change', async (event) => { await addDraftFiles(event.target.files); event.target.value = ''; });
     content.querySelector('#request-complete')?.addEventListener('click', async () => {
+      return completeWithOfflineQueue();
       rememberDraft();
       if (!draft.work.trim()) return toast('Опишите выполненные работы', 'error');
       if (completionInFlight) return;
@@ -757,62 +788,59 @@ async function openTechnicianRequestWorkspace(id, loadedRequest = null) {
 
 async function renderPulse(content) {
   if (state.me.role === 'technician') return renderTechnicianPulse(content);
-  const [clients, sites, equipment, tasks, tickets, users] = await Promise.all([
-    api('/clients'), api('/sites'), api('/equipment'), api('/tasks'), api('/tickets'), api('/users'), ensureEquipmentTypes(),
+  const [clients, sites, equipment, requests, users] = await Promise.all([
+    api('/clients'), api('/sites'), api('/equipment'), api('/service-requests'), api('/users'), ensureEquipmentTypes(),
   ]);
   state.clients = clients;
   state.sites = sites;
-  const activeTasks = tasks.filter((task) => !['closed', 'cancelled'].includes(task.status));
-  const workTasks = activeTasks.filter((task) => ['assigned', 'in_progress'].includes(task.status));
-  const urgentTasks = activeTasks.filter((task) => task.priority === 'urgent');
-  const newTickets = tickets.filter((ticket) => ticket.status === 'new');
+  const activeRequests = requests.filter((request) => !['completed', 'closed', 'cancelled'].includes(request.status));
+  const workRequests = activeRequests.filter((request) => ['on_the_way', 'arrived', 'in_progress'].includes(request.status));
+  const urgentRequests = activeRequests.filter((request) => request.priority === 'urgent');
+  const newRequests = requests.filter((request) => request.status === 'new');
   const now = new Date();
-  const overdueTasks = activeTasks.filter((task) => task.due_at && new Date(task.due_at) < now);
   const technicians = users.filter((user) => user.role === 'technician' && user.is_active);
-  const activeTechIds = new Set(workTasks.map((task) => task.assigned_to).filter(Boolean));
+  const activeTechIds = new Set(workRequests.map((request) => request.assigned_technician_id).filter(Boolean));
   const activeTechnicians = technicians.filter((tech) => activeTechIds.has(tech.id));
-  const teamRoute = state.me.role === 'dispatcher' ? 'tasks' : 'users';
+  const teamRoute = 'users';
   const attentionEquipment = equipment.filter((item) => item.status === 'needs_repair');
   const workingEquipment = equipment.filter((item) => item.status === 'working').length;
   const uptime = equipment.length ? Math.round((workingEquipment / equipment.length) * 100) : 100;
-  const siteOf = (id) => sites.find((site) => site.id === id);
-  const clientOf = (id) => clients.find((client) => client.id === id);
-  const typeName = (id) => (state.equipmentTypes.find((type) => type.id === id) || {}).name || 'Оборудование';
-
-  const taskRows = activeTasks.sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+  const requestRows = activeRequests.sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+  const requestBadge = (request) => badge({
+    new: { label: 'Новая', cls: 'warn' }, assigned: { label: 'Назначена', cls: 'amber' },
+    on_the_way: { label: 'В пути', cls: 'amber' }, arrived: { label: 'На объекте', cls: 'amber' },
+    in_progress: { label: 'В работе', cls: 'amber' }, waiting_parts: { label: 'Ждёт запчасти', cls: 'amber' },
+    waiting_approval: { label: 'Требует согласования', cls: 'amber' }, completed: { label: 'Выполнена', cls: 'good' },
+    closed: { label: 'Закрыта', cls: 'good' }, cancelled: { label: 'Отменена', cls: 'idle' },
+  }, request.status);
   content.innerHTML = `
     <section class="pulse-command">
       <div class="pulse-command-copy"><div class="eyebrow">FIXIT PULSE · LIVE CONTROL</div><h1>Пульс сервиса</h1><p>Заявки, объекты и команда в одном рабочем контуре.</p></div>
-      <div class="pulse-command-live"><span></span><div><b>Онлайн</b><small>${activeTasks.length} активных работ</small></div></div>
+      <div class="pulse-command-live"><span></span><div><b>Онлайн</b><small>${activeRequests.length} активных заявок</small></div></div>
       <div class="pulse-orbit orbit-a"></div><div class="pulse-orbit orbit-b"></div>
     </section>
     <div class="metric-grid">
-      <button class="metric-card metric-new" data-jump="tickets"><span class="metric-label">Новые заявки</span><strong>${newTickets.length}</strong><small>из QR и гостевой формы</small></button>
-      <button class="metric-card metric-dark" data-jump="tasks"><span class="metric-label">В работе</span><strong>${workTasks.length}</strong><small>${urgentTasks.length ? `${urgentTasks.length} срочных` : 'спокойная очередь'}</small></button>
-      <button class="metric-card metric-alert" data-jump="tasks"><span class="metric-label">Просрочено</span><strong>${overdueTasks.length}</strong><small>нужна реакция диспетчера</small></button>
+      <button class="metric-card metric-new" data-jump="requests"><span class="metric-label">Новые заявки</span><strong>${newRequests.length}</strong><small>из QR и диспетчерских обращений</small></button>
+      <button class="metric-card metric-dark" data-jump="requests"><span class="metric-label">В работе</span><strong>${workRequests.length}</strong><small>${urgentRequests.length ? `${urgentRequests.length} срочных` : 'спокойная очередь'}</small></button>
+      <button class="metric-card metric-alert" data-jump="requests"><span class="metric-label">Требуют внимания</span><strong>${requests.filter((request) => request.status === 'waiting_approval').length}</strong><small>ожидают согласования</small></button>
       <button class="metric-card metric-accent" data-jump="${teamRoute}"><span class="metric-label">Мастера в работе</span><strong>${activeTechnicians.length}</strong><small>из ${technicians.length} активных</small></button>
     </div>
     <section class="quick-actions"><div class="section-caption">Быстрые действия</div><div class="quick-action-grid">
-      <button data-jump="tickets"><span class="quick-action-icon qa-ticket">+</span><b>Разобрать заявки</b><small>${newTickets.length} новых</small></button>
-      <button data-jump="tasks"><span class="quick-action-icon qa-task">↗</span><b>Открыть наряды</b><small>${workTasks.length} в работе</small></button>
+      <button data-jump="requests"><span class="quick-action-icon qa-ticket">+</span><b>Открыть заявки</b><small>${newRequests.length} новых</small></button>
+      <button data-jump="requests"><span class="quick-action-icon qa-task">↗</span><b>Активные работы</b><small>${workRequests.length} в работе</small></button>
       <button data-quick="qr"><span class="quick-action-icon qa-qr">⌘</span><b>QR оборудования</b><small>Наклейки и паспорта</small></button>
       <button data-jump="equipment"><span class="quick-action-icon qa-equipment">◌</span><b>Оборудование</b><small>${attentionEquipment.length} требует внимания</small></button>
     </div></section>
     <div class="pulse-grid">
       <section class="card pulse-panel">
-        <div class="panel-head"><div><span class="eyebrow">АКТИВНО</span><h2>Последние активные заявки</h2></div><button class="text-link" data-jump="tasks">Все наряды →</button></div>
-        <div class="pulse-list">${taskRows.length ? taskRows.slice(0, 6).map((task) => {
-          const item = equipment.find((eq) => eq.id === task.equipment_id);
-          const site = item ? siteOf(item.site_id) : null;
-          const overdue = task.due_at && new Date(task.due_at) < now;
-          return `<button class="pulse-row" data-jump="tasks"><span class="priority-mark ${task.priority === 'urgent' || overdue ? 'urgent' : ''}"></span><div><strong>${esc(task.title)}</strong><small>${esc(site?.name || item?.location || 'Объект не указан')} · ${esc(item ? typeName(item.equipment_type_id) : '')}</small></div><div>${overdue ? '<span class="overdue-tag">Просрочено</span>' : badge(TASK_STATUS, task.status)}</div></button>`;
-        }).join('') : '<div class="pulse-empty">Активных нарядов нет — сервис работает штатно</div>'}</div>
+        <div class="panel-head"><div><span class="eyebrow">АКТИВНО</span><h2>Последние активные заявки</h2></div><button class="text-link" data-jump="requests">Все заявки →</button></div>
+        <div class="pulse-list">${requestRows.length ? requestRows.slice(0, 6).map((request) => `<button class="pulse-row" data-request-id="${request.id}"><span class="priority-mark ${request.priority === 'urgent' ? 'urgent' : ''}"></span><div><strong>${esc(request.title || request.description || 'Заявка')}</strong><small>${esc(request.site_name || 'Объект не указан')} · ${esc(request.equipment_name || '')}</small></div><div>${requestBadge(request)}</div></button>`).join('') : '<div class="pulse-empty">Активных заявок нет — сервис работает штатно</div>'}</div>
       </section>
       <section class="card pulse-panel">
         <div class="panel-head"><div><span class="eyebrow">КОМАНДА</span><h2>Мастера на линии</h2></div><button class="text-link" data-jump="${teamRoute}">Команда →</button></div>
         <div class="team-list">${technicians.length ? technicians.slice(0, 6).map((tech) => {
-          const count = workTasks.filter((task) => task.assigned_to === tech.id).length;
-          return `<div class="team-row"><span class="team-avatar">${esc(tech.full_name.split(/\s+/).slice(0, 2).map((part) => part[0]).join(''))}</span><div><strong>${esc(tech.full_name)}</strong><small>${count ? `${count} активн. ${count === 1 ? 'наряд' : 'наряда'}` : 'Свободен'}</small></div><span class="team-state ${count ? 'busy' : ''}">${count ? 'В работе' : 'Свободен'}</span></div>`;
+          const count = workRequests.filter((request) => request.assigned_technician_id === tech.id).length;
+          return `<div class="team-row"><span class="team-avatar">${esc(tech.full_name.split(/\s+/).slice(0, 2).map((part) => part[0]).join(''))}</span><div><strong>${esc(tech.full_name)}</strong><small>${count ? `${count} активн. ${count === 1 ? 'заявка' : 'заявки'}` : 'Свободен'}</small></div><span class="team-state ${count ? 'busy' : ''}">${count ? 'В работе' : 'Свободен'}</span></div>`;
         }).join('') : '<div class="pulse-empty">Добавьте мастеров, чтобы видеть загрузку</div>'}</div>
         <div class="network-strip"><span>${clients.length}<small>клиентов</small></span><span>${sites.length}<small>объектов</small></span><span>${uptime}%<small>готовность</small></span></div>
       </section>
@@ -821,18 +849,17 @@ async function renderPulse(content) {
   content.querySelectorAll('[data-jump]').forEach((button) => {
     button.addEventListener('click', () => { location.hash = button.dataset.jump; });
   });
+  content.querySelectorAll('[data-request-id]').forEach((button) => button.addEventListener('click', () => navigateToServiceRequest(button.dataset.requestId)));
   content.querySelectorAll('[data-quick="qr"]').forEach((button) => button.addEventListener('click', openQrQuickAction));
 }
 
 async function renderTechnicianPulse(content) {
-  const [requests, tasks, equipment] = await Promise.all([
-    api('/service-requests'), api('/tasks'), api('/equipment'), ensureEquipmentTypes(),
+  const [requests, equipment] = await Promise.all([
+    api('/service-requests'), api('/equipment'), ensureEquipmentTypes(),
   ]);
   const active = requests.filter((item) => !['completed', 'closed', 'cancelled'].includes(item.status));
   const inProgress = requests.filter((item) => ['on_the_way', 'arrived', 'in_progress'].includes(item.status));
   const queued = requests.filter((item) => ['new', 'assigned', 'waiting_parts', 'waiting_approval'].includes(item.status));
-  const today = new Date();
-  const overdue = tasks.filter((task) => task.due_at && new Date(task.due_at) < today && !['closed', 'cancelled'].includes(task.status));
   const statusLabel = { new: 'Новая', assigned: 'Назначена', on_the_way: 'В пути', arrived: 'На объекте', in_progress: 'В работе', waiting_parts: 'Ждёт запчасти', waiting_approval: 'Ждёт согласование', completed: 'Выполнена', closed: 'Закрыта', cancelled: 'Отменена' };
   const requestBadge = (item) => `<span class="badge badge-${['completed', 'closed'].includes(item.status) ? 'good' : item.status.startsWith('waiting') ? 'amber' : item.status === 'cancelled' ? 'idle' : 'warn'}"><span class="badge-dot"></span>${esc(statusLabel[item.status] || item.status)}</span>`;
   const nextRequests = [...active].sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || ''))).slice(0, 6);
@@ -847,12 +874,12 @@ async function renderTechnicianPulse(content) {
     <div class="metric-grid technician-metrics">
       <button class="metric-card metric-new" data-jump="requests"><span class="metric-label">Назначено мне</span><strong>${active.length}</strong><small>всего в работе и очереди</small></button>
       <button class="metric-card metric-dark" data-jump="requests"><span class="metric-label">В работе</span><strong>${inProgress.length}</strong><small>в пути или на объекте</small></button>
-      <button class="metric-card metric-alert" data-jump="tasks"><span class="metric-label">Просрочено</span><strong>${overdue.length}</strong><small>требует внимания</small></button>
+      <button class="metric-card metric-alert" data-jump="requests"><span class="metric-label">Ожидают</span><strong>${queued.length}</strong><small>в очереди или ожидании</small></button>
       <button class="metric-card metric-accent" data-jump="equipment"><span class="metric-label">Оборудование</span><strong>${attentionEquipment}</strong><small>единиц требуют ремонта</small></button>
     </div>
     <section class="quick-actions"><div class="section-caption">Рабочие действия</div><div class="quick-action-grid technician-actions">
       <button data-jump="requests"><span class="quick-action-icon qa-ticket">→</span><b>Моя очередь</b><small>${queued.length} ждут выполнения</small></button>
-      <button data-jump="tasks"><span class="quick-action-icon qa-task">↗</span><b>Наряды</b><small>открыть работы и акты</small></button>
+      <button data-jump="requests"><span class="quick-action-icon qa-task">↗</span><b>Активные заявки</b><small>работы и сервисные акты</small></button>
       <button data-quick="qr"><span class="quick-action-icon qa-qr">⌘</span><b>Сканировать QR</b><small>открыть паспорт техники</small></button>
       <button data-jump="equipment"><span class="quick-action-icon qa-equipment">◌</span><b>Оборудование</b><small>паспорта и новая единица</small></button>
     </div></section>
@@ -1184,7 +1211,7 @@ async function openCreateTaskForEquipment(passport) {
       const title = backdrop.querySelector('#passport-request-title').value.trim();
       if (!title) return toast('Опишите проблему', 'error');
       try {
-        await api('/tasks', { method: 'POST', body: JSON.stringify({ equipment_id: passport.id, title, description: backdrop.querySelector('#passport-request-description').value.trim() || null, priority: backdrop.querySelector('#passport-request-priority').value, assigned_to: backdrop.querySelector('#passport-request-tech').value || null }) });
+        await api('/service-requests', { method: 'POST', body: JSON.stringify({ equipment_id: passport.id, title, description: backdrop.querySelector('#passport-request-description').value.trim() || null, priority: backdrop.querySelector('#passport-request-priority').value, assigned_technician_id: backdrop.querySelector('#passport-request-tech').value || null }) });
         closeModal(); toast('Заявка создана'); router();
       } catch (e) { toast(e.message, 'error'); }
     });
@@ -1768,6 +1795,7 @@ function logout() {
   state.token = null;
   state.me = null;
   localStorage.removeItem('token');
+  window.FixitOffline?.db?.kvDelete?.('token').catch(() => null);
   document.getElementById('app').classList.add('hidden');
   document.getElementById('login-screen').classList.remove('hidden');
 }
@@ -1779,6 +1807,8 @@ async function boot() {
   }
   try {
     state.me = await api('/users/me');
+    window.FixitOffline?.configure?.({ token: state.token });
+    window.FixitOffline?.sync?.({ token: state.token, deviceId: 'fixit-pulse' });
     document.getElementById('login-screen').classList.add('hidden');
     document.getElementById('app').classList.remove('hidden');
     router();

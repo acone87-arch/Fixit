@@ -134,3 +134,25 @@ def test_request_photo_lightbox_and_approval_dialog_do_not_replace_detail_screen
     assert "pulse-dialog-backdrop" in dialog_section
     assert "prompt(" not in dialog_section
     assert "await openServiceRequest(item.id);" in source
+
+
+def test_task_is_hidden_from_pulse_navigation_while_service_request_creation_stays_available():
+    source = (Path(__file__).parents[1] / "app" / "static" / "app.js").read_text(encoding="utf-8")
+    navigation = source.split("const NAV =", 1)[1].split("function renderNav", 1)[0]
+    assert "'tasks', 'Наряды'" not in navigation
+    assert "'tasks', 'Мои наряды'" not in navigation
+    assert "api('/service-requests', { method: 'POST'" in source
+    assert "location.hash = 'requests'" in source
+
+
+def test_pulse_uses_shared_offline_repair_queue_and_legacy_tech_redirects():
+    root = Path(__file__).parents[1]
+    source = (root / "app" / "static" / "app.js").read_text(encoding="utf-8")
+    engine = (root / "app" / "static" / "offline" / "engine.js").read_text(encoding="utf-8")
+    main = (root / "app" / "main.py").read_text(encoding="utf-8")
+    assert "FixitOffline.enqueueRepair" in source
+    assert "FixitOffline.sync" in source
+    assert "pendingRepairs" in engine and "pendingAttachments" in engine
+    assert "fixit-tech-db" in engine
+    assert "fixit-sync-repairs" in engine
+    assert 'RedirectResponse(url="/#requests", status_code=307)' in main

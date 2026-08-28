@@ -57,7 +57,17 @@ async def qr_redirect(qr_token: str):
 # зарегистрированными раньше самих mount() ниже.
 @app.get("/tech", include_in_schema=False)
 async def tech_redirect():
-    return RedirectResponse(url="/tech/")
+    return RedirectResponse(url="/#requests", status_code=307)
+
+
+@app.get("/tech/{legacy_path:path}", include_in_schema=False)
+async def legacy_tech_redirect(legacy_path: str):
+    """The legacy shell stays in the repository for rollback only.
+
+    Fixit Pulse is the single technician product; the shared offline engine
+    keeps the same IndexedDB repair/attachment queue before this redirect.
+    """
+    return RedirectResponse(url="/#requests", status_code=307)
 
 
 @app.get("/guest", include_in_schema=False)
@@ -69,8 +79,9 @@ async def guest_redirect():
 # Base.metadata.create_all в lifespan — это единственный источник правды о схеме
 # и для локальной разработки, и для прода.
 
-# PWA техника — офлайн-first, отдельно от админ-панели. Смонтирована ДО "/",
-# иначе catch-all статики админки перехватит все запросы к /tech/*.
+# Legacy technician assets are retained temporarily for rollback/migration only.
+# The routes above redirect users to Fixit Pulse; keep the mount until the
+# separate retirement task removes the old static files.
 app.mount("/tech", StaticFiles(directory="app/static-tech", html=True), name="tech-frontend")
 
 # Гостевая страница заявки — без авторизации, открывается по QR (см. /e/{qr_token} выше).

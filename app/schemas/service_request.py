@@ -15,6 +15,14 @@ class ServiceRequestApproval(BaseModel):
     comment: str | None = Field(default=None, max_length=1000)
 
 
+class ServiceRequestCreate(BaseModel):
+    equipment_id: uuid.UUID
+    title: str = Field(min_length=1, max_length=255)
+    description: str | None = Field(default=None, max_length=5000)
+    priority: Literal["planned", "urgent"] = "planned"
+    assigned_technician_id: uuid.UUID | None = None
+
+
 class ServiceRequestAttachmentOut(BaseModel):
     id: uuid.UUID
     kind: str

@@ -76,6 +76,16 @@ async def sync_one_repair(db: AsyncSession, technician_id: uuid.UUID, organizati
 
             task = None
             ticket_id = payload.ticket_id
+            service_request_id = payload.service_request_id
+            if service_request_id:
+                linked_request = await db.scalar(select(ServiceRequest).where(
+                    ServiceRequest.id == service_request_id,
+                    ServiceRequest.organization_id == organization_id,
+                ).with_for_update())
+                if not linked_request or linked_request.equipment_id != equipment.id:
+                    raise _SyncFailure("Заявка не найдена или относится к другому оборудованию")
+                if linked_request.assigned_technician_id and linked_request.assigned_technician_id != technician_id:
+                    raise _SyncFailure("Заявка назначена другому мастеру")
             if payload.task_id:
                 task = await db.scalar(
                     select(Task)
@@ -116,7 +126,9 @@ async def sync_one_repair(db: AsyncSession, technician_id: uuid.UUID, organizati
                 db.add(RepairPart(repair_id=repair.id, part_id=item.part_id, quantity=item.quantity))
 
             request_query = select(ServiceRequest).where(ServiceRequest.organization_id == organization_id)
-            if payload.task_id:
+            if service_request_id:
+                request_query = request_query.where(ServiceRequest.id == service_request_id)
+            elif payload.task_id:
                 request_query = request_query.where(ServiceRequest.task_id == payload.task_id)
             elif ticket_id:
                 request_query = request_query.where(ServiceRequest.ticket_id == ticket_id)

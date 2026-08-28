@@ -13,8 +13,8 @@ from app.models.organization import OrganizationMembership
 from app.models.repair import Repair, RepairAttachment, RepairPart
 from app.models.service_request import ServiceRequest, ServiceRequestAttachment, ServiceRequestEvent
 from app.models.warehouse import Part
-from app.schemas.service_request import REQUEST_STATUSES, ServiceRequestApproval, ServiceRequestAttachmentOut, ServiceRequestDetail, ServiceRequestListItem, ServiceRequestOut, ServiceRequestStatusUpdate
-from app.services.service_requests import event
+from app.schemas.service_request import REQUEST_STATUSES, ServiceRequestApproval, ServiceRequestAttachmentOut, ServiceRequestCreate, ServiceRequestDetail, ServiceRequestListItem, ServiceRequestOut, ServiceRequestStatusUpdate
+from app.services.service_requests import event, next_number
 
 router = APIRouter(prefix="/api/service-requests", tags=["service requests"])
 UPLOAD_ROOT = Path("uploads")
@@ -102,6 +102,42 @@ async def serialize(db, request, org):
         history.insert(0, {"at": request.created_at, "type": "request.created", "message": "Заявка создана", "details": {}, "actor": None})
     photo_out = {"id": primary_photo.id, "original_name": primary_photo.original_name, "media_type": primary_photo.media_type, "byte_size": primary_photo.byte_size, "uploaded_at": primary_photo.uploaded_at, "download_url": f"/api/equipment/{equipment.id}/photo"} if primary_photo else None
     return ServiceRequestDetail(id=request.id, number=request.number, ticket_id=request.ticket_id, task_id=request.task_id, equipment_id=request.equipment_id, title=request.title, client_name=client_label(client, site), site_name=site.name, equipment_name=equipment.name, serial_number=equipment.serial_number, description=request.description, priority=request.priority, assigned_technician_id=request.assigned_technician_id, assigned_technician_name=technician_name, status=request.status, created_at=request.created_at, completed_at=request.completed_at, repair_id=repair.id if repair else None, parts_used=parts, outcome=repair.description if repair else None, history=history, site_address=site.address, contact_name=site.contact_name or client.contact_name, contact_phone=site.contact_phone or client.contact_phone, equipment_type=equipment_type, manufacturer=equipment.manufacturer, model=equipment.model, equipment_status=equipment.status.value, equipment_version=equipment.version, attachments=attachments, request_attachments=request_attachments, primary_photo=photo_out)
+
+
+@router.post("", response_model=ServiceRequestDetail, status_code=status.HTTP_201_CREATED)
+async def create_service_request(
+    payload: ServiceRequestCreate,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(require_roles(UserRole.admin, UserRole.dispatcher)),
+):
+    equipment = await db.scalar(select(Equipment).where(
+        Equipment.id == payload.equipment_id,
+        Equipment.organization_id == user.organization_id,
+    ))
+    if not equipment:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Оборудование не найдено в организации")
+    technician_id = payload.assigned_technician_id
+    if technician_id:
+        technician = await db.scalar(select(User).join(
+            OrganizationMembership,
+            (OrganizationMembership.user_id == User.id) & (OrganizationMembership.organization_id == user.organization_id),
+        ).where(User.id == technician_id, OrganizationMembership.role == UserRole.technician, User.is_active.is_(True)))
+        if not technician:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Можно назначить только активного техника")
+    request = ServiceRequest(
+        organization_id=user.organization_id, number=await next_number(db, user.organization_id),
+        equipment_id=equipment.id, title=payload.title, description=payload.description,
+        priority=payload.priority, assigned_technician_id=technician_id,
+        status="assigned" if technician_id else "new",
+    )
+    db.add(request)
+    await db.flush()
+    db.add(event(user.organization_id, request.id, user.id, "request.created", "Заявка создана", {}))
+    if technician_id:
+        db.add(event(user.organization_id, request.id, user.id, "technician.assigned", "Назначен мастер", {"technician_id": str(technician_id)}))
+    await db.commit()
+    await db.refresh(request)
+    return await serialize(db, request, user.organization_id)
 
 
 @router.post("/{request_id}/attachments", response_model=ServiceRequestAttachmentOut, status_code=status.HTTP_201_CREATED)

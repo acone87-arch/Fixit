@@ -16,6 +16,8 @@ class RepairCreate(BaseModel):
 
     local_uuid: uuid.UUID
     equipment_id: uuid.UUID
+    # Canonical Fixit 2.0 linkage. task_id remains accepted for legacy devices.
+    service_request_id: uuid.UUID | None = None
     task_id: uuid.UUID | None = None
     ticket_id: uuid.UUID | None = None
     fault_type: str | None = None
