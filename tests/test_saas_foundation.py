@@ -156,3 +156,11 @@ def test_pulse_uses_shared_offline_repair_queue_and_legacy_tech_redirects():
     assert "fixit-tech-db" in engine
     assert "fixit-sync-repairs" in engine
     assert 'RedirectResponse(url="/#requests", status_code=307)' in main
+
+
+def test_technician_workspace_renders_saved_repair_images_as_thumbnails():
+    source = (Path(__file__).parents[1] / "app" / "static" / "app.js").read_text(encoding="utf-8")
+    assert "tech-request-saved-photo-grid" in source
+    assert "data-repair-photo" in source
+    assert "apiBlob(`/repairs/attachments/${attachment.id}`)" in source
+    assert "openProtectedImage(`/repairs/attachments/${attachment.id}`" in source
