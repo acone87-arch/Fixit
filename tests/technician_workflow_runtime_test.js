@@ -19,7 +19,7 @@ assert.match(renderAction('on_the_way'), /data-status="arrived"[^>]*>Я на о�
 assert.match(renderAction('arrived'), /data-status="in_progress"[^>]*>Начать работу/);
 assert.match(renderAction('in_progress'), /Завершить работу/);
 assert.match(renderAction('waiting_parts'), /Продолжить работу/);
-assert.match(renderAction('waiting_approval'), /Продолжить работу/);
+assert.equal(renderAction('waiting_approval'), '');
 assert.equal(renderAction('completed'), '');
 
 assert.match(source, /const draft = \{ diagnostic: '', work: '', comment: '', usedParts: \{\}, photos: \[\] \}/);
@@ -27,4 +27,7 @@ assert.match(source, /URL\.createObjectURL\(file\)/);
 assert.match(source, /URL\.revokeObjectURL\(photo\.url\)/);
 assert.match(source, /completionLocalUuid \|\|= createUuid\(\)/);
 assert.match(source, /\['on_the_way', 'arrived', 'in_progress'\]/);
+assert.match(source, /Ожидается согласование/);
+assert.match(source, /approval: \{ diagnostic: draft\.diagnostic/);
+assert.match(source, /\/approval`, \{ method: 'PATCH'/);
 console.log('technician workflow runtime: ok');

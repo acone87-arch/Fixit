@@ -10,10 +10,16 @@ from app.models.customer import Client, Site
 from app.models.repair import Repair, RepairAttachment, RepairPart
 from app.models.service_request import ServiceRequest, ServiceRequestEvent
 from app.models.warehouse import Part
-from app.schemas.service_request import REQUEST_STATUSES, ServiceRequestOut, ServiceRequestStatusUpdate
+from app.schemas.service_request import REQUEST_STATUSES, ServiceRequestApproval, ServiceRequestOut, ServiceRequestStatusUpdate
 from app.services.service_requests import event
 
 router = APIRouter(prefix="/api/service-requests", tags=["service requests"])
+
+TECHNICIAN_TRANSITIONS = {
+    "assigned": {"on_the_way"}, "on_the_way": {"arrived"}, "arrived": {"in_progress"},
+    "in_progress": {"waiting_parts", "waiting_approval", "completed"},
+    "waiting_parts": {"in_progress"}, "waiting_approval": set(),
+}
 
 def client_label(client: Client, site: Site) -> str:
     name = (client.legal_name or client.name or "").strip()
@@ -65,13 +71,10 @@ async def update_status(request_id: uuid.UUID, payload: ServiceRequestStatusUpda
     request = await db.scalar(select(ServiceRequest).where(ServiceRequest.id == request_id, ServiceRequest.organization_id == user.organization_id).with_for_update())
     if not request or (user.role == UserRole.technician and request.assigned_technician_id != user.id): raise HTTPException(404, "Заявка не найдена")
     previous = request.status
-    technician_transitions = {
-        "assigned": {"on_the_way"}, "on_the_way": {"arrived"}, "arrived": {"in_progress"},
-        "in_progress": {"waiting_parts", "waiting_approval", "completed"},
-        "waiting_parts": {"in_progress"}, "waiting_approval": {"in_progress"},
-    }
-    if user.role == UserRole.technician and payload.status not in technician_transitions.get(previous, set()):
+    if user.role == UserRole.technician and payload.status not in TECHNICIAN_TRANSITIONS.get(previous, set()):
         raise HTTPException(409, "Этот переход недоступен на текущем этапе заявки")
+    if user.role != UserRole.technician and previous == "waiting_approval" and payload.status in {"in_progress", "cancelled"}:
+        raise HTTPException(409, "Используйте действие согласования для этой заявки")
     request.status = payload.status
     if payload.status in {"completed", "closed", "cancelled"}: request.completed_at = datetime.now(timezone.utc)
     if request.task_id and payload.status == "in_progress":
@@ -79,6 +82,34 @@ async def update_status(request_id: uuid.UUID, payload: ServiceRequestStatusUpda
         if task: task.status = TaskStatus.in_progress
     event_messages = {"on_the_way": "Мастер выехал", "arrived": "Мастер прибыл на объект", "in_progress": "Работа начата", "waiting_parts": "Ожидание запчастей", "waiting_approval": "Ожидание согласования", "completed": "Работы завершены"}
     event_types = {"on_the_way": "technician.on_the_way", "arrived": "technician.arrived", "in_progress": "work.started", "waiting_parts": "request.waiting_parts", "waiting_approval": "request.waiting_approval", "completed": "repair.completed"}
-    db.add(event(user.organization_id, request.id, user.id, event_types.get(payload.status, "status.changed"), payload.note or event_messages.get(payload.status, f"Статус: {previous} → {payload.status}"), {"from": previous, "to": payload.status, "transitioned_at": datetime.now(timezone.utc).isoformat()}))
+    details = {"from": previous, "to": payload.status, "transitioned_at": datetime.now(timezone.utc).isoformat()}
+    if payload.details:
+        details.update(payload.details)
+    db.add(event(user.organization_id, request.id, user.id, event_types.get(payload.status, "status.changed"), payload.note or event_messages.get(payload.status, f"Статус: {previous} → {payload.status}"), details))
+    await db.commit(); await db.refresh(request)
+    return await serialize(db, request, user.organization_id)
+
+@router.patch("/{request_id}/approval", response_model=ServiceRequestOut)
+async def decide_approval(request_id: uuid.UUID, payload: ServiceRequestApproval, db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(require_roles(UserRole.admin, UserRole.dispatcher))):
+    request = await db.scalar(select(ServiceRequest).where(ServiceRequest.id == request_id, ServiceRequest.organization_id == user.organization_id).with_for_update())
+    if not request:
+        raise HTTPException(404, "Заявка не найдена")
+    if request.status != "waiting_approval":
+        raise HTTPException(409, "Заявка не ожидает согласования")
+    approved_at = datetime.now(timezone.utc)
+    details = {"approved_by": str(user.id), "approved_at": approved_at.isoformat(), "comment": payload.comment}
+    if payload.action == "approved":
+        request.status = "in_progress"
+        if request.task_id:
+            task = await db.scalar(select(Task).where(Task.id == request.task_id, Task.organization_id == user.organization_id))
+            if task: task.status = TaskStatus.in_progress
+        db.add(event(user.organization_id, request.id, user.id, "approval.approved", "Работы согласованы, заявка возвращена мастеру", details))
+    else:
+        request.status = "cancelled"
+        request.completed_at = approved_at
+        if request.task_id:
+            task = await db.scalar(select(Task).where(Task.id == request.task_id, Task.organization_id == user.organization_id))
+            if task: task.status = TaskStatus.cancelled
+        db.add(event(user.organization_id, request.id, user.id, "approval.rejected", payload.comment or "Согласование отклонено", details))
     await db.commit(); await db.refresh(request)
     return await serialize(db, request, user.organization_id)

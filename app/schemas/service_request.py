@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 REQUEST_STATUSES = {"new", "assigned", "on_the_way", "arrived", "in_progress", "waiting_parts", "waiting_approval", "completed", "closed", "cancelled"}
@@ -7,6 +8,11 @@ REQUEST_STATUSES = {"new", "assigned", "on_the_way", "arrived", "in_progress", "
 class ServiceRequestStatusUpdate(BaseModel):
     status: str
     note: str | None = Field(default=None, max_length=1000)
+    details: dict[str, Any] | None = None
+
+class ServiceRequestApproval(BaseModel):
+    action: Literal["approved", "rejected"]
+    comment: str | None = Field(default=None, max_length=1000)
 
 class ServiceRequestOut(BaseModel):
     id: uuid.UUID; number: int; ticket_id: uuid.UUID | None; task_id: uuid.UUID | None; equipment_id: uuid.UUID
