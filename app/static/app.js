@@ -327,12 +327,16 @@ async function renderServiceRequests(content) {
   const requestRows = requests.length ? requests.map((item) => `<tr class="clickable request-row" data-id="${item.id}"><td><strong>SR-${String(item.number).padStart(5, '0')}</strong><div class="text-soft">${esc(item.description || 'Без описания')}</div></td><td>${esc(item.client_name || '—')}<div class="text-soft">${esc(item.site_name || '')}</div></td><td>${esc(item.equipment_name)}<div class="text-soft mono">${esc(item.serial_number)}</div></td><td>${esc(item.assigned_technician_name || 'Не назначен')}</td><td>${requestBadge(item)}</td><td>${esc(item.outcome || '—')}</td></tr>`).join('') : '<tr class="empty-row"><td colspan="6">Заявок пока нет</td></tr>';
   const requestCards = requests.length ? requests.map((item) => `<button class="mobile-info-card request-card request-row" data-id="${item.id}"><div class="mobile-card-top"><span class="request-number">SR-${String(item.number).padStart(5, '0')}</span>${requestBadge(item)}</div><strong>${esc(item.description || 'Без описания')}</strong><span class="text-soft">${esc(item.equipment_name || 'Оборудование не указано')} · <span class="mono">${esc(item.serial_number || '—')}</span></span><div class="request-card-detail"><span>${esc(item.client_name || 'Клиент не указан')}<small>${esc(item.site_name || 'Объект не указан')}</small></span><span class="assigned-master">${esc(item.assigned_technician_name || 'Мастер не назначен')}</span></div>${item.outcome ? `<div class="request-outcome">${esc(item.outcome)}</div>` : ''}</button>`).join('') : '<div class="mobile-empty">Заявок пока нет</div>';
   content.innerHTML = `<div class="page-header"><div><h1>Заявки</h1><div class="page-subtitle">Единый путь обращения: от QR до сервисного акта</div></div></div><div class="card mobile-table" style="padding:0"><table><thead><tr><th>№ / проблема</th><th>Клиент и объект</th><th>Оборудование</th><th>Мастер</th><th>Статус</th><th>Итог</th></tr></thead><tbody>${requestRows}</tbody></table></div><div class="mobile-card-list" id="request-cards">${requestCards}</div>`;
-  content.querySelectorAll('.request-row').forEach((row) => row.addEventListener('click', async () => {
-    const item = await api(`/service-requests/${row.dataset.id}`);
+  content.querySelectorAll('.request-row').forEach((row) => row.addEventListener('click', () => openServiceRequestModal(row.dataset.id)));
+}
+
+async function openServiceRequestModal(id) {
+  try {
+    const item = await api(`/service-requests/${id}`);
     const history = item.history.map((entry) => `<div class="timeline-item"><div class="timeline-dot"></div><div><strong>${esc(entry.message)}</strong><div class="text-soft">${fmtDate(entry.at)}</div></div></div>`).join('') || '<div class="text-soft">История пока пуста</div>';
-    openModal(`Заявка SR-${String(item.number).padStart(5, '0')}`, `<div class="text-soft">${esc(item.client_name || '')} · ${esc(item.site_name || '')}</div><h3 style="margin-top:12px">${esc(item.equipment_name)} · ${esc(item.serial_number)}</h3><p>${esc(item.description || 'Без описания')}</p><h3 style="margin-top:16px">История</h3>${history}`, '<button class="btn btn-secondary" id="modal-cancel">Закрыть</button>');
-    document.querySelector('#modal-cancel').addEventListener('click', closeModal);
-  }));
+    const backdrop = openModal(`Заявка SR-${String(item.number).padStart(5, '0')}`, `<div class="text-soft">${esc(item.client_name || '')} · ${esc(item.site_name || '')}</div><h3 style="margin-top:12px">${esc(item.equipment_name)} · ${esc(item.serial_number)}</h3><p>${esc(item.description || 'Без описания')}</p><h3 style="margin-top:16px">История</h3>${history}`, '<button class="btn btn-secondary" id="modal-cancel">Закрыть</button>');
+    backdrop.querySelector('#modal-cancel').addEventListener('click', closeModal);
+  } catch (e) { toast(e.message, 'error'); }
 }
 
 // ============================================================
@@ -583,11 +587,11 @@ async function renderEquipment(content) {
     <div class="page-header">
       <div><h1>Оборудование</h1><div class="page-subtitle">Цифровой паспорт и лента ремонтов по каждой единице техники</div></div>
       <div style="display:flex;gap:10px;align-items:center">
-        <select id="equipment-location-filter" aria-label="Фильтр по объекту"><option value="">Все объекты</option>${activeSites.map((site) => `<option value="${site.id}">${esc(clientOf(site.client_id)?.name || '—')} · ${esc(site.name)}</option>`).join('')}</select>
+        <select id="equipment-location-filter" aria-label="Фильтр по объекту"><option value="">Все объекты</option>${activeSites.map((site) => `<option value="${site.id}">${esc(readableClientName(clientOf(site.client_id)?.legal_name || clientOf(site.client_id)?.name, site.name))} · ${esc(site.name)}</option>`).join('')}</select>
         <div class="site-picker" id="equipment-site-picker">
           <button type="button" class="site-picker-trigger" id="equipment-site-trigger"><span id="equipment-site-label">Все объекты</span><i>⌄</i></button>
           <div class="site-picker-menu hidden" id="equipment-site-menu">
-            <button type="button" data-site-value="">Все объекты</button>${activeSites.map((site) => `<button type="button" data-site-value="${site.id}"><small>${esc(clientOf(site.client_id)?.name || '—')}</small>${esc(site.name)}</button>`).join('')}
+            <button type="button" data-site-value="">Все объекты</button>${activeSites.map((site) => `<button type="button" data-site-value="${site.id}"><small>${esc(readableClientName(clientOf(site.client_id)?.legal_name || clientOf(site.client_id)?.name, site.name))}</small>${esc(site.name)}</button>`).join('')}
           </div>
         </div>
         ${canEdit ? '<button class="btn btn-primary" id="add-equipment-btn">+ Добавить оборудование</button>' : ''}
@@ -618,12 +622,12 @@ async function renderEquipment(content) {
       <td><strong>${esc(typeName(eq.equipment_type_id))}</strong><div class="text-soft">${esc(eq.manufacturer || '')} ${esc(eq.model || '')}</div></td>
       <td class="mono">${esc(eq.serial_number)}</td>
       <td>${badge(EQUIPMENT_STATUS, eq.status)}</td>
-      <td>${esc(client?.name || '—')}<div class="text-soft">${esc(site?.name || eq.location || '—')}</div></td>
+      <td>${esc(readableClientName(client?.legal_name || client?.name, site?.name || eq.location))}<div class="text-soft">${esc(site?.name || eq.location || '—')}</div></td>
       </tr>`;
     }).join('') : '<tr class="empty-row"><td colspan="4">На этом объекте оборудования нет</td></tr>';
     cards.innerHTML = visibleItems.length ? visibleItems.map((eq) => {
       const site = siteOf(eq.site_id); const client = site ? clientOf(site.client_id) : null;
-      return `<button class="mobile-info-card equipment-card" data-id="${eq.id}"><div class="mobile-card-top"><span class="equipment-glyph">◌</span>${badge(EQUIPMENT_STATUS, eq.status)}</div><strong>${esc(typeName(eq.equipment_type_id))}</strong><span class="text-soft">${esc(eq.manufacturer || '')} ${esc(eq.model || '')}</span><div class="mobile-card-meta"><span class="mono">${esc(eq.serial_number)}</span><span>${esc(client?.name || '—')} · ${esc(site?.name || eq.location || '—')}</span></div></button>`;
+      return `<button class="mobile-info-card equipment-card" data-id="${eq.id}"><div class="mobile-card-top"><span class="equipment-glyph">◌</span>${badge(EQUIPMENT_STATUS, eq.status)}</div><strong>${esc(typeName(eq.equipment_type_id))}</strong><span class="text-soft">${esc(eq.manufacturer || '')} ${esc(eq.model || '')}</span><div class="mobile-card-meta"><span class="mono">${esc(eq.serial_number)}</span><span>${esc(readableClientName(client?.legal_name || client?.name, site?.name || eq.location))} · ${esc(site?.name || eq.location || '—')}</span></div></button>`;
     }).join('') : '<div class="mobile-empty">На этом объекте оборудования нет</div>';
 
     rows.querySelectorAll('tr[data-id]').forEach((tr) => {
@@ -657,7 +661,7 @@ function openCreateEquipmentModal() {
   if (!activeSites.length) return toast('Сначала создайте объект обслуживания', 'error');
   const siteOptions = activeSites.map((site) => {
     const client = state.clients.find((item) => item.id === site.client_id);
-    return `<option value="${site.id}">${esc(client?.name || '—')} · ${esc(site.name)}</option>`;
+    return `<option value="${site.id}">${esc(readableClientName(client?.legal_name || client?.name, site.name))} · ${esc(site.name)}</option>`;
   }).join('');
   const backdrop = openModal('Новое оборудование', `
     <form id="equipment-form">
@@ -711,81 +715,110 @@ function openCreateEquipmentModal() {
   });
 }
 
-async function openEquipmentPassport(id) {
-  const [passport, qrBlob] = await Promise.all([
-    api(`/equipment/${id}/passport`),
-    apiBlob(`/equipment/${id}/qr`),
-  ]);
-  const qrObjectUrl = URL.createObjectURL(qrBlob);
-  const equipmentTypeName = (state.equipmentTypes.find((type) => type.id === passport.equipment_type_id) || {}).name || passport.name;
-  const site = state.sites.find((item) => item.id === passport.site_id);
-  const client = site ? state.clients.find((item) => item.id === site.client_id) : null;
-  const canDelete = state.me.role === 'owner' || state.me.role === 'admin' || state.me.role === 'dispatcher';
-  const historyHtml = passport.history.length ? passport.history.map((h) => `
-    <div style="display:flex;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)">
-      <div style="width:8px;height:8px;border-radius:50%;background:var(--accent);margin-top:6px;flex-shrink:0"></div>
-      <div>
-        <div class="text-soft" style="font-size:12px;font-weight:600">${fmtDate(h.closed_at)} · ${esc(h.technician_name)}</div>
-        <div style="margin-top:2px">${esc(h.description)}</div>
-        ${h.parts_used.length ? `<div class="mono text-soft" style="font-size:12px;margin-top:2px">${h.parts_used.map((p) => `${esc(p.part_name)} ×${p.quantity}`).join(', ')}</div>` : ''}
-        <button class="btn btn-ghost act-download-btn" data-repair-id="${h.repair_id}" style="padding:4px 0;margin-top:6px;font-size:12px;color:var(--accent-strong)">Скачать сервисный акт PDF</button>
-      </div>
-    </div>`).join('') : '<div class="text-soft" style="padding:12px 0">Ремонтов ещё не было</div>';
+function readableClientName(name, siteName) {
+  const value = String(name || '').trim();
+  return value && !/^импортированные\s+клиенты$/i.test(value) ? value : (siteName || 'Клиент не указан');
+}
 
-  const qrFilenamePart = (value) => String(value || 'без-названия')
-    .trim().replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').replace(/\s+/g, ' ');
-  const qrFilename = `QR — ${qrFilenamePart(passport.location)} — ${qrFilenamePart(passport.model || equipmentTypeName)}.svg`;
-  const backdrop = openModal(equipmentTypeName, `
-    <div style="display:flex;gap:16px;align-items:flex-start;margin-bottom:16px">
-      <img src="${qrObjectUrl}" data-object-url alt="QR" style="width:96px;height:96px;border:1px solid var(--line);border-radius:8px;padding:6px;background:#fff">
-      <div>
-        <div>${esc(passport.manufacturer || '')} ${esc(passport.model || '')}</div>
-        <div class="mono text-soft" style="margin-top:4px">${esc(passport.serial_number)}</div>
-        <div class="text-soft" style="margin-top:4px">${esc(client?.name || '')}${site ? ` · ${esc(site.name)}` : ''}</div>
-        <div style="margin-top:8px">${badge(EQUIPMENT_STATUS, passport.status)}</div>
-      </div>
-    </div>
-    <h2 style="font-size:14px;margin-bottom:6px">Лента истории</h2>
-    <div>${historyHtml}</div>
-  `, `${canDelete ? '<button class="btn btn-ghost" id="delete-equipment-btn" style="color:#b42318">Удалить оборудование</button>' : ''}
-      <button class="btn btn-secondary" id="download-qr-btn">Скачать QR</button>
-      <button class="btn btn-secondary" id="modal-close">Закрыть</button>`);
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url; link.download = filename;
+  document.body.appendChild(link); link.click(); link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 
-  backdrop.querySelector('#modal-close').addEventListener('click', closeModal);
-  backdrop.querySelector('#download-qr-btn').addEventListener('click', () => {
-    const link = document.createElement('a');
-    link.href = qrObjectUrl;
-    link.download = qrFilename;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-  });
-  backdrop.querySelectorAll('.act-download-btn').forEach((button) => button.addEventListener('click', async () => {
-    const original = button.textContent;
+async function openEquipmentManageModal(passport) {
+  const sites = state.sites.filter((site) => site.is_active);
+  const options = sites.map((site) => {
+    const client = state.clients.find((item) => item.id === site.client_id);
+    return `<option value="${site.id}" ${site.id === passport.site_id ? 'selected' : ''}>${esc(readableClientName(client?.legal_name || client?.name, site.name))} · ${esc(site.name)}</option>`;
+  }).join('');
+  const backdrop = openModal('Управление оборудованием', `
+    <div class="field"><label>Объект обслуживания</label><select id="passport-site">${options}</select></div>
+    <div class="field"><label>Статус</label><select id="passport-status">${Object.entries(EQUIPMENT_STATUS).map(([key, item]) => `<option value="${key}" ${passport.status === key ? 'selected' : ''}>${item.label}</option>`).join('')}</select></div>`,
+    '<button class="btn btn-secondary" id="passport-manage-cancel">Отмена</button><button class="btn btn-primary" id="passport-manage-save">Сохранить</button>');
+  backdrop.querySelector('#passport-manage-cancel').addEventListener('click', closeModal);
+  backdrop.querySelector('#passport-manage-save').addEventListener('click', async () => {
     try {
-      button.disabled = true;
-      button.textContent = 'Готовим PDF…';
-      const blob = await apiBlob(`/repairs/${button.dataset.repairId}/act.pdf`);
-      const link = document.createElement('a');
-      link.href = URL.createObjectURL(blob);
-      link.download = `service-act-${button.dataset.repairId.slice(0, 8)}.pdf`;
-      document.body.appendChild(link); link.click(); link.remove();
-      setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+      await api(`/equipment/${passport.id}`, { method: 'PATCH', body: JSON.stringify({ site_id: backdrop.querySelector('#passport-site').value, status: backdrop.querySelector('#passport-status').value }) });
+      closeModal(); toast('Паспорт оборудования обновлён'); router();
     } catch (e) { toast(e.message, 'error'); }
-    finally { button.disabled = false; button.textContent = original; }
-  }));
-  const deleteButton = backdrop.querySelector('#delete-equipment-btn');
-  if (deleteButton) {
-    deleteButton.addEventListener('click', async () => {
-      if (!confirm(`Удалить оборудование «${equipmentTypeName}»? Это действие нельзя отменить.`)) return;
+  });
+}
+
+async function openCreateTaskForEquipment(passport) {
+  try {
+    const technicians = (await api('/users')).filter((item) => item.role === 'technician' && item.is_active);
+    const backdrop = openModal('Создать заявку', `
+      <div class="passport-create-context">${esc(passport.manufacturer || '')} ${esc(passport.model || passport.name)} · <span class="mono">${esc(passport.serial_number)}</span></div>
+      <div class="field"><label>Проблема</label><input id="passport-request-title" required placeholder="Например: не набирает воду"></div>
+      <div class="field"><label>Описание</label><textarea id="passport-request-description" rows="3"></textarea></div>
+      <div class="field-row"><div class="field"><label>Приоритет</label><select id="passport-request-priority"><option value="planned">Плановая</option><option value="urgent">Срочно</option></select></div><div class="field"><label>Мастер</label><select id="passport-request-tech"><option value="">Назначить позже</option>${technicians.map((tech) => `<option value="${tech.id}">${esc(tech.full_name)}</option>`).join('')}</select></div></div>`,
+      '<button class="btn btn-secondary" id="passport-request-cancel">Отмена</button><button class="btn btn-primary" id="passport-request-save">Создать заявку</button>');
+    backdrop.querySelector('#passport-request-cancel').addEventListener('click', closeModal);
+    backdrop.querySelector('#passport-request-save').addEventListener('click', async () => {
+      const title = backdrop.querySelector('#passport-request-title').value.trim();
+      if (!title) return toast('Опишите проблему', 'error');
       try {
-        await api(`/equipment/${id}`, { method: 'DELETE' });
-        closeModal();
-        toast('Оборудование удалено');
-        router();
+        await api('/tasks', { method: 'POST', body: JSON.stringify({ equipment_id: passport.id, title, description: backdrop.querySelector('#passport-request-description').value.trim() || null, priority: backdrop.querySelector('#passport-request-priority').value, assigned_to: backdrop.querySelector('#passport-request-tech').value || null }) });
+        closeModal(); toast('Заявка создана'); router();
       } catch (e) { toast(e.message, 'error'); }
     });
-  }
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+async function openEquipmentPassport(id) {
+  try {
+    const [passport, qrBlob] = await Promise.all([api(`/equipment/${id}/passport`), apiBlob(`/equipment/${id}/qr`)]);
+    const qrObjectUrl = URL.createObjectURL(qrBlob);
+    const equipmentTypeName = (state.equipmentTypes.find((type) => type.id === passport.equipment_type_id) || {}).name || passport.name;
+    const clientName = readableClientName(passport.client_name, passport.site_name);
+    const isStaff = state.me.role !== 'technician';
+    const statusLabels = { new: 'Новая', assigned: 'Назначена', on_the_way: 'В пути', in_progress: 'В работе', waiting_parts: 'Ждёт запчасти', waiting_approval: 'Ждёт согласование', completed: 'Выполнена', closed: 'Закрыта', cancelled: 'Отменена' };
+    const requestBadge = (request) => `<span class="badge badge-${['completed', 'closed'].includes(request.status) ? 'good' : request.status.startsWith('waiting') ? 'amber' : request.status === 'cancelled' ? 'idle' : 'warn'}"><span class="badge-dot"></span>${esc(statusLabels[request.status] || request.status)}</span>`;
+    const timeline = passport.timeline.map((entry) => `<article class="equipment-timeline-item"><span class="equipment-timeline-dot ${entry.kind.startsWith('repair') ? 'repair' : entry.kind.startsWith('request') ? 'request' : ''}"></span><div><div class="equipment-timeline-meta">${fmtDate(entry.occurred_at)} · ${entry.request_number ? `SR-${String(entry.request_number).padStart(5, '0')}` : entry.kind === 'repair.completed' ? 'Сервис' : 'Паспорт'}</div><strong>${esc(entry.title)}</strong>${entry.description ? `<p>${esc(entry.description)}</p>` : ''}${entry.parts_used?.length ? `<div class="equipment-parts">Запчасти: ${entry.parts_used.map((part) => `${esc(part.part_name)} ×${part.quantity}`).join(', ')}</div>` : ''}${entry.request_id ? `<button class="btn btn-ghost btn-sm open-request-btn" data-request-id="${entry.request_id}">Открыть заявку</button>` : ''}${entry.has_service_act ? `<button class="btn btn-ghost btn-sm download-act-btn" data-repair-id="${entry.repair_id}">Сервисный акт PDF</button>` : ''}</div></article>`).join('') || '<div class="passport-empty">Событий пока нет</div>';
+    const documents = passport.documents.map((document) => `<button class="passport-document" data-document-kind="${esc(document.kind)}" data-repair-id="${document.repair_id || ''}" data-attachment-id="${document.attachment_id || ''}"><span class="passport-document-icon">${document.kind === 'service_act' ? 'PDF' : document.kind === 'before' || document.kind === 'after' ? 'Фото' : 'Файл'}</span><span><strong>${esc(document.title)}</strong><small>${fmtDate(document.created_at)}${document.media_type ? ` · ${esc(document.media_type)}` : ''}</small></span><b>↓</b></button>`).join('') || '<div class="passport-empty">Фотографии и сервисные акты появятся здесь после выполнения работ.</div>';
+    const qrFilename = `QR — ${String(passport.model || equipmentTypeName).replace(/[<>:"/\\|?*\x00-\x1F]/g, '_')}.svg`;
+    const primaryAction = passport.active_request
+      ? `<button class="btn btn-primary" id="passport-primary-request">Открыть заявку SR-${String(passport.active_request.number).padStart(5, '0')}</button>`
+      : isStaff ? '<button class="btn btn-primary" id="passport-create-request">Создать заявку</button>' : '';
+    const backdrop = openModal('', `<section class="equipment-passport">
+      <header class="passport-hero"><div><span class="passport-eyebrow">${esc(equipmentTypeName)}</span><h2>${esc([passport.manufacturer, passport.model].filter(Boolean).join(' ') || passport.name)}</h2><div class="passport-status-row">${badge(EQUIPMENT_STATUS, passport.status)}<span class="mono">S/N ${esc(passport.serial_number)}</span></div></div><button class="passport-more" id="passport-more" aria-label="Дополнительные действия">•••</button><div class="passport-more-menu hidden" id="passport-more-menu"><button id="passport-download-qr">Скачать QR</button>${isStaff ? '<button id="passport-manage">Редактировать и переместить</button><button id="passport-archive">Архивировать</button>' : ''}</div></header>
+      <div class="passport-context"><div><small>Клиент</small><strong>${esc(clientName)}</strong></div><div><small>Объект</small><strong>${esc(passport.site_name || 'Не указан')}</strong>${passport.site_address ? `<span>${esc(passport.site_address)}</span>` : ''}</div></div>
+      <nav class="passport-tabs" aria-label="Разделы паспорта"><button class="active" data-passport-tab="overview">Обзор</button><button data-passport-tab="history">История</button><button data-passport-tab="documents">Документы <span>${passport.documents.length}</span></button></nav>
+      <section data-passport-panel="overview"><div class="passport-overview-grid"><div class="passport-data"><span>Серийный номер</span><strong class="mono">${esc(passport.serial_number)}</strong></div>${passport.inventory_number ? `<div class="passport-data"><span>Инвентарный номер</span><strong>${esc(passport.inventory_number)}</strong></div>` : ''}<div class="passport-data"><span>Текущий статус</span>${badge(EQUIPMENT_STATUS, passport.status)}</div></div>${passport.active_request ? `<div class="passport-active-request"><div><span>Активная заявка SR-${String(passport.active_request.number).padStart(5, '0')}</span><strong>${esc(passport.active_request.title)}</strong><small>${esc(passport.active_request.assigned_technician_name || 'Мастер ещё не назначен')}</small></div>${requestBadge(passport.active_request)}</div>` : '<div class="passport-no-request">Активных заявок нет — оборудование готово к работе.</div>'}<div class="passport-qr"><img src="${qrObjectUrl}" data-object-url alt="QR-код оборудования"><div><span>QR оборудования</span><p>Используйте для быстрого открытия паспорта и обращения в сервис.</p><button class="btn btn-ghost btn-sm" id="passport-qr-download-inline">Скачать QR</button></div></div></section>
+      <section class="hidden" data-passport-panel="history"><div class="equipment-timeline">${timeline}</div></section>
+      <section class="hidden" data-passport-panel="documents"><div class="passport-documents">${documents}</div></section>
+    </section>`, `<span class="passport-footer-action">${primaryAction}</span><button class="btn btn-secondary" id="passport-close">Закрыть</button>`);
+    backdrop.querySelector('#passport-close').addEventListener('click', closeModal);
+    const downloadQr = () => downloadBlob(qrBlob, qrFilename);
+    backdrop.querySelector('#passport-download-qr').addEventListener('click', downloadQr);
+    backdrop.querySelector('#passport-qr-download-inline').addEventListener('click', downloadQr);
+    backdrop.querySelector('#passport-more').addEventListener('click', () => backdrop.querySelector('#passport-more-menu').classList.toggle('hidden'));
+    backdrop.querySelectorAll('[data-passport-tab]').forEach((tab) => tab.addEventListener('click', () => {
+      backdrop.querySelectorAll('[data-passport-tab]').forEach((item) => item.classList.toggle('active', item === tab));
+      backdrop.querySelectorAll('[data-passport-panel]').forEach((panel) => panel.classList.toggle('hidden', panel.dataset.passportPanel !== tab.dataset.passportTab));
+    }));
+    backdrop.querySelectorAll('.open-request-btn').forEach((button) => button.addEventListener('click', () => openServiceRequestModal(button.dataset.requestId)));
+    backdrop.querySelector('#passport-primary-request')?.addEventListener('click', () => openServiceRequestModal(passport.active_request.id));
+    backdrop.querySelector('#passport-create-request')?.addEventListener('click', () => openCreateTaskForEquipment(passport));
+    backdrop.querySelector('#passport-manage')?.addEventListener('click', () => openEquipmentManageModal(passport));
+    backdrop.querySelector('#passport-archive')?.addEventListener('click', async () => {
+      if (!confirm('Архивировать оборудование? Его можно вернуть через редактирование статуса.')) return;
+      try { await api(`/equipment/${passport.id}`, { method: 'PATCH', body: JSON.stringify({ status: 'mothballed' }) }); closeModal(); toast('Оборудование архивировано'); router(); } catch (e) { toast(e.message, 'error'); }
+    });
+    const downloadAct = async (repairId) => {
+      try { downloadBlob(await apiBlob(`/repairs/${repairId}/act.pdf`), `service-act-${repairId.slice(0, 8)}.pdf`); } catch (e) { toast(e.message, 'error'); }
+    };
+    backdrop.querySelectorAll('.download-act-btn').forEach((button) => button.addEventListener('click', () => downloadAct(button.dataset.repairId)));
+    backdrop.querySelectorAll('.passport-document').forEach((button) => button.addEventListener('click', async () => {
+      try {
+        if (button.dataset.documentKind === 'service_act') return downloadAct(button.dataset.repairId);
+        downloadBlob(await apiBlob(`/repairs/attachments/${button.dataset.attachmentId}`), button.querySelector('strong').textContent || 'document');
+      } catch (e) { toast(e.message, 'error'); }
+    }));
+  } catch (e) { toast(e.message, 'error'); }
 }
 
 // ============================================================

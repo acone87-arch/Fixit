@@ -10,13 +10,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.core.deps import CurrentUser, get_current_user, require_roles
 from app.database import get_db
-from app.models.core import Equipment, EquipmentType, Task, Ticket, UserRole
-from app.models.customer import Site
-from app.models.repair import Repair
+from app.models.core import Equipment, EquipmentType, Task, Ticket, User, UserRole
+from app.models.customer import Client, Site
+from app.models.repair import Repair, RepairAttachment, RepairPart
+from app.models.service_request import ServiceRequest, ServiceRequestEvent
+from app.models.warehouse import Part
 from app.schemas.equipment import (
+    EquipmentActiveRequest,
     EquipmentCreate,
+    EquipmentDocumentEntry,
     EquipmentOut,
     EquipmentPassport,
+    EquipmentTimelineEntry,
     EquipmentUpdate,
     EquipmentTypeCreate,
     EquipmentTypeOut,
@@ -179,54 +184,162 @@ async def delete_equipment(
 @router.get("/{equipment_id}/passport", response_model=EquipmentPassport)
 async def get_passport(equipment_id: uuid.UUID, db: AsyncSession = Depends(get_db),
                        user: CurrentUser = Depends(get_current_user)):
-    equipment = await db.scalar(select(Equipment).where(
-        Equipment.id == equipment_id, Equipment.organization_id == user.organization_id
-    ))
-    if not equipment:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Оборудование не найдено")
-
-    from app.models.core import User
-    from app.models.repair import RepairPart
-    from app.models.warehouse import Part
-
-    rows = (
-        await db.execute(
-            select(Repair, User.full_name)
-            .join(User, User.id == Repair.technician_id)
-            .where(Repair.equipment_id == equipment_id)
-            .order_by(Repair.closed_at.desc())
+    equipment_row = (await db.execute(
+        select(Equipment, EquipmentType.name, Site, Client)
+        .join(EquipmentType, EquipmentType.id == Equipment.equipment_type_id)
+        .join(Site, Site.id == Equipment.site_id)
+        .join(Client, Client.id == Site.client_id)
+        .where(
+            Equipment.id == equipment_id,
+            Equipment.organization_id == user.organization_id,
+            Site.organization_id == user.organization_id,
+            Client.organization_id == user.organization_id,
         )
-    ).all()
+    )).one_or_none()
+    if not equipment_row:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Оборудование не найдено")
+    equipment, equipment_type_name, site, client = equipment_row
+
+    repair_rows = (await db.execute(
+        select(Repair, User.full_name)
+        .outerjoin(User, User.id == Repair.technician_id)
+        .where(Repair.equipment_id == equipment_id, Repair.organization_id == user.organization_id)
+        .order_by(Repair.closed_at.desc(), Repair.created_at.desc())
+    )).all()
+    repair_ids = [repair.id for repair, _ in repair_rows]
+    parts_by_repair: dict[uuid.UUID, list[dict]] = {repair_id: [] for repair_id in repair_ids}
+    if repair_ids:
+        parts_rows = (await db.execute(
+            select(RepairPart.repair_id, Part.name, Part.article, RepairPart.quantity)
+            .join(Part, Part.id == RepairPart.part_id)
+            .where(RepairPart.repair_id.in_(repair_ids))
+        )).all()
+        for repair_id, part_name, article, quantity in parts_rows:
+            parts_by_repair[repair_id].append({"part_name": part_name, "article": article, "quantity": quantity})
+    attachments_by_repair: dict[uuid.UUID, list[RepairAttachment]] = {repair_id: [] for repair_id in repair_ids}
+    if repair_ids:
+        attachments = (await db.scalars(select(RepairAttachment).where(
+            RepairAttachment.organization_id == user.organization_id,
+            RepairAttachment.repair_id.in_(repair_ids),
+        ).order_by(RepairAttachment.uploaded_at.desc()))).all()
+        for attachment in attachments:
+            attachments_by_repair.setdefault(attachment.repair_id, []).append(attachment)
+
+    requests = (await db.scalars(select(ServiceRequest).where(
+        ServiceRequest.organization_id == user.organization_id,
+        ServiceRequest.equipment_id == equipment_id,
+    ).order_by(ServiceRequest.created_at.desc()))).all()
+    request_ids = [item.id for item in requests]
+    request_events: list[ServiceRequestEvent] = []
+    if request_ids:
+        request_events = (await db.scalars(select(ServiceRequestEvent).where(
+            ServiceRequestEvent.organization_id == user.organization_id,
+            ServiceRequestEvent.service_request_id.in_(request_ids),
+        ).order_by(ServiceRequestEvent.created_at))).all()
+    technician_ids = {item.assigned_technician_id for item in requests if item.assigned_technician_id}
+    technician_ids.update(repair.technician_id for repair, _ in repair_rows if repair.technician_id)
+    technicians = {}
+    if technician_ids:
+        technicians = {person.id: person.full_name for person in (await db.scalars(
+            select(User).where(User.id.in_(technician_ids), User.is_active.is_(True))
+        )).all()}
 
     history: list[RepairHistoryEntry] = []
-    for repair, technician_name in rows:
-        parts_rows = (
-            await db.execute(
-                select(Part.name, RepairPart.quantity)
-                .join(RepairPart, RepairPart.part_id == Part.id)
-                .where(RepairPart.repair_id == repair.id)
-            )
-        ).all()
+    for repair, technician_name in repair_rows:
+        repair_parts = parts_by_repair.get(repair.id, [])
         history.append(
             RepairHistoryEntry(
                 repair_id=repair.id,
                 closed_at=repair.closed_at,
-                technician_name=technician_name,
+                technician_name=technician_name or "Не указан",
                 fault_type=repair.fault_type,
                 description=repair.description,
                 labor_minutes=repair.labor_minutes,
                 client_signer_name=repair.client_signer_name,
                 client_signed_at=repair.client_signed_at,
-                parts_used=[{"part_name": name, "quantity": qty} for name, qty in parts_rows],
+                parts_used=repair_parts,
             )
         )
 
-    equipment_type_name = await db.scalar(
-        select(EquipmentType.name).where(EquipmentType.id == equipment.equipment_type_id)
-    )
+    timeline: list[EquipmentTimelineEntry] = [EquipmentTimelineEntry(
+        id=f"equipment:{equipment.id}", kind="equipment.created", occurred_at=equipment.created_at,
+        title="Оборудование добавлено", description=equipment_type_name,
+    )]
+    request_by_task = {item.task_id: item for item in requests if item.task_id}
+    request_by_ticket = {item.ticket_id: item for item in requests if item.ticket_id}
+    for item in requests:
+        timeline.append(EquipmentTimelineEntry(
+            id=f"request:{item.id}", kind="request.created", occurred_at=item.created_at,
+            title=f"Заявка SR-{item.number:05d}", description=item.title or item.description,
+            request_id=item.id, request_number=item.number,
+        ))
+    for item in request_events:
+        if item.event_type == "request.created":
+            continue
+        request = next((candidate for candidate in requests if candidate.id == item.service_request_id), None)
+        timeline.append(EquipmentTimelineEntry(
+            id=f"request-event:{item.id}", kind=item.event_type, occurred_at=item.created_at,
+            title=item.message, request_id=item.service_request_id,
+            request_number=request.number if request else None,
+        ))
+    for repair, technician_name in repair_rows:
+        request = request_by_task.get(repair.task_id) or request_by_ticket.get(repair.ticket_id)
+        timeline.append(EquipmentTimelineEntry(
+            id=f"repair:{repair.id}", kind="repair.completed", occurred_at=repair.closed_at or repair.created_at,
+            title="Ремонт и сервисный акт", description=repair.description,
+            request_id=request.id if request else None, request_number=request.number if request else None,
+            repair_id=repair.id, task_id=repair.task_id, parts_used=parts_by_repair.get(repair.id, []),
+            has_service_act=True,
+        ))
+    legacy_tasks = (await db.scalars(select(Task).where(
+        Task.organization_id == user.organization_id, Task.equipment_id == equipment_id,
+    ))).all()
+    for task in legacy_tasks:
+        if task.id not in request_by_task:
+            timeline.append(EquipmentTimelineEntry(
+                id=f"task:{task.id}", kind="task.created", occurred_at=task.created_at,
+                title=task.title, description=task.description, task_id=task.id,
+            ))
+    legacy_tickets = (await db.scalars(select(Ticket).where(
+        Ticket.organization_id == user.organization_id, Ticket.equipment_id == equipment_id,
+    ))).all()
+    for ticket in legacy_tickets:
+        if ticket.id not in request_by_ticket:
+            timeline.append(EquipmentTimelineEntry(
+                id=f"ticket:{ticket.id}", kind="ticket.created", occurred_at=ticket.created_at,
+                title="Обращение через QR", description=ticket.comment or ", ".join(ticket.symptom_tags or []),
+            ))
+    timeline.sort(key=lambda item: str(item.occurred_at or ""), reverse=True)
+
+    documents: list[EquipmentDocumentEntry] = []
+    for repair, _ in repair_rows:
+        documents.append(EquipmentDocumentEntry(
+            id=f"act:{repair.id}", kind="service_act", title="Сервисный акт PDF",
+            created_at=repair.closed_at or repair.created_at, repair_id=repair.id, media_type="application/pdf",
+        ))
+        for attachment in attachments_by_repair.get(repair.id, []):
+            documents.append(EquipmentDocumentEntry(
+                id=f"attachment:{attachment.id}", kind=attachment.kind,
+                title=attachment.original_name or "Вложение к сервисному акту",
+                created_at=attachment.uploaded_at, repair_id=repair.id, attachment_id=attachment.id,
+                media_type=attachment.media_type,
+            ))
+    documents.sort(key=lambda item: str(item.created_at or ""), reverse=True)
+    active_request_model = next((item for item in requests if item.status not in {"completed", "closed", "cancelled"}), None)
+    active_request = EquipmentActiveRequest(
+        id=active_request_model.id, number=active_request_model.number, status=active_request_model.status,
+        priority=active_request_model.priority, title=active_request_model.title,
+        description=active_request_model.description,
+        assigned_technician_name=technicians.get(active_request_model.assigned_technician_id),
+        created_at=active_request_model.created_at,
+    ) if active_request_model else None
+
     data = EquipmentOut.model_validate(equipment).model_dump()
     data["name"] = equipment_type_name or equipment.name
-    return EquipmentPassport(**data, history=history)
+    return EquipmentPassport(
+        **data, client_name=client.legal_name or client.name, site_name=site.name, site_address=site.address,
+        active_request=active_request, timeline=timeline, documents=documents, history=history,
+    )
 
 
 @router.get("/{equipment_id}/qr", response_class=Response)

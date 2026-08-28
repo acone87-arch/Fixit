@@ -58,7 +58,48 @@ class RepairHistoryEntry(BaseModel):
     parts_used: list[dict]
 
 
+class EquipmentActiveRequest(BaseModel):
+    id: uuid.UUID
+    number: int
+    status: str
+    priority: str
+    title: str
+    description: str | None = None
+    assigned_technician_name: str | None = None
+    created_at: datetime
+
+
+class EquipmentTimelineEntry(BaseModel):
+    id: str
+    kind: str
+    occurred_at: datetime | None = None
+    title: str
+    description: str | None = None
+    request_id: uuid.UUID | None = None
+    request_number: int | None = None
+    repair_id: uuid.UUID | None = None
+    task_id: uuid.UUID | None = None
+    parts_used: list[dict] = []
+    has_service_act: bool = False
+
+
+class EquipmentDocumentEntry(BaseModel):
+    id: str
+    kind: str
+    title: str
+    created_at: datetime | None = None
+    repair_id: uuid.UUID | None = None
+    attachment_id: uuid.UUID | None = None
+    media_type: str | None = None
+
+
 class EquipmentPassport(EquipmentOut):
+    client_name: str | None = None
+    site_name: str | None = None
+    site_address: str | None = None
+    active_request: EquipmentActiveRequest | None = None
+    timeline: list[EquipmentTimelineEntry] = []
+    documents: list[EquipmentDocumentEntry] = []
     history: list[RepairHistoryEntry] = []
 
 
