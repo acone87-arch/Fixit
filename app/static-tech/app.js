@@ -102,8 +102,15 @@ async function cacheEquipmentPassport(passport) {
 }
 
 async function uploadAttachment(repairId, attachment) {
+  if (!repairId) throw new Error('Не найден ремонт для вложения');
   const headers = state.token ? { Authorization: `Bearer ${state.token}` } : {};
-  const data = await fetch(attachment.data_url).then((res) => res.blob());
+  let data = attachment.file instanceof Blob ? attachment.file : null;
+  if (!data && attachment.data_url) {
+    const response = await fetch(attachment.data_url);
+    if (!response.ok) throw new Error('Не удалось прочитать сохранённое фото');
+    data = await response.blob();
+  }
+  if (!(data instanceof Blob) || !data.size) throw new Error('Сохранённое фото повреждено');
   const form = new FormData();
   form.append('kind', attachment.kind);
   form.append('file', data, attachment.file_name || `${attachment.kind}.jpg`);
@@ -147,8 +154,8 @@ async function getDeviceId() {
 // ---------- Соединение и фоновая синхронизация ----------
 
 async function pendingCount() {
-  const items = await TechDB.getAll('pendingRepairs');
-  return items.length;
+  const [repairs, attachments] = await Promise.all([TechDB.getAll('pendingRepairs'), TechDB.getAll('pendingAttachments')]);
+  return repairs.length + attachments.length;
 }
 
 async function renderConnStrip() {
@@ -170,24 +177,31 @@ async function syncPendingRepairs() {
   const resultsById = new Map();
   if (!navigator.onLine) return resultsById;
   const pending = await TechDB.getAll('pendingRepairs');
-  if (!pending.length) return resultsById;
   state.syncing = true; renderConnStrip();
   try {
-    const device_id = await getDeviceId();
-    const payload = pending.map(({ _equipmentName, ...rest }) => rest);
-    const res = await apiFetch('/v1/sync/repairs', { method: 'POST', body: JSON.stringify({ device_id, repairs: payload }) });
-    for (const r of res.results) {
-      resultsById.set(r.local_uuid, r);
-      if (r.resolved_as === 'failed') {
-        toast(`Не удалось отправить ремонт: ${r.error}`, 'error');
-      } else {
-        await TechDB.delete('pendingRepairs', r.local_uuid);
-        if (r.resolved_as === 'applied_with_conflict') {
-          toast('Ремонт отправлен, но оборудование менялось без вас — диспетчер проверит вручную', 'info');
+    if (pending.length) {
+      const device_id = await getDeviceId();
+      const payload = pending.map(({ _equipmentName, ...rest }) => rest);
+      const res = await apiFetch('/v1/sync/repairs', { method: 'POST', body: JSON.stringify({ device_id, repairs: payload }) });
+      for (const r of res.results) {
+        resultsById.set(r.local_uuid, r);
+        if (r.resolved_as === 'failed') {
+          toast(`Не удалось отправить ремонт: ${r.error}`, 'error');
+        } else {
+          const attachments = await TechDB.getAll('pendingAttachments');
+          for (const attachment of attachments.filter((item) => item.local_uuid === r.local_uuid)) {
+            attachment.repair_id = r.server_id;
+            await TechDB.put('pendingAttachments', attachment);
+          }
+          await TechDB.delete('pendingRepairs', r.local_uuid);
+          if (r.resolved_as === 'applied_with_conflict') {
+            toast('Ремонт отправлен, но оборудование менялось без вас — диспетчер проверит вручную', 'info');
+          }
         }
       }
     }
     await syncPendingAttachments(resultsById);
+    if ((await TechDB.getAll('pendingAttachments')).length) registerBackgroundSync();
   } catch (e) {
     toast('Не удалось синхронизировать: ' + e.message, 'error');
   }

@@ -78,6 +78,19 @@ function createUuid() {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
+function normalizeDraftPhoto(photo, index = 0) {
+  const blob = photo?.file || photo?.blob;
+  if (!(blob instanceof Blob) || !blob.size) return null;
+  const name = photo.name || blob.name || `photo-${Date.now()}-${index + 1}.jpg`;
+  const type = photo.type || blob.type || 'image/jpeg';
+  const file = typeof File !== 'undefined' && blob instanceof File ? blob : new File([blob], name, { type });
+  return { file, url: URL.createObjectURL(file), approvalAttachmentId: photo.approvalAttachmentId || null };
+}
+
+function hasDraftPhotoFile(photo) {
+  return Boolean(photo?.file instanceof Blob && photo.file.size);
+}
+
 const RequestDraftStore = (() => {
   if (!window.indexedDB) return { get: async () => null, put: async () => null, remove: async () => null };
   const dbPromise = new Promise((resolve, reject) => {
@@ -501,9 +514,10 @@ async function openTechnicianRequestWorkspace(id, loadedRequest = null) {
     draft.work = persistedDraft.work || '';
     draft.comment = persistedDraft.comment || '';
     draft.usedParts = persistedDraft.usedParts || {};
-    draft.photos = (persistedDraft.photos || []).map((photo) => ({ ...photo, url: URL.createObjectURL(photo.blob) }));
+    draft.photos = (persistedDraft.photos || []).map(normalizeDraftPhoto).filter(Boolean);
   }
-  let completionLocalUuid = null;
+  let completionLocalUuid = persistedDraft?.completionLocalUuid || null;
+  let completionRepairId = persistedDraft?.completionRepairId || null;
   let completionInFlight = false;
   let draftCompleted = false;
   const statusText = { assigned: 'Назначена', on_the_way: 'В пути', arrived: 'На объекте', in_progress: 'В работе', waiting_parts: 'Ждёт запчасти', waiting_approval: 'Ждёт согласование', completed: 'Выполнена' };
@@ -520,7 +534,7 @@ async function openTechnicianRequestWorkspace(id, loadedRequest = null) {
   const persistDraft = async () => {
     if (draftCompleted) return;
     rememberDraft();
-    await RequestDraftStore.put({ key: draftKey, diagnostic: draft.diagnostic, work: draft.work, comment: draft.comment, usedParts: draft.usedParts, photos: draft.photos.map(({ file, approvalAttachmentId }) => ({ blob: file, name: file.name, type: file.type, approvalAttachmentId })), timestamp: new Date().toISOString() }).catch(() => null);
+    await RequestDraftStore.put({ key: draftKey, diagnostic: draft.diagnostic, work: draft.work, comment: draft.comment, usedParts: draft.usedParts, photos: draft.photos.filter(hasDraftPhotoFile).map(({ file, approvalAttachmentId }) => ({ blob: file, name: file.name, type: file.type, approvalAttachmentId })), completionLocalUuid, completionRepairId, timestamp: new Date().toISOString() }).catch(() => null);
   };
   const releasePhotos = () => draft.photos.forEach((photo) => URL.revokeObjectURL(photo.url));
   let workCameraStream = null;
@@ -529,7 +543,10 @@ async function openTechnicianRequestWorkspace(id, loadedRequest = null) {
   const persistOnBackground = (lifecycleEvent) => { if (document.visibilityState === 'hidden' || lifecycleEvent?.type === 'pagehide') persistDraft(); };
   const addDraftFiles = async (files) => {
     const available = 5 - draft.photos.length;
-    for (const file of [...files].slice(0, available)) draft.photos.push({ file, url: URL.createObjectURL(file) });
+    for (const file of [...files].slice(0, available)) {
+      const photo = normalizeDraftPhoto({ file, name: file.name, type: file.type }, draft.photos.length);
+      if (photo) draft.photos.push(photo);
+    }
     await persistDraft();
     draw();
   };
@@ -559,6 +576,29 @@ async function openTechnicianRequestWorkspace(id, loadedRequest = null) {
       canvas.toBlob(async (blob) => { if (!blob) return toast('Не удалось сохранить снимок', 'error'); await addDraftFiles([new File([blob], `photo-${Date.now()}.jpg`, { type: 'image/jpeg' })]); refreshCount(); }, 'image/jpeg', .88);
     });
   };
+  const uploadPendingRepairPhotos = async () => {
+    if (!completionRepairId) throw new Error('Не найден созданный ремонт для загрузки фото');
+    const pending = draft.photos.map((photo, index) => ({ photo, index })).filter(({ photo }) => hasDraftPhotoFile(photo));
+    const uploads = await Promise.allSettled(pending.map(async ({ photo }) => {
+      const form = new FormData();
+      form.append('kind', 'after');
+      form.append('file', photo.file, photo.file.name || 'photo.jpg');
+      await api(`/repairs/${completionRepairId}/attachments`, { method: 'POST', body: form });
+    }));
+    const successfulIndexes = pending.filter((_, index) => uploads[index].status === 'fulfilled').map(({ index }) => index).sort((a, b) => b - a);
+    successfulIndexes.forEach((index) => {
+      const [photo] = draft.photos.splice(index, 1);
+      if (photo?.url) URL.revokeObjectURL(photo.url);
+    });
+    await persistDraft();
+    return uploads.filter((upload) => upload.status === 'rejected').length;
+  };
+  const refreshCompletedRequest = async () => {
+    request = await api(`/service-requests/${request.id}`);
+    request.history = Array.isArray(request.history) ? request.history : [];
+    request.attachments = Array.isArray(request.attachments) ? request.attachments : [];
+    request.request_attachments = Array.isArray(request.request_attachments) ? request.request_attachments : [];
+  };
   const draw = () => {
     const timeline = request.history.map((item) => {
       const resumedAfterParts = item.type === 'work.started' && item.details?.from === 'waiting_parts';
@@ -576,7 +616,8 @@ async function openTechnicianRequestWorkspace(id, loadedRequest = null) {
     const action = nextAction
       ? `<button class="btn btn-primary tech-request-main" id="request-next" data-status="${nextAction[0]}">${nextAction[1]}</button>`
       : request.status === 'in_progress' ? '<button class="btn btn-primary tech-request-main" id="request-complete">Завершить работу</button>'
-      : request.status === 'waiting_parts' ? '<button class="btn btn-primary tech-request-main" id="request-resume">Продолжить работу</button>' : '';
+      : request.status === 'waiting_parts' ? '<button class="btn btn-primary tech-request-main" id="request-resume">Продолжить работу</button>'
+      : request.status === 'completed' && completionRepairId && draft.photos.length ? '<button class="btn btn-primary tech-request-main" id="request-retry-photos">Повторить загрузку фото</button>' : '';
     content.innerHTML = `<section class="tech-request-workspace"><header class="tech-request-header"><button class="tech-request-back" id="request-back">←</button><div><span>Заявка SR-${String(request.number).padStart(5, '0')}</span><h1>${esc(request.title || request.description || 'Сервисная заявка')}</h1></div>${statusBadge()}</header><div class="tech-request-scroll"><section class="tech-request-meta"><div><small>Приоритет</small><strong>${request.priority === 'urgent' ? 'Срочно' : 'Плановая'}</strong></div><div><small>Создана</small><strong>${fmtDate(request.created_at)}</strong></div></section><section class="tech-request-section"><h2>Клиент и объект</h2><strong>${esc(request.client_name || request.site_name || 'Клиент')}</strong><p>${esc(request.site_name || 'Объект не указан')}${request.site_address ? ` · ${esc(request.site_address)}` : ''}</p>${request.contact_name || request.contact_phone ? `<a href="tel:${esc(request.contact_phone || '')}">${esc(request.contact_name || 'Контакт')} · ${esc(request.contact_phone || '')}</a>` : ''}</section><section class="tech-request-section tech-request-equipment"><div><h2>Оборудование</h2><button class="btn btn-ghost btn-sm" id="request-passport">Открыть паспорт</button></div>${equipmentPhotoUrl ? `<img class="tech-request-equipment-photo" src="${equipmentPhotoUrl}" alt="Фото оборудования">` : '<div class="tech-request-equipment-placeholder">FIXIT</div>'}<strong>${esc(request.equipment_type || request.equipment_name)}</strong><p>${esc([request.manufacturer, request.model].filter(Boolean).join(' ') || 'Модель не указана')} · <span class="mono">S/N ${esc(request.serial_number)}</span></p>${badge(EQUIPMENT_STATUS, request.equipment_status || 'working')}</section><section class="tech-request-section"><h2>Проблема</h2><p>${esc(request.description || 'Описание не добавлено')}</p><div class="tech-request-files">${attachments}</div></section>${workArea}<section class="tech-request-section"><h2>История</h2><div class="tech-request-timeline-list">${timeline}</div></section></div><footer>${action}</footer></section>`;
     content.querySelector('#request-back').addEventListener('click', () => { disposeWorkspace(); activeTechnicianWorkspaceCleanup = null; location.hash = 'requests'; });
     content.querySelector('#request-passport').addEventListener('click', () => openEquipmentPassport(request.equipment_id));
@@ -584,10 +625,22 @@ async function openTechnicianRequestWorkspace(id, loadedRequest = null) {
     const transition = async (status, note = null, details = null) => { rememberDraft(); await persistDraft(); try { request = await api(`/service-requests/${request.id}/status`, { method: 'PATCH', body: JSON.stringify({ status, note, details }) }); request.history = Array.isArray(request.history) ? request.history : []; request.attachments = Array.isArray(request.attachments) ? request.attachments : []; request.request_attachments = Array.isArray(request.request_attachments) ? request.request_attachments : []; if (workStatuses.has(status) && !stock.length) stock = await api('/warehouses/mine/stock').catch(() => []); draw(); } catch (e) { toast(e.message, 'error'); } };
     content.querySelector('#request-next')?.addEventListener('click', () => transition(content.querySelector('#request-next').dataset.status));
     content.querySelector('#request-resume')?.addEventListener('click', () => transition('in_progress'));
+    content.querySelector('#request-retry-photos')?.addEventListener('click', async () => {
+      if (completionInFlight) return;
+      completionInFlight = true;
+      try {
+        const failedUploads = await uploadPendingRepairPhotos();
+        await refreshCompletedRequest();
+        if (failedUploads) toast(`Не удалось загрузить ${failedUploads} фото. Повторите попытку позже.`, 'error');
+        else { releasePhotos(); draft.photos = []; draftCompleted = true; await RequestDraftStore.remove(draftKey).catch(() => null); toast('Все фотографии загружены'); }
+        draw();
+      } catch (error) { toast(error.message || 'Не удалось загрузить фото', 'error'); }
+      finally { completionInFlight = false; }
+    });
     content.querySelector('#request-wait-parts')?.addEventListener('click', () => { rememberDraft(); transition('waiting_parts', draft.comment.trim() || null); });
     content.querySelector('#request-wait-approval')?.addEventListener('click', async () => {
       rememberDraft();
-      const pendingPhotos = draft.photos.filter((photo) => !photo.approvalAttachmentId);
+      const pendingPhotos = draft.photos.filter((photo) => !photo.approvalAttachmentId && hasDraftPhotoFile(photo));
       if (pendingPhotos.length) {
         const uploads = await Promise.allSettled(pendingPhotos.map(async (photo) => {
           const form = new FormData(); form.append('kind', 'approval'); form.append('file', photo.file);
@@ -615,14 +668,23 @@ async function openTechnicianRequestWorkspace(id, loadedRequest = null) {
       const parts_used = Object.entries(draft.usedParts).filter(([, quantity]) => quantity > 0).map(([part_id, quantity]) => ({ part_id, quantity }));
       const started = request.history.find((item) => item.type === 'work.started')?.at || new Date().toISOString();
       try {
-        completionLocalUuid ||= createUuid();
-        const result = await api('/v1/sync/repairs', { method: 'POST', body: JSON.stringify({ device_id: 'web-technician-workspace', repairs: [{ local_uuid: completionLocalUuid, equipment_id: request.equipment_id, task_id: request.task_id, ticket_id: request.ticket_id, fault_type: draft.diagnostic.trim() || null, description: [draft.diagnostic.trim() && `Диагностика: ${draft.diagnostic.trim()}`, `Работы: ${draft.work.trim()}`, draft.comment.trim() && `Комментарий: ${draft.comment.trim()}`].filter(Boolean).join('\n'), labor_minutes: 0, client_signer_name: null, client_signed_at: null, started_at: started, closed_at: new Date().toISOString(), device_updated_at: new Date().toISOString(), base_equipment_version: request.equipment_version || 1, parts_used }] }) });
-        const repairId = result.results?.[0]?.server_id; if (!repairId || result.results?.[0]?.resolved_as === 'failed') throw new Error(result.results?.[0]?.error || 'Не удалось завершить работы');
-        const uploads = await Promise.allSettled(draft.photos.map(async ({ file }) => { const form = new FormData(); form.append('kind', 'after'); form.append('file', file); await api(`/repairs/${repairId}/attachments`, { method: 'POST', body: form }); }));
-        const failedUploads = uploads.filter((item) => item.status === 'rejected').length;
-        request = await api(`/service-requests/${request.id}`); request.history = Array.isArray(request.history) ? request.history : []; request.attachments = Array.isArray(request.attachments) ? request.attachments : []; request.request_attachments = Array.isArray(request.request_attachments) ? request.request_attachments : [];
-        releasePhotos(); draft.photos = []; draftCompleted = true; await RequestDraftStore.remove(draftKey).catch(() => null);
-        toast(failedUploads ? `Ремонт завершён, но ${failedUploads} из ${uploads.length} фото не загрузилось` : 'Работы завершены, сервисный акт сформирован', failedUploads ? 'error' : 'success'); draw();
+        if (!completionRepairId) {
+          completionLocalUuid ||= createUuid();
+          await persistDraft();
+          const result = await api('/v1/sync/repairs', { method: 'POST', body: JSON.stringify({ device_id: 'web-technician-workspace', repairs: [{ local_uuid: completionLocalUuid, equipment_id: request.equipment_id, task_id: request.task_id, ticket_id: request.ticket_id, fault_type: draft.diagnostic.trim() || null, description: [draft.diagnostic.trim() && `Диагностика: ${draft.diagnostic.trim()}`, `Работы: ${draft.work.trim()}`, draft.comment.trim() && `Комментарий: ${draft.comment.trim()}`].filter(Boolean).join('\n'), labor_minutes: 0, client_signer_name: null, client_signed_at: null, started_at: started, closed_at: new Date().toISOString(), device_updated_at: new Date().toISOString(), base_equipment_version: request.equipment_version || 1, parts_used }] }) });
+          completionRepairId = result.results?.[0]?.server_id;
+          if (!completionRepairId || result.results?.[0]?.resolved_as === 'failed') throw new Error(result.results?.[0]?.error || 'Не удалось завершить работы');
+          await persistDraft();
+        }
+        const failedUploads = await uploadPendingRepairPhotos();
+        await refreshCompletedRequest();
+        if (failedUploads) {
+          toast(`Ремонт завершён, но ${failedUploads} фото не загрузилось. Повторите загрузку.`, 'error');
+        } else {
+          releasePhotos(); draft.photos = []; draftCompleted = true; await RequestDraftStore.remove(draftKey).catch(() => null);
+          toast('Работы завершены, сервисный акт сформирован');
+        }
+        draw();
       } catch (e) { toast(e.message, 'error'); } finally { completionInFlight = false; }
     });
   };
