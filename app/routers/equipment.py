@@ -66,7 +66,7 @@ async def list_equipment(db: AsyncSession = Depends(get_db), user: CurrentUser =
 async def create_equipment(
     payload: EquipmentCreate,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_roles(UserRole.admin, UserRole.dispatcher)),
+    user=Depends(require_roles(UserRole.admin, UserRole.dispatcher, UserRole.technician)),
 ):
     equipment_type = await db.scalar(select(EquipmentType).where(
         EquipmentType.id == payload.equipment_type_id,

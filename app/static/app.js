@@ -180,7 +180,7 @@ const NAV = {
     ['warehouse', 'Склад и запчасти'],
   ],
   technician: [
-    ['requests', 'Мои заявки'], ['tasks', 'Мои наряды'],
+    ['pulse', 'Pulse'], ['requests', 'Мои заявки'], ['equipment', 'Оборудование'], ['tasks', 'Мои наряды'],
     ['warehouse', 'Мой склад'],
   ],
 };
@@ -290,7 +290,7 @@ function openQrQuickAction() {
 }
 
 async function router() {
-  const defaultRoute = state.me?.role === 'technician' ? 'tasks' : 'pulse';
+  const defaultRoute = 'pulse';
   state.route = location.hash.replace('#', '') || defaultRoute;
   const allowedRoutes = (NAV[state.me?.role] || []).map(([key]) => key);
   if (!allowedRoutes.includes(state.route)) {
@@ -340,6 +340,7 @@ async function renderServiceRequests(content) {
 // ============================================================
 
 async function renderPulse(content) {
+  if (state.me.role === 'technician') return renderTechnicianPulse(content);
   const [clients, sites, equipment, tasks, tickets, users] = await Promise.all([
     api('/clients'), api('/sites'), api('/equipment'), api('/tasks'), api('/tickets'), api('/users'), ensureEquipmentTypes(),
   ]);
@@ -400,6 +401,48 @@ async function renderPulse(content) {
         <div class="network-strip"><span>${clients.length}<small>клиентов</small></span><span>${sites.length}<small>объектов</small></span><span>${uptime}%<small>готовность</small></span></div>
       </section>
     </div>`;
+
+  content.querySelectorAll('[data-jump]').forEach((button) => {
+    button.addEventListener('click', () => { location.hash = button.dataset.jump; });
+  });
+  content.querySelectorAll('[data-quick="qr"]').forEach((button) => button.addEventListener('click', openQrQuickAction));
+}
+
+async function renderTechnicianPulse(content) {
+  const [requests, tasks, equipment] = await Promise.all([
+    api('/service-requests'), api('/tasks'), api('/equipment'), ensureEquipmentTypes(),
+  ]);
+  const active = requests.filter((item) => !['completed', 'closed', 'cancelled'].includes(item.status));
+  const inProgress = requests.filter((item) => ['on_the_way', 'in_progress'].includes(item.status));
+  const queued = requests.filter((item) => ['new', 'assigned', 'waiting_parts', 'waiting_approval'].includes(item.status));
+  const today = new Date();
+  const overdue = tasks.filter((task) => task.due_at && new Date(task.due_at) < today && !['closed', 'cancelled'].includes(task.status));
+  const statusLabel = { new: 'Новая', assigned: 'Назначена', on_the_way: 'В пути', in_progress: 'В работе', waiting_parts: 'Ждёт запчасти', waiting_approval: 'Ждёт согласование', completed: 'Выполнена', closed: 'Закрыта', cancelled: 'Отменена' };
+  const requestBadge = (item) => `<span class="badge badge-${['completed', 'closed'].includes(item.status) ? 'good' : item.status.startsWith('waiting') ? 'amber' : item.status === 'cancelled' ? 'idle' : 'warn'}"><span class="badge-dot"></span>${esc(statusLabel[item.status] || item.status)}</span>`;
+  const nextRequests = [...active].sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || ''))).slice(0, 6);
+  const attentionEquipment = equipment.filter((item) => item.status === 'needs_repair').length;
+
+  content.innerHTML = `
+    <section class="pulse-command technician-pulse">
+      <div class="pulse-command-copy"><div class="eyebrow">FIXIT PULSE · МОЯ СМЕНА</div><h1>Пульс мастера</h1><p>Назначенные работы, маршрут по объектам и очередь на сегодня.</p></div>
+      <div class="pulse-command-live"><span></span><div><b>На линии</b><small>${active.length} активных заявок</small></div></div>
+      <div class="pulse-orbit orbit-a"></div><div class="pulse-orbit orbit-b"></div>
+    </section>
+    <div class="metric-grid technician-metrics">
+      <button class="metric-card metric-new" data-jump="requests"><span class="metric-label">Назначено мне</span><strong>${active.length}</strong><small>всего в работе и очереди</small></button>
+      <button class="metric-card metric-dark" data-jump="requests"><span class="metric-label">В работе</span><strong>${inProgress.length}</strong><small>в пути или на объекте</small></button>
+      <button class="metric-card metric-alert" data-jump="tasks"><span class="metric-label">Просрочено</span><strong>${overdue.length}</strong><small>требует внимания</small></button>
+      <button class="metric-card metric-accent" data-jump="equipment"><span class="metric-label">Оборудование</span><strong>${attentionEquipment}</strong><small>единиц требуют ремонта</small></button>
+    </div>
+    <section class="quick-actions"><div class="section-caption">Рабочие действия</div><div class="quick-action-grid technician-actions">
+      <button data-jump="requests"><span class="quick-action-icon qa-ticket">→</span><b>Моя очередь</b><small>${queued.length} ждут выполнения</small></button>
+      <button data-jump="tasks"><span class="quick-action-icon qa-task">↗</span><b>Наряды</b><small>открыть работы и акты</small></button>
+      <button data-quick="qr"><span class="quick-action-icon qa-qr">⌘</span><b>Сканировать QR</b><small>открыть паспорт техники</small></button>
+      <button data-jump="equipment"><span class="quick-action-icon qa-equipment">◌</span><b>Оборудование</b><small>паспорта и новая единица</small></button>
+    </div></section>
+    <section class="card pulse-panel technician-queue"><div class="panel-head"><div><span class="eyebrow">ОЧЕРЕДЬ</span><h2>Следующие заявки</h2></div><button class="text-link" data-jump="requests">Все заявки →</button></div>
+      <div class="pulse-list">${nextRequests.length ? nextRequests.map((item) => `<button class="pulse-row" data-jump="requests"><span class="priority-mark ${item.priority === 'urgent' ? 'urgent' : ''}"></span><div><strong>SR-${String(item.number).padStart(5, '0')} · ${esc(item.description || 'Без описания')}</strong><small>${esc(item.client_name || 'Клиент')} · ${esc(item.site_name || 'Объект не указан')} · ${esc(item.equipment_name || '')}</small></div><div>${requestBadge(item)}</div></button>`).join('') : '<div class="pulse-empty">В очереди нет назначенных заявок</div>'}</div>
+    </section>`;
 
   content.querySelectorAll('[data-jump]').forEach((button) => {
     button.addEventListener('click', () => { location.hash = button.dataset.jump; });
@@ -533,7 +576,7 @@ async function renderEquipment(content) {
   const typeName = (id) => (state.equipmentTypes.find((t) => t.id === id) || {}).name || '—';
   const siteOf = (id) => state.sites.find((site) => site.id === id);
   const clientOf = (id) => state.clients.find((client) => client.id === id);
-  const canEdit = state.me.role !== 'technician';
+  const canEdit = true;
   const activeSites = state.sites.filter((site) => site.is_active);
 
   content.innerHTML = `
