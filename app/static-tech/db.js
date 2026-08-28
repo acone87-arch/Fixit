@@ -6,7 +6,7 @@
 
 const TechDB = (() => {
   const DB_NAME = 'fixit-tech-db';
-  const DB_VERSION = 1;
+  const DB_VERSION = 2;
   let dbPromise = null;
 
   function open() {
@@ -20,6 +20,10 @@ const TechDB = (() => {
         if (!db.objectStoreNames.contains('equipment')) db.createObjectStore('equipment', { keyPath: 'id' });
         if (!db.objectStoreNames.contains('stock')) db.createObjectStore('stock', { keyPath: 'part_id' });
         if (!db.objectStoreNames.contains('pendingRepairs')) db.createObjectStore('pendingRepairs', { keyPath: 'local_uuid' });
+        // Фото «до»/«после» и подпись живут рядом с офлайн-актом. Храним
+        // сжатый data URL: после синхронизации ремонта он загрузится отдельным
+        // multipart-запросом и будет удалён из устройства.
+        if (!db.objectStoreNames.contains('pendingAttachments')) db.createObjectStore('pendingAttachments', { keyPath: 'id' });
       };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);

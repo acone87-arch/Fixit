@@ -52,6 +52,9 @@ class RepairHistoryEntry(BaseModel):
     technician_name: str
     fault_type: str | None
     description: str
+    labor_minutes: int = 0
+    client_signer_name: str | None = None
+    client_signed_at: datetime | None = None
     parts_used: list[dict]
 
 

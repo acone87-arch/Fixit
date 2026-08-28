@@ -214,6 +214,9 @@ async def get_passport(equipment_id: uuid.UUID, db: AsyncSession = Depends(get_d
                 technician_name=technician_name,
                 fault_type=repair.fault_type,
                 description=repair.description,
+                labor_minutes=repair.labor_minutes,
+                client_signer_name=repair.client_signer_name,
+                client_signed_at=repair.client_signed_at,
                 parts_used=[{"part_name": name, "quantity": qty} for name, qty in parts_rows],
             )
         )

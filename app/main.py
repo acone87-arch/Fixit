@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.routers import auth, customers, equipment, organizations, sync, tasks, tickets, users, warehouses
+from app.routers import auth, customers, equipment, organizations, repairs, sync, tasks, tickets, users, warehouses
 
 app = FastAPI(title="Service & Warehouse Management API", version="0.1.0")
 
@@ -28,6 +28,7 @@ app.include_router(warehouses.parts_router)
 app.include_router(tickets.public_router)
 app.include_router(tickets.admin_router)
 app.include_router(sync.router)
+app.include_router(repairs.router)
 
 
 @app.get("/health", tags=["meta"])

@@ -83,6 +83,43 @@ async function apiFetch(path, options = {}) {
   return text ? JSON.parse(text) : null;
 }
 
+async function uploadAttachment(repairId, attachment) {
+  const headers = state.token ? { Authorization: `Bearer ${state.token}` } : {};
+  const data = await fetch(attachment.data_url).then((res) => res.blob());
+  const form = new FormData();
+  form.append('kind', attachment.kind);
+  form.append('file', data, attachment.file_name || `${attachment.kind}.jpg`);
+  const res = await fetch(`/api/repairs/${repairId}/attachments`, { method: 'POST', headers, body: form });
+  if (!res.ok) {
+    let message = 'Не удалось загрузить вложение';
+    try { message = (await res.json()).detail || message; } catch (_) {}
+    throw new Error(message);
+  }
+  return res.json();
+}
+
+async function syncPendingAttachments(resultsById = new Map()) {
+  if (!navigator.onLine) return;
+  const attachments = await TechDB.getAll('pendingAttachments');
+  for (const attachment of attachments) {
+    const result = resultsById.get(attachment.local_uuid);
+    if (!attachment.repair_id && result?.server_id) {
+      attachment.repair_id = result.server_id;
+      await TechDB.put('pendingAttachments', attachment);
+    }
+    if (!attachment.repair_id) continue;
+    try {
+      await uploadAttachment(attachment.repair_id, attachment);
+      await TechDB.delete('pendingAttachments', attachment.id);
+    } catch (e) {
+      // Ремонт уже закрыт, поэтому фотография останется в локальной очереди и
+      // будет повторена при следующем выходе приложения в онлайн.
+      toast(`Фото акта пока не отправлено: ${e.message}`, 'info');
+      break;
+    }
+  }
+}
+
 async function getDeviceId() {
   let id = await TechDB.kvGet('deviceId');
   if (!id) { id = createUuid(); await TechDB.kvSet('deviceId', id); }
@@ -132,6 +169,7 @@ async function syncPendingRepairs() {
         }
       }
     }
+    await syncPendingAttachments(resultsById);
   } catch (e) {
     toast('Не удалось синхронизировать: ' + e.message, 'error');
   }
@@ -295,6 +333,24 @@ async function renderActScreen(screen) {
   let selectedFault = FAULT_TYPES[0];
   const usedQty = {};
   let savedPayload = null;
+  const media = { before: [], after: [], signature: null };
+  const formValues = { description: '', labor: '0', signer: '', confirmed: false };
+
+  function mediaSummary(kind) {
+    const item = kind === 'signature' ? (media.signature ? [media.signature] : []) : media[kind];
+    return item.length ? `<div class="text-soft" style="font-size:12px;margin-top:6px">Добавлено: ${item.length}</div>` : '';
+  }
+
+  async function compressPhoto(file) {
+    const source = await new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = reject; reader.readAsDataURL(file); });
+    const image = await new Promise((resolve, reject) => { const img = new Image(); img.onload = () => resolve(img); img.onerror = reject; img.src = source; });
+    const maxSide = 1600;
+    const scale = Math.min(1, maxSide / Math.max(image.width, image.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(image.width * scale)); canvas.height = Math.max(1, Math.round(image.height * scale));
+    canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL('image/jpeg', 0.78);
+  }
 
   function partsHtml() {
     return stock.length ? stock.map((p) => `
@@ -309,6 +365,12 @@ async function renderActScreen(screen) {
   }
 
   function draw() {
+    if (screen.querySelector('#f-desc')) {
+      formValues.description = screen.querySelector('#f-desc').value;
+      formValues.labor = screen.querySelector('#f-labor').value;
+      formValues.signer = screen.querySelector('#f-signer').value;
+      formValues.confirmed = screen.querySelector('#f-confirmed').checked;
+    }
     screen.innerHTML = header('Акт ремонта', true) + `
       <div class="section-padding">
         <div class="text-soft" style="font-size:12.5px;margin-bottom:14px">${esc(eq.name)} · <span class="mono">${esc(eq.serial_number)}</span></div>
@@ -319,9 +381,15 @@ async function renderActScreen(screen) {
           </div>
         </div>
 
-        <div class="field"><label>Описание работ</label><textarea id="f-desc" placeholder="Что сделано…"></textarea></div>
+        <div class="field"><label>Описание работ</label><textarea id="f-desc" placeholder="Что сделано…">${esc(formValues.description)}</textarea></div>
+
+        <div class="field"><label>Время работы, мин.</label><input id="f-labor" type="number" min="0" step="5" value="${esc(formValues.labor)}" inputmode="numeric"></div>
 
         <div class="field"><label>Использованные запчасти (мой склад)</label><div id="parts-list">${partsHtml()}</div></div>
+
+        <div class="field"><label>Фото до ремонта</label><input id="f-before" type="file" accept="image/*" capture="environment" multiple>${mediaSummary('before')}</div>
+        <div class="field"><label>Фото после ремонта</label><input id="f-after" type="file" accept="image/*" capture="environment" multiple>${mediaSummary('after')}</div>
+        <div class="field"><label>Работы принял клиент</label><input id="f-signer" maxlength="255" placeholder="ФИО клиента" value="${esc(formValues.signer)}"><label style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:12px;text-transform:none;letter-spacing:0"><input id="f-confirmed" type="checkbox" style="width:auto" ${formValues.confirmed ? 'checked' : ''}> Подтверждаю, что клиент принял работы</label><div style="margin-top:10px"><canvas id="signature-pad" width="600" height="150" style="width:100%;height:90px;background:#fff;border:1px dashed var(--line);border-radius:8px;touch-action:none"></canvas><button class="btn btn-ghost" id="clear-signature" style="padding:5px 0;font-size:12px">${media.signature ? 'Подпись сохранена · очистить' : 'Очистить подпись'}</button></div></div>
 
         <div class="notice"><span>⟳</span><span>Акт сохраняется на устройстве и будет отправлен на сервер автоматически, как только появится связь.</span></div>
 
@@ -337,6 +405,31 @@ async function renderActScreen(screen) {
     screen.querySelectorAll('[data-minus]').forEach((btn) => btn.addEventListener('click', () => {
       const id = btn.dataset.minus; usedQty[id] = Math.max(0, (usedQty[id] || 0) - 1); draw();
     }));
+    for (const [kind, inputId] of [['before', '#f-before'], ['after', '#f-after']]) {
+      screen.querySelector(inputId).addEventListener('change', async (event) => {
+        const selected = [...event.target.files].slice(0, 3 - media[kind].length);
+        if (!selected.length) return;
+        try {
+          for (const file of selected) {
+            if (file.size > 12 * 1024 * 1024) throw new Error('Фото должно быть не больше 12 МБ');
+            media[kind].push({ id: createUuid(), kind, file_name: file.name || `${kind}.jpg`, data_url: await compressPhoto(file) });
+          }
+          draw();
+        } catch (e) { toast(e.message || 'Не удалось обработать фото', 'error'); }
+      });
+    }
+    const signaturePad = screen.querySelector('#signature-pad');
+    const signatureContext = signaturePad.getContext('2d');
+    signatureContext.strokeStyle = '#0F172A'; signatureContext.lineWidth = 2.5; signatureContext.lineCap = 'round';
+    let signing = false;
+    const signaturePoint = (event) => {
+      const box = signaturePad.getBoundingClientRect();
+      return { x: (event.clientX - box.left) * signaturePad.width / box.width, y: (event.clientY - box.top) * signaturePad.height / box.height };
+    };
+    signaturePad.addEventListener('pointerdown', (event) => { signing = true; signaturePad.setPointerCapture(event.pointerId); const p = signaturePoint(event); signatureContext.beginPath(); signatureContext.moveTo(p.x, p.y); });
+    signaturePad.addEventListener('pointermove', (event) => { if (!signing) return; const p = signaturePoint(event); signatureContext.lineTo(p.x, p.y); signatureContext.stroke(); });
+    signaturePad.addEventListener('pointerup', () => { if (!signing) return; signing = false; media.signature = { id: createUuid(), kind: 'signature', file_name: 'client-signature.png', data_url: signaturePad.toDataURL('image/png') }; });
+    screen.querySelector('#clear-signature').addEventListener('click', () => { media.signature = null; signatureContext.clearRect(0, 0, signaturePad.width, signaturePad.height); });
     screen.querySelector('#close-btn').addEventListener('click', submit);
   }
 
@@ -359,6 +452,10 @@ async function renderActScreen(screen) {
 
     const description = screen.querySelector('#f-desc').value.trim();
     if (!description) return toast('Опишите, что сделано', 'error');
+    const signer = screen.querySelector('#f-signer').value.trim();
+    const confirmed = screen.querySelector('#f-confirmed').checked;
+    if (signer && !confirmed) return toast('Подтвердите приёмку работ клиентом', 'error');
+    if (confirmed && (!signer || !media.signature)) return toast('Укажите ФИО и подпись клиента', 'error');
     const parts_used = Object.entries(usedQty).filter(([, q]) => q > 0).map(([part_id, quantity]) => ({ part_id, quantity }));
 
     const payload = {
@@ -368,6 +465,9 @@ async function renderActScreen(screen) {
       ticket_id: null,
       fault_type: selectedFault,
       description,
+      labor_minutes: Math.max(0, Number(screen.querySelector('#f-labor').value || 0)),
+      client_signer_name: confirmed ? signer : null,
+      client_signed_at: confirmed ? new Date().toISOString() : null,
       started_at: null,
       closed_at: new Date().toISOString(),
       device_updated_at: new Date().toISOString(),
@@ -375,6 +475,9 @@ async function renderActScreen(screen) {
       parts_used,
     };
     await TechDB.put('pendingRepairs', payload);
+    for (const attachment of [...media.before, ...media.after, ...(media.signature ? [media.signature] : [])]) {
+      await TechDB.put('pendingAttachments', { ...attachment, local_uuid: payload.local_uuid, repair_id: null });
+    }
     savedPayload = payload;
 
     // Оптимистично уменьшаем локальный кэш остатков — для немедленной обратной связи в UI,

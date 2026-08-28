@@ -30,6 +30,11 @@ class Repair(Base):
     technician_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
     fault_type: Mapped[str | None] = mapped_column(String(100))
     description: Mapped[str] = mapped_column(Text)
+    # Реквизиты сервисного акта. Поля заполняются в том же offline-пакете, что
+    # и сам ремонт, поэтому акт не теряется, если связь пропала на объекте.
+    labor_minutes: Mapped[int] = mapped_column(Integer, default=0)
+    client_signer_name: Mapped[str | None] = mapped_column(String(255))
+    client_signed_at: Mapped[datetime | None]
     started_at: Mapped[datetime | None]
     closed_at: Mapped[datetime | None]
     sync_status: Mapped[SyncStatus] = mapped_column(Enum(SyncStatus, name="sync_status"), default=SyncStatus.synced)
@@ -39,6 +44,9 @@ class Repair(Base):
 
     equipment: Mapped["Equipment"] = relationship(back_populates="repairs")  # noqa: F821
     parts_used: Mapped[list["RepairPart"]] = relationship(back_populates="repair", cascade="all, delete-orphan")
+    attachments: Mapped[list["RepairAttachment"]] = relationship(
+        back_populates="repair", cascade="all, delete-orphan"
+    )
 
 
 class RepairPart(Base):
@@ -58,7 +66,13 @@ class RepairAttachment(Base):
     organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id"), index=True)
     repair_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("repairs.id"))
     file_url: Mapped[str] = mapped_column(Text)
+    kind: Mapped[str] = mapped_column(String(30), default="document")
+    original_name: Mapped[str | None] = mapped_column(String(255))
+    media_type: Mapped[str | None] = mapped_column(String(100))
+    byte_size: Mapped[int | None] = mapped_column(Integer)
     uploaded_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+    repair: Mapped["Repair"] = relationship(back_populates="attachments")
 
 
 class SyncLog(Base):

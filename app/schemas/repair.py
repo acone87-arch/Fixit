@@ -20,6 +20,9 @@ class RepairCreate(BaseModel):
     ticket_id: uuid.UUID | None = None
     fault_type: str | None = None
     description: str
+    labor_minutes: int = 0
+    client_signer_name: str | None = None
+    client_signed_at: datetime | None = None
     started_at: datetime | None = None
     closed_at: datetime | None = None
     device_updated_at: datetime
@@ -40,6 +43,9 @@ class RepairOut(BaseModel):
     technician_id: uuid.UUID
     fault_type: str | None
     description: str
+    labor_minutes: int
+    client_signer_name: str | None
+    client_signed_at: datetime | None
     closed_at: datetime | None
     sync_status: SyncStatus
 
@@ -64,3 +70,14 @@ class SyncItemResult(BaseModel):
 
 class SyncBatchResponse(BaseModel):
     results: list[SyncItemResult]
+
+
+class RepairAttachmentOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    kind: str
+    original_name: str | None
+    media_type: str | None
+    byte_size: int | None
+    uploaded_at: datetime
+    download_url: str

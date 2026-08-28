@@ -5,13 +5,13 @@
 // даже если вкладка/приложение закрыты (см. п.3.2 ТЗ: "отложенная отправка").
 // ============================================================
 
-const CACHE_NAME = 'fixit-tech-shell-v6';
+const CACHE_NAME = 'fixit-tech-shell-v7';
 const SHELL_FILES = [
   '/tech/',
   '/tech/index.html',
   '/tech/styles.css',
-  '/tech/app.js?v=20260817-6',
-  '/tech/db.js?v=20260817-6',
+  '/tech/app.js?v=20260828-7',
+  '/tech/db.js?v=20260828-7',
   '/tech/manifest.json',
   '/tech/icon-192.png',
   '/tech/icon-512.png',
@@ -85,7 +85,14 @@ async function syncPendingRepairsFromSW() {
     if (!res.ok) return; // остаётся в очереди, попробуем на следующий sync-триггер
     const data = await res.json();
     for (const r of data.results) {
-      if (r.resolved_as !== 'failed') await self.TechDB.delete('pendingRepairs', r.local_uuid);
+      if (r.resolved_as !== 'failed') {
+        const attachments = await self.TechDB.getAll('pendingAttachments');
+        for (const attachment of attachments.filter((item) => item.local_uuid === r.local_uuid)) {
+          attachment.repair_id = r.server_id;
+          await self.TechDB.put('pendingAttachments', attachment);
+        }
+        await self.TechDB.delete('pendingRepairs', r.local_uuid);
+      }
     }
   } catch (_) {
     // Нет сети прямо сейчас — Background Sync API сам повторит попытку позже.

@@ -47,7 +47,7 @@ async function apiBlob(path) {
     logout();
     throw new Error('Сессия истекла, войдите заново');
   }
-  if (!res.ok) throw new Error('Не удалось загрузить QR-код');
+  if (!res.ok) throw new Error('Не удалось загрузить файл');
   return res.blob();
 }
 
@@ -517,6 +517,7 @@ async function openEquipmentPassport(id) {
         <div class="text-soft" style="font-size:12px;font-weight:600">${fmtDate(h.closed_at)} · ${esc(h.technician_name)}</div>
         <div style="margin-top:2px">${esc(h.description)}</div>
         ${h.parts_used.length ? `<div class="mono text-soft" style="font-size:12px;margin-top:2px">${h.parts_used.map((p) => `${esc(p.part_name)} ×${p.quantity}`).join(', ')}</div>` : ''}
+        <button class="btn btn-ghost act-download-btn" data-repair-id="${h.repair_id}" style="padding:4px 0;margin-top:6px;font-size:12px;color:var(--accent-strong)">Скачать сервисный акт PDF</button>
       </div>
     </div>`).join('') : '<div class="text-soft" style="padding:12px 0">Ремонтов ещё не было</div>';
 
@@ -548,6 +549,20 @@ async function openEquipmentPassport(id) {
     link.click();
     link.remove();
   });
+  backdrop.querySelectorAll('.act-download-btn').forEach((button) => button.addEventListener('click', async () => {
+    const original = button.textContent;
+    try {
+      button.disabled = true;
+      button.textContent = 'Готовим PDF…';
+      const blob = await apiBlob(`/repairs/${button.dataset.repairId}/act.pdf`);
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `service-act-${button.dataset.repairId.slice(0, 8)}.pdf`;
+      document.body.appendChild(link); link.click(); link.remove();
+      setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+    } catch (e) { toast(e.message, 'error'); }
+    finally { button.disabled = false; button.textContent = original; }
+  }));
   const deleteButton = backdrop.querySelector('#delete-equipment-btn');
   if (deleteButton) {
     deleteButton.addEventListener('click', async () => {
