@@ -76,3 +76,11 @@ def test_service_request_opening_uses_one_safe_modal_transition():
     assert "openServiceRequest(passport.active_request.id)" in source
     assert "closeModal();\n    if (state.me?.role === 'technician')" in source
     assert "openServiceRequestModal" not in source
+
+
+def test_technician_workspace_does_not_reference_action_inside_its_initializer():
+    source = (Path(__file__).parents[1] / "app" / "static" / "app.js").read_text(encoding="utf-8")
+    assert "const nextAction = statusAction[request.status];" in source
+    assert 'data-status="${nextAction[0]}">${nextAction[1]}' in source
+    assert "const action = statusAction[request.status]" not in source
+    assert "data-status=\"${action[0]}\">${action[1]}" not in source
