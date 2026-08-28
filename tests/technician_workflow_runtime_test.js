@@ -6,9 +6,11 @@ const source = fs.readFileSync('app/static/app.js', 'utf8');
 
 const utilitySource = source.slice(0, source.indexOf('function toast('));
 const context = { window: { crypto: undefined }, localStorage: { getItem: () => null }, location: { hash: '' }, Uint8Array, Math };
-vm.runInNewContext(`${utilitySource}; this.createUuidForTest = createUuid;`, context);
+vm.runInNewContext(`${utilitySource}; this.createUuidForTest = createUuid; this.navigateForTest = navigateToServiceRequest;`, context);
 const fallbackUuid = context.createUuidForTest();
 assert.match(fallbackUuid, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+context.navigateForTest('request-123');
+assert.equal(context.location.hash, 'requests/request-123');
 
 const mapping = source.match(/const statusAction = (\{[^;]+\});/);
 const actionBlock = source.match(/const nextAction = statusAction\[request\.status\];[\s\S]*?: '';/);
@@ -30,4 +32,11 @@ assert.match(source, /\['on_the_way', 'arrived', 'in_progress'\]/);
 assert.match(source, /Ожидается согласование/);
 assert.match(source, /approval: \{ diagnostic: draft\.diagnostic/);
 assert.match(source, /\/approval`, \{ method: 'PATCH'/);
+assert.match(source, /const \[route, requestId\] = hashRoute\.split\('\/'\)/);
+assert.match(source, /state\.route === 'requests' && state\.requestId/);
+assert.match(source, /RequestDraftStore\.put/);
+assert.match(source, /window\.addEventListener\('pagehide', persistOnBackground\)/);
+assert.match(source, /navigator\.mediaDevices\?\.getUserMedia/);
+assert.match(source, /facingMode: \{ ideal: 'environment' \}/);
+assert.doesNotMatch(source, /capture="environment"/);
 console.log('technician workflow runtime: ok');

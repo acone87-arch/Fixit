@@ -78,8 +78,8 @@ def test_approval_wait_requires_dispatcher_decision():
 def test_service_request_opening_uses_one_safe_modal_transition():
     source = (Path(__file__).parents[1] / "app" / "static" / "app.js").read_text(encoding="utf-8")
     assert "async function openServiceRequest(id)" in source
-    assert "openServiceRequest(row.dataset.id)" in source
-    assert "openServiceRequest(passport.active_request.id)" in source
+    assert "navigateToServiceRequest(row.dataset.id)" in source
+    assert "navigateToServiceRequest(passport.active_request.id)" in source
     assert "closeModal();\n    if (state.me?.role === 'technician')" in source
     assert "openServiceRequestModal" not in source
 

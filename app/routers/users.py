@@ -16,7 +16,7 @@ router = APIRouter(prefix="/api/users", tags=["users"])
 
 @router.get("/me", response_model=UserOut)
 async def read_me(user: CurrentUser = Depends(get_current_user)):
-    return user
+    return UserOut.model_validate(user.user).model_copy(update={"role": user.role, "organization_id": user.organization_id})
 
 
 @router.get("", response_model=list[UserOut])
