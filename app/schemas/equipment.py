@@ -44,6 +44,16 @@ class EquipmentOut(EquipmentBase):
     status: EquipmentStatus
     version: int
     created_at: datetime
+    primary_photo: "EquipmentPhotoOut | None" = None
+
+
+class EquipmentPhotoOut(BaseModel):
+    id: uuid.UUID
+    original_name: str | None = None
+    media_type: str | None = None
+    byte_size: int | None = None
+    uploaded_at: datetime | None = None
+    download_url: str
 
 
 class RepairHistoryEntry(BaseModel):

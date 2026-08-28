@@ -154,6 +154,22 @@ function openModal(title, bodyHtml, footerHtml) {
   return backdrop;
 }
 
+async function openProtectedImage(path, title = 'Фотография') {
+  try {
+    const url = URL.createObjectURL(await apiBlob(path));
+    const backdrop = openModal(title, `<div class="protected-image-viewer"><img src="${url}" data-object-url alt="${esc(title)}"></div>`, '<button class="btn btn-secondary" id="image-viewer-close">Закрыть</button>');
+    backdrop.querySelector('#image-viewer-close').addEventListener('click', closeModal);
+  } catch (error) {
+    toast(error.message || 'Не удалось открыть фотографию', 'error');
+  }
+}
+
+async function uploadEquipmentPhoto(equipmentId, file) {
+  const form = new FormData();
+  form.append('file', file);
+  return api(`/equipment/${equipmentId}/photo`, { method: 'POST', body: form });
+}
+
 // ---------- Справочники (общие) ----------
 
 const EQUIPMENT_STATUS = {
@@ -386,16 +402,60 @@ async function openServiceRequest(id) {
     closeModal();
     if (state.me?.role === 'technician') return openTechnicianRequestWorkspace(id, item);
     const historyItems = Array.isArray(item.history) ? item.history : [];
-    const history = historyItems.map((entry) => `<div class="timeline-item"><div class="timeline-dot"></div><div><strong>${esc(entry.message || 'Событие заявки')}</strong><div class="text-soft">${fmtDate(entry.at)}</div></div></div>`).join('') || '<div class="text-soft">История пока пуста</div>';
     const statusLabel = { new: 'Новая', assigned: 'Назначена', on_the_way: 'В пути', arrived: 'На объекте', in_progress: 'В работе', waiting_parts: 'Ждёт запчасти', waiting_approval: 'Требует согласования', completed: 'Выполнена', closed: 'Закрыта', cancelled: 'Отменена' };
     const statusClass = ['completed', 'closed'].includes(item.status) ? 'good' : item.status?.startsWith('waiting') ? 'amber' : item.status === 'cancelled' ? 'idle' : 'warn';
     const statusBadge = `<span class="badge badge-${statusClass}"><span class="badge-dot"></span>${esc(statusLabel[item.status] || item.status || '—')}</span>`;
     const approvalEvent = [...historyItems].reverse().find((entry) => entry.type === 'request.waiting_approval');
     const approval = approvalEvent?.details?.approval || {};
+    const actorRole = (role) => ({ technician: 'МАСТЕР', dispatcher: 'ДИСПЕТЧЕР', admin: 'АДМИНИСТРАТОР', owner: 'АДМИНИСТРАТОР' }[role] || 'СИСТЕМА');
+    const timelineCopy = (entry) => {
+      const details = entry.details || {};
+      if (entry.type === 'approval.approved') return { title: 'Работы согласованы', extra: details.comment ? `Комментарий: ${details.comment}` : '' };
+      if (entry.type === 'approval.rejected') return { title: 'Согласование отклонено', extra: details.comment ? `Причина: ${details.comment}` : '' };
+      if (entry.type === 'request.waiting_parts') return { title: 'Мастер приостановил работу', extra: 'Причина: Ожидание запчастей' };
+      if (entry.type === 'request.waiting_approval') {
+        const approvalDetails = details.approval || {};
+        return { title: 'Мастер запросил согласование', extra: [
+          approvalDetails.diagnostic && `Диагностика: ${approvalDetails.diagnostic}`,
+          approvalDetails.work && `Предлагаемые работы: ${approvalDetails.work}`,
+          approvalDetails.parts?.length && `Запчасти: ${approvalDetails.parts.map((part) => `${part.name} ×${part.quantity}`).join(', ')}`,
+          approvalDetails.comment && `Комментарий: ${approvalDetails.comment}`,
+          approvalDetails.photo_count ? `Фото: ${approvalDetails.photo_count}` : '',
+        ].filter(Boolean).join(' · ') };
+      }
+      if (entry.type === 'work.started' && details.from === 'waiting_parts') return { title: 'Мастер возобновил работу после получения запчастей', extra: '' };
+      if (entry.type === 'work.started' && details.from === 'waiting_approval') return { title: 'Работы согласованы — мастер продолжил ремонт', extra: '' };
+      return { title: entry.message || 'Событие заявки', extra: '' };
+    };
+    const history = historyItems.map((entry) => {
+      const copy = timelineCopy(entry); const actor = entry.actor;
+      return `<article class="sr-timeline-entry"><div class="sr-timeline-dot"></div><div><span class="sr-timeline-role">${actorRole(actor?.role)}</span><strong>${esc(actor?.full_name || 'Система')}</strong><p>${esc(copy.title)}</p>${copy.extra ? `<small>${esc(copy.extra)}</small>` : ''}<time>${fmtDate(entry.at)}</time></div></article>`;
+    }).join('') || '<div class="passport-empty">История пока пуста</div>';
+    const repairPhotos = (item.attachments || []).filter((attachment) => ['before', 'after'].includes(attachment.kind));
+    const repairGallery = repairPhotos.length ? `<div class="sr-photo-grid">${repairPhotos.map((attachment) => `<button type="button" class="sr-photo-thumb" data-repair-photo="${attachment.id}"><span>${attachment.kind === 'before' ? 'До ремонта' : 'После ремонта'}</span><img alt="${attachment.kind === 'before' ? 'До ремонта' : 'После ремонта'}"></button>`).join('')}</div>` : '<div class="sr-empty">Фотографии пока не добавлены</div>';
+    const equipmentPhoto = item.primary_photo ? `<button type="button" class="sr-equipment-photo" id="sr-equipment-photo"><img alt="Фото оборудования"><span>Открыть фото</span></button>` : '<div class="sr-equipment-placeholder">FIXIT<br>оборудование</div>';
+    const rejected = [...historyItems].reverse().find((entry) => entry.type === 'approval.rejected');
+    const rejectionNotice = item.status === 'cancelled' && rejected ? `<section class="sr-rejection"><strong>Согласование отклонено диспетчером</strong>${rejected.details?.comment ? `<span>Причина: ${esc(rejected.details.comment)}</span>` : ''}</section>` : '';
     const approvalContext = item.status === 'waiting_approval' ? `<section class="approval-context"><span>Требуется согласование</span><strong>${esc(item.equipment_name || 'Оборудование')}</strong><p>Проблема: ${esc(item.description || 'Не указана')}</p><p>Диагностика: ${esc(approval.diagnostic || 'Не указана')}</p><p>Предлагаемые работы: ${esc(approval.work || 'Не указаны')}</p><p>Запчасти: ${esc((approval.parts || []).map((part) => `${part.name} ×${part.quantity}`).join(', ') || 'Не выбраны')}</p><p>Комментарий мастера: ${esc(approval.comment || 'Не указан')}</p>${approval.photo_count ? `<p>Выбрано фото: ${approval.photo_count}</p>` : ''}</section>` : '';
     const approvalActions = item.status === 'waiting_approval' ? '<button class="btn btn-secondary" id="approval-reject">Отклонено</button><button class="btn btn-primary" id="approval-approve">Согласовано</button>' : '';
-    const backdrop = openModal(`Заявка SR-${String(item.number).padStart(5, '0')}`, `<div class="passport-status-row">${statusBadge}</div><div class="text-soft" style="margin-top:10px">${esc(item.client_name || 'Клиент не указан')} · ${esc(item.site_name || 'Объект не указан')}</div><h3 style="margin-top:12px">${esc(item.equipment_name || 'Оборудование не указано')} · ${esc(item.serial_number || '—')}</h3><p>${esc(item.description || 'Без описания')}</p><div class="text-soft">Мастер: ${esc(item.assigned_technician_name || 'Не назначен')}</div>${approvalContext}<h3 style="margin-top:16px">История</h3>${history}`, `<button class="btn btn-secondary" id="modal-cancel">Закрыть</button>${approvalActions}`);
+    const backdrop = openModal('', `<section class="service-request-detail"><header class="sr-detail-header"><div><span>SR-${String(item.number).padStart(5, '0')}</span><h2>Заявка на сервис</h2></div>${statusBadge}</header>${rejectionNotice}<section class="sr-equipment-hero">${equipmentPhoto}<div><span class="sr-kicker">${esc(item.equipment_type || item.equipment_name || 'Оборудование')}</span><h3>${esc([item.manufacturer, item.model].filter(Boolean).join(' ') || item.equipment_name || 'Оборудование')}</h3><p>S/N ${esc(item.serial_number || '—')}</p></div></section><section class="sr-detail-grid"><div><span>Клиент / объект</span><strong>${esc(item.client_name || 'Клиент не указан')}</strong><small>${esc(item.site_name || 'Объект не указан')}</small></div><div><span>Мастер</span><strong>${esc(item.assigned_technician_name || 'Не назначен')}</strong></div></section><section class="sr-problem"><span>Проблема</span><p>${esc(item.description || 'Без описания')}</p></section>${approvalContext}<section class="sr-photos"><h3>Фотографии</h3>${repairGallery}</section><section class="sr-timeline"><h3>Ход заявки</h3>${history}</section></section>`, `<button class="btn btn-secondary" id="modal-cancel">Закрыть</button>${approvalActions}`);
     backdrop.querySelector('#modal-cancel').addEventListener('click', closeModal);
+    if (item.primary_photo) {
+      apiBlob(`/equipment/${item.equipment_id}/photo`).then((blob) => {
+        const image = backdrop.querySelector('#sr-equipment-photo img');
+        if (!image) return;
+        image.src = URL.createObjectURL(blob); image.setAttribute('data-object-url', '');
+      }).catch(() => {});
+      backdrop.querySelector('#sr-equipment-photo')?.addEventListener('click', () => openProtectedImage(`/equipment/${item.equipment_id}/photo`, 'Фото оборудования'));
+    }
+    backdrop.querySelectorAll('[data-repair-photo]').forEach((button) => {
+      const attachment = repairPhotos.find((photo) => photo.id === button.dataset.repairPhoto);
+      apiBlob(`/repairs/attachments/${button.dataset.repairPhoto}`).then((blob) => {
+        const image = button.querySelector('img'); if (!image) return;
+        image.src = URL.createObjectURL(blob); image.setAttribute('data-object-url', '');
+      }).catch(() => { button.classList.add('is-unavailable'); });
+      button.addEventListener('click', () => openProtectedImage(`/repairs/attachments/${attachment.id}`, attachment.kind === 'before' ? 'До ремонта' : 'После ремонта'));
+    });
     const decideApproval = async (action) => {
       const comment = prompt(action === 'rejected' ? 'Укажите причину отклонения' : 'Комментарий к согласованию (необязательно)');
       if (comment === null) return;
@@ -417,6 +477,10 @@ async function openTechnicianRequestWorkspace(id, loadedRequest = null) {
   }
   request.history = Array.isArray(request.history) ? request.history : [];
   request.attachments = Array.isArray(request.attachments) ? request.attachments : [];
+  let equipmentPhotoUrl = null;
+  if (request.primary_photo) {
+    try { equipmentPhotoUrl = URL.createObjectURL(await apiBlob(`/equipment/${request.equipment_id}/photo`)); } catch (_) {}
+  }
   const draft = { diagnostic: '', work: '', comment: '', usedParts: {}, photos: [] };
   const draftKey = requestDraftKey(request.id);
   const persistedDraft = await RequestDraftStore.get(draftKey).catch(() => null);
@@ -449,7 +513,7 @@ async function openTechnicianRequestWorkspace(id, loadedRequest = null) {
   const releasePhotos = () => draft.photos.forEach((photo) => URL.revokeObjectURL(photo.url));
   let workCameraStream = null;
   const stopWorkCamera = () => { workCameraStream?.getTracks().forEach((track) => track.stop()); workCameraStream = null; };
-  const disposeWorkspace = () => { persistDraft(); stopWorkCamera(); releasePhotos(); window.removeEventListener('pagehide', persistOnBackground); document.removeEventListener('visibilitychange', persistOnBackground); };
+  const disposeWorkspace = () => { persistDraft(); stopWorkCamera(); releasePhotos(); if (equipmentPhotoUrl) URL.revokeObjectURL(equipmentPhotoUrl); window.removeEventListener('pagehide', persistOnBackground); document.removeEventListener('visibilitychange', persistOnBackground); };
   const persistOnBackground = (lifecycleEvent) => { if (document.visibilityState === 'hidden' || lifecycleEvent?.type === 'pagehide') persistDraft(); };
   const addDraftFiles = async (files) => {
     const available = 5 - draft.photos.length;
@@ -501,7 +565,7 @@ async function openTechnicianRequestWorkspace(id, loadedRequest = null) {
       ? `<button class="btn btn-primary tech-request-main" id="request-next" data-status="${nextAction[0]}">${nextAction[1]}</button>`
       : request.status === 'in_progress' ? '<button class="btn btn-primary tech-request-main" id="request-complete">Завершить работу</button>'
       : request.status === 'waiting_parts' ? '<button class="btn btn-primary tech-request-main" id="request-resume">Продолжить работу</button>' : '';
-    content.innerHTML = `<section class="tech-request-workspace"><header class="tech-request-header"><button class="tech-request-back" id="request-back">←</button><div><span>Заявка SR-${String(request.number).padStart(5, '0')}</span><h1>${esc(request.title || request.description || 'Сервисная заявка')}</h1></div>${statusBadge()}</header><div class="tech-request-scroll"><section class="tech-request-meta"><div><small>Приоритет</small><strong>${request.priority === 'urgent' ? 'Срочно' : 'Плановая'}</strong></div><div><small>Создана</small><strong>${fmtDate(request.created_at)}</strong></div></section><section class="tech-request-section"><h2>Клиент и объект</h2><strong>${esc(request.client_name || request.site_name || 'Клиент')}</strong><p>${esc(request.site_name || 'Объект не указан')}${request.site_address ? ` · ${esc(request.site_address)}` : ''}</p>${request.contact_name || request.contact_phone ? `<a href="tel:${esc(request.contact_phone || '')}">${esc(request.contact_name || 'Контакт')} · ${esc(request.contact_phone || '')}</a>` : ''}</section><section class="tech-request-section tech-request-equipment"><div><h2>Оборудование</h2><button class="btn btn-ghost btn-sm" id="request-passport">Открыть паспорт</button></div><strong>${esc(request.equipment_type || request.equipment_name)}</strong><p>${esc([request.manufacturer, request.model].filter(Boolean).join(' ') || 'Модель не указана')} · <span class="mono">S/N ${esc(request.serial_number)}</span></p>${badge(EQUIPMENT_STATUS, request.equipment_status || 'working')}</section><section class="tech-request-section"><h2>Проблема</h2><p>${esc(request.description || 'Описание не добавлено')}</p><div class="tech-request-files">${attachments}</div></section>${workArea}<section class="tech-request-section"><h2>История</h2><div class="tech-request-timeline-list">${timeline}</div></section></div><footer>${action}</footer></section>`;
+    content.innerHTML = `<section class="tech-request-workspace"><header class="tech-request-header"><button class="tech-request-back" id="request-back">←</button><div><span>Заявка SR-${String(request.number).padStart(5, '0')}</span><h1>${esc(request.title || request.description || 'Сервисная заявка')}</h1></div>${statusBadge()}</header><div class="tech-request-scroll"><section class="tech-request-meta"><div><small>Приоритет</small><strong>${request.priority === 'urgent' ? 'Срочно' : 'Плановая'}</strong></div><div><small>Создана</small><strong>${fmtDate(request.created_at)}</strong></div></section><section class="tech-request-section"><h2>Клиент и объект</h2><strong>${esc(request.client_name || request.site_name || 'Клиент')}</strong><p>${esc(request.site_name || 'Объект не указан')}${request.site_address ? ` · ${esc(request.site_address)}` : ''}</p>${request.contact_name || request.contact_phone ? `<a href="tel:${esc(request.contact_phone || '')}">${esc(request.contact_name || 'Контакт')} · ${esc(request.contact_phone || '')}</a>` : ''}</section><section class="tech-request-section tech-request-equipment"><div><h2>Оборудование</h2><button class="btn btn-ghost btn-sm" id="request-passport">Открыть паспорт</button></div>${equipmentPhotoUrl ? `<img class="tech-request-equipment-photo" src="${equipmentPhotoUrl}" alt="Фото оборудования">` : '<div class="tech-request-equipment-placeholder">FIXIT</div>'}<strong>${esc(request.equipment_type || request.equipment_name)}</strong><p>${esc([request.manufacturer, request.model].filter(Boolean).join(' ') || 'Модель не указана')} · <span class="mono">S/N ${esc(request.serial_number)}</span></p>${badge(EQUIPMENT_STATUS, request.equipment_status || 'working')}</section><section class="tech-request-section"><h2>Проблема</h2><p>${esc(request.description || 'Описание не добавлено')}</p><div class="tech-request-files">${attachments}</div></section>${workArea}<section class="tech-request-section"><h2>История</h2><div class="tech-request-timeline-list">${timeline}</div></section></div><footer>${action}</footer></section>`;
     content.querySelector('#request-back').addEventListener('click', () => { disposeWorkspace(); activeTechnicianWorkspaceCleanup = null; location.hash = 'requests'; });
     content.querySelector('#request-passport').addEventListener('click', () => openEquipmentPassport(request.equipment_id));
     content.querySelectorAll('[data-attachment]').forEach((button) => button.addEventListener('click', async () => { try { downloadBlob(await apiBlob(`/repairs/attachments/${button.dataset.attachment}`), button.textContent.trim()); } catch (e) { toast(e.message, 'error'); } }));
@@ -877,6 +941,7 @@ function openCreateEquipmentModal() {
       </div>
       <div class="field"><label>Серийный номер</label><input id="f-serial" required></div>
       <div class="field"><label>Объект обслуживания</label><select id="f-site" required>${siteOptions}</select></div>
+      <div class="field"><label>Фото оборудования <span class="text-soft">(необязательно)</span></label><div class="equipment-photo-inputs"><label class="btn btn-ghost btn-sm">Сфотографировать<input id="f-equipment-camera" type="file" accept="image/*" capture="environment" hidden></label><label class="btn btn-ghost btn-sm">Выбрать фото<input id="f-equipment-photo" type="file" accept="image/*" hidden></label><span id="f-equipment-photo-name" class="text-soft">Фото не выбрано</span></div></div>
     </form>`,
     `<button class="btn btn-secondary" id="modal-cancel">Отмена</button>
      <button class="btn btn-primary" id="modal-save">Создать</button>`);
@@ -885,6 +950,13 @@ function openCreateEquipmentModal() {
   backdrop.querySelector('#f-type').addEventListener('change', (e) => {
     backdrop.querySelector('#f-newtype-wrap').classList.toggle('hidden', e.target.value !== '__new');
   });
+  let selectedPhoto = null;
+  const selectPhoto = (event) => {
+    selectedPhoto = event.target.files?.[0] || null;
+    backdrop.querySelector('#f-equipment-photo-name').textContent = selectedPhoto ? selectedPhoto.name : 'Фото не выбрано';
+  };
+  backdrop.querySelector('#f-equipment-camera').addEventListener('change', selectPhoto);
+  backdrop.querySelector('#f-equipment-photo').addEventListener('change', selectPhoto);
 
   backdrop.querySelector('#modal-save').addEventListener('click', async () => {
     try {
@@ -898,7 +970,7 @@ function openCreateEquipmentModal() {
       }
       const serial = backdrop.querySelector('#f-serial').value.trim();
       if (!serial) return toast('Укажите серийный номер', 'error');
-      await api('/equipment', {
+      const equipment = await api('/equipment', {
         method: 'POST',
         body: JSON.stringify({
           equipment_type_id: Number(typeId),
@@ -909,7 +981,10 @@ function openCreateEquipmentModal() {
         }),
       });
       closeModal();
-      toast('Оборудование добавлено');
+      if (selectedPhoto) {
+        try { await uploadEquipmentPhoto(equipment.id, selectedPhoto); toast('Оборудование и фото добавлены'); }
+        catch (_) { toast('Оборудование создано, фото не удалось загрузить. Повторите загрузку из паспорта.', 'error'); }
+      } else toast('Оборудование добавлено');
       router();
     } catch (e) {
       toast(e.message, 'error');
@@ -985,15 +1060,33 @@ async function openEquipmentPassport(id) {
     const primaryAction = passport.active_request
       ? `<button class="btn btn-primary" id="passport-primary-request">Открыть заявку SR-${String(passport.active_request.number).padStart(5, '0')}</button>`
       : isStaff ? '<button class="btn btn-primary" id="passport-create-request">Создать заявку</button>' : '';
+    const photoControl = `<section class="passport-photo"><div class="passport-photo-frame">${passport.primary_photo ? '<img id="passport-primary-photo" alt="Фото оборудования">' : '<span>FIXIT<br>оборудование</span>'}</div><div><span>Фото оборудования</span><p>${passport.primary_photo ? 'Основное фото паспорта' : 'Добавьте фото, чтобы быстрее узнать машину на объекте.'}</p><label class="btn btn-ghost btn-sm">${passport.primary_photo ? 'Заменить фото' : 'Добавить фото'}<input id="passport-photo-upload" type="file" accept="image/*" hidden></label>${passport.primary_photo ? '<button class="btn btn-ghost btn-sm" id="passport-photo-delete">Удалить</button>' : ''}</div></section>`;
     const backdrop = openModal('', `<section class="equipment-passport">
       <header class="passport-hero"><div><span class="passport-eyebrow">${esc(equipmentTypeName)}</span><h2>${esc([passport.manufacturer, passport.model].filter(Boolean).join(' ') || passport.name)}</h2><div class="passport-status-row">${badge(EQUIPMENT_STATUS, passport.status)}<span class="mono">S/N ${esc(passport.serial_number)}</span></div></div><button type="button" class="passport-more" id="passport-more" aria-label="Дополнительные действия" aria-expanded="false">•••</button><div class="passport-more-menu hidden" id="passport-more-menu" role="menu"><button type="button" role="menuitem" id="passport-download-qr">Скачать QR</button>${isStaff ? '<button type="button" role="menuitem" id="passport-manage">Редактировать и переместить</button><button type="button" role="menuitem" class="passport-menu-danger" id="passport-archive">Архивировать</button>' : ''}</div></header>
-      <div class="passport-context"><div><small>Клиент</small><strong>${esc(clientName)}</strong></div><div><small>Объект</small><strong>${esc(passport.site_name || 'Не указан')}</strong>${passport.site_address ? `<span>${esc(passport.site_address)}</span>` : ''}</div></div>
+      <div class="passport-context"><div><small>Клиент</small><strong>${esc(clientName)}</strong></div><div><small>Объект</small><strong>${esc(passport.site_name || 'Не указан')}</strong>${passport.site_address ? `<span>${esc(passport.site_address)}</span>` : ''}</div></div>${photoControl}
       <nav class="passport-tabs" aria-label="Разделы паспорта"><button class="active" data-passport-tab="overview">Обзор</button><button data-passport-tab="history">История</button><button data-passport-tab="documents">Документы <span>${passport.documents.length}</span></button></nav>
       <section data-passport-panel="overview"><div class="passport-overview-grid"><div class="passport-data"><span>Серийный номер</span><strong class="mono">${esc(passport.serial_number)}</strong></div>${passport.inventory_number ? `<div class="passport-data"><span>Инвентарный номер</span><strong>${esc(passport.inventory_number)}</strong></div>` : ''}<div class="passport-data"><span>Текущий статус</span>${badge(EQUIPMENT_STATUS, passport.status)}</div></div>${passport.active_request ? `<div class="passport-active-request"><div><span>Активная заявка SR-${String(passport.active_request.number).padStart(5, '0')}</span><strong>${esc(passport.active_request.title)}</strong><small>${esc(passport.active_request.assigned_technician_name || 'Мастер ещё не назначен')}</small></div>${requestBadge(passport.active_request)}</div>` : '<div class="passport-no-request">Активных заявок нет — оборудование готово к работе.</div>'}<div class="passport-qr"><img src="${qrObjectUrl}" data-object-url alt="QR-код оборудования"><div><span>QR оборудования</span><p>Используйте для быстрого открытия паспорта и обращения в сервис.</p><button class="btn btn-ghost btn-sm" id="passport-qr-download-inline">Скачать QR</button></div></div></section>
       <section class="hidden" data-passport-panel="history"><div class="equipment-timeline">${timeline}</div></section>
       <section class="hidden" data-passport-panel="documents"><div class="passport-documents">${documents}</div></section>
     </section>`, `<span class="passport-footer-action">${primaryAction}</span><button class="btn btn-secondary" id="passport-close">Закрыть</button>`);
     backdrop.querySelector('#passport-close').addEventListener('click', closeModal);
+    if (passport.primary_photo) {
+      apiBlob(`/equipment/${passport.id}/photo`).then((blob) => {
+        const image = backdrop.querySelector('#passport-primary-photo');
+        if (!image) return;
+        image.src = URL.createObjectURL(blob); image.setAttribute('data-object-url', '');
+      }).catch(() => toast('Фото оборудования временно недоступно', 'error'));
+    }
+    backdrop.querySelector('#passport-photo-upload').addEventListener('change', async (event) => {
+      const file = event.target.files?.[0]; if (!file) return;
+      try { await uploadEquipmentPhoto(passport.id, file); toast('Фото оборудования сохранено'); closeModal(); openEquipmentPassport(passport.id); }
+      catch (error) { toast(error.message || 'Не удалось загрузить фото', 'error'); }
+    });
+    backdrop.querySelector('#passport-photo-delete')?.addEventListener('click', async () => {
+      if (!confirm('Удалить основное фото оборудования?')) return;
+      try { await api(`/equipment/${passport.id}/photo`, { method: 'DELETE' }); toast('Фото удалено'); closeModal(); openEquipmentPassport(passport.id); }
+      catch (error) { toast(error.message || 'Не удалось удалить фото', 'error'); }
+    });
     const downloadQr = () => downloadBlob(qrBlob, qrFilename);
     backdrop.querySelector('#passport-download-qr').addEventListener('click', downloadQr);
     backdrop.querySelector('#passport-qr-download-inline').addEventListener('click', downloadQr);

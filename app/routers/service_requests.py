@@ -5,8 +5,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import CurrentUser, get_current_user, require_roles
 from app.database import get_db
-from app.models.core import Equipment, EquipmentType, Task, TaskStatus, User, UserRole
+from app.models.core import Equipment, EquipmentAttachment, EquipmentType, Task, TaskStatus, User, UserRole
 from app.models.customer import Client, Site
+from app.models.organization import OrganizationMembership
 from app.models.repair import Repair, RepairAttachment, RepairPart
 from app.models.service_request import ServiceRequest, ServiceRequestEvent
 from app.models.warehouse import Part
@@ -36,6 +37,10 @@ async def serialize(db, request, org):
         .where(Equipment.id == request.equipment_id, Equipment.organization_id == org, Site.organization_id == org, Client.organization_id == org)
     )).one()
     equipment, equipment_type, site, client, technician_name = row
+    primary_photo = await db.scalar(select(EquipmentAttachment).where(
+        EquipmentAttachment.equipment_id == equipment.id,
+        EquipmentAttachment.organization_id == org,
+    ))
     repair_query = select(Repair).where(Repair.organization_id == org, Repair.equipment_id == request.equipment_id)
     if request.task_id:
         repair_query = repair_query.where(Repair.task_id == request.task_id)
@@ -48,10 +53,28 @@ async def serialize(db, request, org):
     attachments = []
     if repair:
         attachments = [{"id": item.id, "kind": item.kind, "name": item.original_name, "media_type": item.media_type, "at": item.uploaded_at} for item in (await db.scalars(select(RepairAttachment).where(RepairAttachment.organization_id == org, RepairAttachment.repair_id == repair.id).order_by(RepairAttachment.uploaded_at))).all()]
-    history = [{"at": item.created_at, "type": item.event_type, "message": item.message, "details": item.details_json} for item in (await db.scalars(select(ServiceRequestEvent).where(ServiceRequestEvent.organization_id == org, ServiceRequestEvent.service_request_id == request.id).order_by(ServiceRequestEvent.created_at))).all()]
+    events = (await db.scalars(select(ServiceRequestEvent).where(
+        ServiceRequestEvent.organization_id == org,
+        ServiceRequestEvent.service_request_id == request.id,
+    ).order_by(ServiceRequestEvent.created_at))).all()
+    actor_ids = {item.actor_user_id for item in events if item.actor_user_id}
+    actor_map = {}
+    if actor_ids:
+        actor_rows = (await db.execute(
+            select(User.id, User.full_name, OrganizationMembership.role)
+            .outerjoin(OrganizationMembership, (OrganizationMembership.user_id == User.id) & (OrganizationMembership.organization_id == org))
+            .where(User.id.in_(actor_ids))
+        )).all()
+        actor_map = {
+            actor_id: {"id": actor_id, "full_name": full_name, "role": role.value if role else None}
+            for actor_id, full_name, role in actor_rows
+        }
+    history = [{"at": item.created_at, "type": item.event_type, "message": item.message,
+                "details": item.details_json or {}, "actor": actor_map.get(item.actor_user_id)} for item in events]
     if not any(item["type"] == "request.created" for item in history):
-        history.insert(0, {"at": request.created_at, "type": "request.created", "message": "Заявка создана", "details": {}})
-    return ServiceRequestOut(id=request.id, number=request.number, ticket_id=request.ticket_id, task_id=request.task_id, equipment_id=request.equipment_id, client_name=client_label(client, site), site_name=site.name, equipment_name=equipment.name, serial_number=equipment.serial_number, description=request.description, priority=request.priority, assigned_technician_id=request.assigned_technician_id, assigned_technician_name=technician_name, status=request.status, created_at=request.created_at, completed_at=request.completed_at, repair_id=repair.id if repair else None, parts_used=parts, outcome=repair.description if repair else None, history=history, site_address=site.address, contact_name=site.contact_name or client.contact_name, contact_phone=site.contact_phone or client.contact_phone, equipment_type=equipment_type, manufacturer=equipment.manufacturer, model=equipment.model, equipment_status=equipment.status.value, equipment_version=equipment.version, attachments=attachments)
+        history.insert(0, {"at": request.created_at, "type": "request.created", "message": "Заявка создана", "details": {}, "actor": None})
+    photo_out = {"id": primary_photo.id, "original_name": primary_photo.original_name, "media_type": primary_photo.media_type, "byte_size": primary_photo.byte_size, "uploaded_at": primary_photo.uploaded_at, "download_url": f"/api/equipment/{equipment.id}/photo"} if primary_photo else None
+    return ServiceRequestOut(id=request.id, number=request.number, ticket_id=request.ticket_id, task_id=request.task_id, equipment_id=request.equipment_id, client_name=client_label(client, site), site_name=site.name, equipment_name=equipment.name, serial_number=equipment.serial_number, description=request.description, priority=request.priority, assigned_technician_id=request.assigned_technician_id, assigned_technician_name=technician_name, status=request.status, created_at=request.created_at, completed_at=request.completed_at, repair_id=repair.id if repair else None, parts_used=parts, outcome=repair.description if repair else None, history=history, site_address=site.address, contact_name=site.contact_name or client.contact_name, contact_phone=site.contact_phone or client.contact_phone, equipment_type=equipment_type, manufacturer=equipment.manufacturer, model=equipment.model, equipment_status=equipment.status.value, equipment_version=equipment.version, attachments=attachments, primary_photo=photo_out)
 
 @router.get("", response_model=list[ServiceRequestOut])
 async def list_requests(db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(get_current_user)):

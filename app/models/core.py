@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Enum, ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import Enum, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -101,6 +101,28 @@ class Equipment(Base):
     site: Mapped["Site"] = relationship(back_populates="equipment")  # noqa: F821
     tasks: Mapped[list["Task"]] = relationship(back_populates="equipment")
     repairs: Mapped[list["Repair"]] = relationship(back_populates="equipment")
+    attachments: Mapped[list["EquipmentAttachment"]] = relationship(
+        back_populates="equipment", cascade="all, delete-orphan"
+    )
+
+
+class EquipmentAttachment(Base):
+    """Permanent media of an equipment unit, deliberately separate from repair evidence."""
+
+    __tablename__ = "equipment_attachments"
+    __table_args__ = (UniqueConstraint("equipment_id", name="uq_equipment_attachment_primary"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id"), index=True)
+    equipment_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("equipment.id", ondelete="CASCADE"), index=True)
+    file_url: Mapped[str] = mapped_column(Text)
+    original_name: Mapped[str | None] = mapped_column(String(255))
+    media_type: Mapped[str | None] = mapped_column(String(100))
+    byte_size: Mapped[int | None] = mapped_column(Integer)
+    uploaded_at: Mapped[datetime] = mapped_column(server_default=func.now())
+    uploaded_by_user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
+
+    equipment: Mapped["Equipment"] = relationship(back_populates="attachments")
 
 
 class Task(Base):

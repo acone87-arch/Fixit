@@ -1,16 +1,18 @@
 import uuid
 from io import BytesIO
+from pathlib import Path
 
 import qrcode
 import qrcode.image.svg
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.core.deps import CurrentUser, get_current_user, require_roles
 from app.database import get_db
-from app.models.core import Equipment, EquipmentType, Task, Ticket, User, UserRole
+from app.models.core import Equipment, EquipmentAttachment, EquipmentType, Task, Ticket, User, UserRole
 from app.models.customer import Client, Site
 from app.models.repair import Repair, RepairAttachment, RepairPart
 from app.models.service_request import ServiceRequest, ServiceRequestEvent
@@ -20,6 +22,7 @@ from app.schemas.equipment import (
     EquipmentCreate,
     EquipmentDocumentEntry,
     EquipmentOut,
+    EquipmentPhotoOut,
     EquipmentPassport,
     EquipmentTimelineEntry,
     EquipmentUpdate,
@@ -30,6 +33,25 @@ from app.schemas.equipment import (
 
 router = APIRouter(prefix="/api/equipment", tags=["equipment"])
 types_router = APIRouter(prefix="/api/equipment-types", tags=["equipment"])
+UPLOAD_ROOT = Path("uploads")
+MAX_PHOTO_BYTES = 8 * 1024 * 1024
+
+
+def _photo_out(item: EquipmentAttachment) -> EquipmentPhotoOut:
+    return EquipmentPhotoOut(
+        id=item.id, original_name=item.original_name, media_type=item.media_type,
+        byte_size=item.byte_size, uploaded_at=item.uploaded_at,
+        download_url=f"/api/equipment/{item.equipment_id}/photo",
+    )
+
+
+async def _equipment_for_user(equipment_id: uuid.UUID, db: AsyncSession, user: CurrentUser) -> Equipment:
+    equipment = await db.scalar(select(Equipment).where(
+        Equipment.id == equipment_id, Equipment.organization_id == user.organization_id,
+    ))
+    if not equipment:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Оборудование не найдено")
+    return equipment
 
 
 @types_router.get("", response_model=list[EquipmentTypeOut])
@@ -56,15 +78,19 @@ async def create_equipment_type(
 async def list_equipment(db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     rows = (
         await db.execute(
-            select(Equipment, EquipmentType.name)
+            select(Equipment, EquipmentType.name, EquipmentAttachment)
             .join(EquipmentType, Equipment.equipment_type_id == EquipmentType.id)
+            .outerjoin(EquipmentAttachment, (EquipmentAttachment.equipment_id == Equipment.id) & (EquipmentAttachment.organization_id == user.organization_id))
             .where(Equipment.organization_id == user.organization_id)
             .order_by(Equipment.updated_at.desc())
         )
     ).all()
     # Для старых записей сохраняем историческое поле name в БД, но наружу
     # всегда отдаём тип: все клиенты показывают единое обозначение техники.
-    return [EquipmentOut.model_validate(equipment).model_copy(update={"name": type_name}) for equipment, type_name in rows]
+    return [EquipmentOut.model_validate(equipment).model_copy(update={
+        "name": type_name,
+        "primary_photo": _photo_out(photo) if photo else None,
+    }) for equipment, type_name, photo in rows]
 
 
 @router.post("", response_model=EquipmentOut, status_code=status.HTTP_201_CREATED)
@@ -102,6 +128,94 @@ async def create_equipment(
         raise HTTPException(status.HTTP_409_CONFLICT, "Оборудование с таким серийным номером уже существует") from exc
     await db.refresh(equipment)
     return equipment
+
+
+@router.post("/{equipment_id}/photo", response_model=EquipmentPhotoOut, status_code=status.HTTP_201_CREATED)
+async def upload_equipment_photo(
+    equipment_id: uuid.UUID,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_roles(UserRole.admin, UserRole.dispatcher, UserRole.technician)),
+):
+    equipment = await _equipment_for_user(equipment_id, db, user)
+    content = await file.read(MAX_PHOTO_BYTES + 1)
+    media_type = file.content_type or ""
+    if not content or len(content) > MAX_PHOTO_BYTES:
+        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Фото должно быть не больше 8 МБ")
+    if not media_type.startswith("image/"):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Можно загрузить только изображение")
+    suffix = Path(file.filename or "photo").suffix.lower()
+    if len(suffix) > 10 or not suffix.replace(".", "").isalnum():
+        suffix = ""
+    attachment = await db.scalar(select(EquipmentAttachment).where(
+        EquipmentAttachment.equipment_id == equipment.id,
+        EquipmentAttachment.organization_id == user.organization_id,
+    ).with_for_update())
+    attachment_id = attachment.id if attachment else uuid.uuid4()
+    relative_path = Path(str(user.organization_id)) / "equipment" / str(equipment.id) / f"{attachment_id}{suffix}"
+    destination = UPLOAD_ROOT / relative_path
+    await run_in_threadpool(destination.parent.mkdir, parents=True, exist_ok=True)
+    previous_path = UPLOAD_ROOT / attachment.file_url if attachment else None
+    await run_in_threadpool(destination.write_bytes, content)
+    if attachment:
+        attachment.file_url = str(relative_path).replace("\\", "/")
+        attachment.original_name = (file.filename or "фото оборудования")[:255]
+        attachment.media_type = media_type[:100]
+        attachment.byte_size = len(content)
+        attachment.uploaded_by_user_id = user.id
+    else:
+        attachment = EquipmentAttachment(
+            id=attachment_id, organization_id=user.organization_id, equipment_id=equipment.id,
+            file_url=str(relative_path).replace("\\", "/"),
+            original_name=(file.filename or "фото оборудования")[:255], media_type=media_type[:100],
+            byte_size=len(content), uploaded_by_user_id=user.id,
+        )
+        db.add(attachment)
+    await db.commit()
+    await db.refresh(attachment)
+    if previous_path and previous_path != destination and previous_path.is_file():
+        await run_in_threadpool(previous_path.unlink)
+    return _photo_out(attachment)
+
+
+@router.get("/{equipment_id}/photo")
+async def download_equipment_photo(
+    equipment_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(get_current_user),
+):
+    await _equipment_for_user(equipment_id, db, user)
+    attachment = await db.scalar(select(EquipmentAttachment).where(
+        EquipmentAttachment.equipment_id == equipment_id,
+        EquipmentAttachment.organization_id == user.organization_id,
+    ))
+    if not attachment:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Фотография оборудования не добавлена")
+    path = UPLOAD_ROOT / attachment.file_url
+    if not path.is_file():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Файл фотографии не найден")
+    return Response(await run_in_threadpool(path.read_bytes), media_type=attachment.media_type or "image/jpeg")
+
+
+@router.delete("/{equipment_id}/photo", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_equipment_photo(
+    equipment_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_roles(UserRole.admin, UserRole.dispatcher, UserRole.technician)),
+):
+    await _equipment_for_user(equipment_id, db, user)
+    attachment = await db.scalar(select(EquipmentAttachment).where(
+        EquipmentAttachment.equipment_id == equipment_id,
+        EquipmentAttachment.organization_id == user.organization_id,
+    ))
+    if not attachment:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Фотография оборудования не добавлена")
+    path = UPLOAD_ROOT / attachment.file_url
+    await db.delete(attachment)
+    await db.commit()
+    if path.is_file():
+        await run_in_threadpool(path.unlink)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/by-qr/{qr_token}", response_model=EquipmentPassport)
@@ -185,10 +299,11 @@ async def delete_equipment(
 async def get_passport(equipment_id: uuid.UUID, db: AsyncSession = Depends(get_db),
                        user: CurrentUser = Depends(get_current_user)):
     equipment_row = (await db.execute(
-        select(Equipment, EquipmentType.name, Site, Client)
+        select(Equipment, EquipmentType.name, Site, Client, EquipmentAttachment)
         .join(EquipmentType, EquipmentType.id == Equipment.equipment_type_id)
         .join(Site, Site.id == Equipment.site_id)
         .join(Client, Client.id == Site.client_id)
+        .outerjoin(EquipmentAttachment, (EquipmentAttachment.equipment_id == Equipment.id) & (EquipmentAttachment.organization_id == user.organization_id))
         .where(
             Equipment.id == equipment_id,
             Equipment.organization_id == user.organization_id,
@@ -198,7 +313,7 @@ async def get_passport(equipment_id: uuid.UUID, db: AsyncSession = Depends(get_d
     )).one_or_none()
     if not equipment_row:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Оборудование не найдено")
-    equipment, equipment_type_name, site, client = equipment_row
+    equipment, equipment_type_name, site, client, primary_photo = equipment_row
 
     repair_rows = (await db.execute(
         select(Repair, User.full_name)
@@ -336,6 +451,7 @@ async def get_passport(equipment_id: uuid.UUID, db: AsyncSession = Depends(get_d
 
     data = EquipmentOut.model_validate(equipment).model_dump()
     data["name"] = equipment_type_name or equipment.name
+    data["primary_photo"] = _photo_out(primary_photo) if primary_photo else None
     return EquipmentPassport(
         **data, client_name=client.legal_name or client.name, site_name=site.name, site_address=site.address,
         active_request=active_request, timeline=timeline, documents=documents, history=history,

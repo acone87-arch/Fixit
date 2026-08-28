@@ -83,6 +83,24 @@ async function apiFetch(path, options = {}) {
   return text ? JSON.parse(text) : null;
 }
 
+async function cacheEquipmentPassport(passport) {
+  // The passport itself is already the offline cache unit. Keep its primary
+  // photo with it instead of inventing another attachment queue/store.
+  if (passport?.primary_photo && navigator.onLine) {
+    try {
+      const response = await fetch(`/api/equipment/${passport.id}/photo`, { headers: { Authorization: `Bearer ${state.token}` } });
+      if (response.ok) {
+        const blob = await response.blob();
+        passport.primary_photo_data_url = await new Promise((resolve) => {
+          const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = () => resolve(null); reader.readAsDataURL(blob);
+        });
+      }
+    } catch (_) { /* passport remains useful without its image */ }
+  }
+  await TechDB.put('equipment', passport);
+  return passport;
+}
+
 async function uploadAttachment(repairId, attachment) {
   const headers = state.token ? { Authorization: `Bearer ${state.token}` } : {};
   const data = await fetch(attachment.data_url).then((res) => res.blob());
@@ -232,7 +250,7 @@ async function loadTasks() {
       for (const t of tasks) {
         try {
           const passport = await apiFetch(`/equipment/${t.equipment_id}/passport`);
-          await TechDB.put('equipment', passport);
+          await cacheEquipmentPassport(passport);
         } catch (_) { /* не критично — просто не закэшируется на этот раз */ }
       }
       return tasks;
@@ -279,7 +297,7 @@ async function renderTasksScreen(screen) {
 async function openPassport(equipmentId, taskId) {
   let eq = await TechDB.get('equipment', equipmentId);
   if (!eq && navigator.onLine) {
-    try { eq = await apiFetch(`/equipment/${equipmentId}/passport`); await TechDB.put('equipment', eq); } catch (_) {}
+    try { eq = await cacheEquipmentPassport(await apiFetch(`/equipment/${equipmentId}/passport`)); } catch (_) {}
   }
   if (!eq) return toast('Нет сохранённых данных по этому оборудованию — нужна связь', 'error');
   state.drill = { screen: 'passport', equipmentId, taskId };
@@ -301,6 +319,7 @@ async function renderPassportScreen(screen) {
 
   screen.innerHTML = header('Паспорт оборудования', true) + `
     <div class="eq-header">
+      ${eq.primary_photo_data_url ? `<img class="tech-equipment-photo" src="${eq.primary_photo_data_url}" alt="Фото оборудования">` : '<div class="tech-equipment-photo-placeholder">FIXIT</div>'}
       <div>
         <div class="display" style="font-size:16px">${esc(eq.name)}</div>
         <div class="eq-meta text-soft">${esc(eq.manufacturer || '')} ${esc(eq.model || '')}</div>
@@ -585,7 +604,7 @@ async function resolveByQrToken(token) {
   if (!navigator.onLine) return toast('Для первого скана этого оборудования нужна связь', 'error');
   try {
     const eq = await apiFetch(`/equipment/by-qr/${token}`);
-    await TechDB.put('equipment', eq);
+    await cacheEquipmentPassport(eq);
     state.drill = { screen: 'passport', equipmentId: eq.id, taskId: null };
     render();
   } catch (e) { toast(e.message, 'error'); }
@@ -601,7 +620,7 @@ async function findEquipmentBySerial(serial) {
     const match = list.find((e) => e.serial_number.toLowerCase() === serial.toLowerCase());
     if (!match) return toast('Оборудование с таким серийным номером не найдено', 'error');
     const passport = await apiFetch(`/equipment/${match.id}/passport`);
-    await TechDB.put('equipment', passport);
+    await cacheEquipmentPassport(passport);
     state.drill = { screen: 'passport', equipmentId: passport.id, taskId: null };
     render();
   } catch (e) { toast(e.message, 'error'); }

@@ -169,3 +169,5 @@ input, select, textarea { font-family: inherit; font-size: 15px; }
 .toast-info { background: var(--idle); }
 
 .hidden { display: none !important; }
+
+.tech-equipment-photo,.tech-equipment-photo-placeholder { width:72px; height:72px; margin:0 0 12px; overflow:hidden; border:1px solid #315c4b; border-radius:12px; object-fit:cover; }.tech-equipment-photo-placeholder { display:grid; place-items:center; color:#8eaaa0; background:#10271f; font:800 10px 'IBM Plex Mono',monospace; }

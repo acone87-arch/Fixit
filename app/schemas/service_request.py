@@ -23,3 +23,4 @@ class ServiceRequestOut(BaseModel):
     site_address: str | None = None; contact_name: str | None = None; contact_phone: str | None = None
     equipment_type: str | None = None; manufacturer: str | None = None; model: str | None = None; equipment_status: str | None = None; equipment_version: int | None = None
     attachments: list[dict] = []
+    primary_photo: dict | None = None
