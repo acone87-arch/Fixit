@@ -90,6 +90,7 @@ class EquipmentTimelineEntry(BaseModel):
     repair_id: uuid.UUID | None = None
     task_id: uuid.UUID | None = None
     parts_used: list[dict] = []
+    photos: list[dict] = []
     has_service_act: bool = False
 
 

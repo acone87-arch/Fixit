@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Enum, ForeignKey, Integer, String, Text
+from sqlalchemy import Enum, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -61,6 +61,9 @@ class RepairPart(Base):
 
 class RepairAttachment(Base):
     __tablename__ = "repair_attachments"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "repair_id", "client_id", name="uq_repair_attachment_client"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id"), index=True)
@@ -70,6 +73,9 @@ class RepairAttachment(Base):
     original_name: Mapped[str | None] = mapped_column(String(255))
     media_type: Mapped[str | None] = mapped_column(String(100))
     byte_size: Mapped[int | None] = mapped_column(Integer)
+    # Stable ID of an item in the IndexedDB queue. It makes attachment retry
+    # idempotent when a connection fails after the server has stored the file.
+    client_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
     uploaded_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
     repair: Mapped["Repair"] = relationship(back_populates="attachments")

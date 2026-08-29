@@ -51,12 +51,22 @@ async def upload_attachment(
     repair_id: uuid.UUID,
     kind: str = Form(...),
     file: UploadFile = File(...),
+    client_id: str | None = Form(None),
     db: AsyncSession = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
 ):
     repair = await _repair_for_user(repair_id, db, user)
     if kind not in ALLOWED_KINDS:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Неизвестный тип вложения")
+    client_id = (client_id or "").strip()[:120] or None
+    if client_id:
+        existing = await db.scalar(select(RepairAttachment).where(
+            RepairAttachment.organization_id == user.organization_id,
+            RepairAttachment.repair_id == repair.id,
+            RepairAttachment.client_id == client_id,
+        ))
+        if existing:
+            return _attachment_out(existing)
     content = await file.read(MAX_UPLOAD_BYTES + 1)
     if not content or len(content) > MAX_UPLOAD_BYTES:
         raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Файл должен быть не больше 8 МБ")
@@ -76,6 +86,7 @@ async def upload_attachment(
         id=attachment_id, organization_id=user.organization_id, repair_id=repair.id,
         file_url=str(relative_path).replace("\\", "/"), kind=kind,
         original_name=(file.filename or "вложение")[:255], media_type=media_type[:100], byte_size=len(content),
+        client_id=client_id,
     )
     db.add(attachment)
     request_query = select(ServiceRequest).where(

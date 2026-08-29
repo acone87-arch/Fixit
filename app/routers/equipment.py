@@ -399,11 +399,18 @@ async def get_passport(equipment_id: uuid.UUID, db: AsyncSession = Depends(get_d
         ))
     for repair, technician_name in repair_rows:
         request = request_by_task.get(repair.task_id) or request_by_ticket.get(repair.ticket_id)
+        repair_photos = [
+            {"id": str(attachment.id), "kind": attachment.kind, "media_type": attachment.media_type,
+             "download_url": f"/api/repairs/attachments/{attachment.id}"}
+            for attachment in attachments_by_repair.get(repair.id, [])
+            if attachment.kind in {"before", "after"} and (attachment.media_type or "").startswith("image/")
+        ]
         timeline.append(EquipmentTimelineEntry(
             id=f"repair:{repair.id}", kind="repair.completed", occurred_at=repair.closed_at or repair.created_at,
             title="Ремонт и сервисный акт", description=repair.description,
             request_id=request.id if request else None, request_number=request.number if request else None,
             repair_id=repair.id, task_id=repair.task_id, parts_used=parts_by_repair.get(repair.id, []),
+            photos=repair_photos,
             has_service_act=True,
         ))
     legacy_tasks = (await db.scalars(select(Task).where(

@@ -51,14 +51,41 @@
     const form = new FormData();
     form.append('kind', attachment.kind || 'after');
     form.append('file', blob, attachment.file_name || `${attachment.kind || 'photo'}.jpg`);
+    // This survives a timeout after the server has accepted the file: retrying
+    // the same durable queue item must not create a second RepairAttachment.
+    form.append('client_id', attachment.id);
     const response = await fetch(`/api/repairs/${attachment.repair_id}/attachments`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: form });
     if (!response.ok) throw new Error('Не удалось загрузить фото');
+  }
+
+  async function queueStatus(filter = null) {
+    const localUuid = typeof filter === 'string' ? filter : filter?.localUuid || null;
+    const serviceRequestId = typeof filter === 'object' ? filter?.serviceRequestId || null : null;
+    const [repairs, attachments] = await Promise.all([db.getAll('pendingRepairs'), db.getAll('pendingAttachments')]);
+    const matches = (item) => !localUuid && !serviceRequestId || (localUuid && item.local_uuid === localUuid) || (serviceRequestId && item.service_request_id === serviceRequestId);
+    const pendingRepairs = repairs.filter(matches);
+    const pendingAttachments = attachments.filter(matches);
+    return {
+      repairPending: pendingRepairs.length > 0,
+      attachmentsPending: pendingAttachments.length,
+      fullySynced: pendingRepairs.length === 0 && pendingAttachments.length === 0,
+      repairId: pendingAttachments.find((item) => item.repair_id)?.repair_id || null,
+      localUuid: pendingRepairs[0]?.local_uuid || pendingAttachments[0]?.local_uuid || null,
+    };
+  }
+
+  function announce(summary) {
+    if (typeof window !== 'undefined' && typeof window.CustomEvent === 'function') {
+      window.dispatchEvent(new CustomEvent('fixit-offline-sync', { detail: summary }));
+    }
   }
 
   async function sync({ token, deviceId = 'fixit-pulse', onError } = {}) {
     token ||= await db.kvGet('token');
     const results = new Map();
-    if (!token || (typeof navigator !== 'undefined' && !navigator.onLine)) return results;
+    if (!token || (typeof navigator !== 'undefined' && !navigator.onLine)) {
+      return { results, status: await queueStatus() };
+    }
     try {
       const repairs = await db.getAll('pendingRepairs');
       if (repairs.length) {
@@ -84,7 +111,9 @@
       }
       if ((await db.getAll('pendingRepairs')).length || (await db.getAll('pendingAttachments')).length) registerBackgroundSync();
     } catch (error) { onError?.(error); }
-    return results;
+    const summary = { results, status: await queueStatus() };
+    announce(summary);
+    return summary;
   }
 
   async function enqueueRepair(repair, photos = []) {
@@ -92,7 +121,7 @@
     await db.put('pendingRepairs', { ...repair, local_uuid });
     for (const [index, photo] of photos.entries()) {
       if (!(photo?.file instanceof Blob) || !photo.file.size) continue;
-      await db.put('pendingAttachments', { id: `${local_uuid}:${index}:${uuid()}`, local_uuid, repair_id: null, kind: photo.kind || 'after', file: photo.file, file_name: photo.file.name || `photo-${index + 1}.jpg` });
+      await db.put('pendingAttachments', { id: `${local_uuid}:${index}:${uuid()}`, local_uuid, service_request_id: repair.service_request_id || null, repair_id: null, kind: photo.kind || 'after', file: photo.file, file_name: photo.file.name || `photo-${index + 1}.jpg` });
     }
     await registerBackgroundSync();
     return local_uuid;
@@ -101,17 +130,18 @@
   async function registerBackgroundSync() {
     if (typeof navigator === 'undefined' || !navigator.serviceWorker) return;
     try {
-      const registration = await navigator.serviceWorker.register('/static/offline/sw.js');
+      const registration = await navigator.serviceWorker.register('/static/offline/sw.js?v=20260829-2');
       if ('sync' in registration) await registration.sync.register('fixit-sync-repairs');
     } catch (_) { /* online retry remains available */ }
   }
   function configure({ token } = {}) {
-    if (token) db.kvSet('token', token);
+    // Never replace a usable background-sync credential with an empty value.
+    if (typeof token === 'string' && token) db.kvSet('token', token);
     if (!configured && typeof window !== 'undefined') {
       configured = true;
       window.addEventListener('online', () => sync({ token: null }));
     }
   }
 
-  root.FixitOffline = { db, uuid, configure, enqueueRepair, sync, registerBackgroundSync };
+  root.FixitOffline = { db, uuid, configure, enqueueRepair, sync, queueStatus, registerBackgroundSync };
 })(typeof self !== 'undefined' ? self : window);

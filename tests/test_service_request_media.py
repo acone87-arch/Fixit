@@ -3,7 +3,9 @@ from datetime import datetime, timezone
 
 from app.models.core import EquipmentAttachment
 from app.models.service_request import ServiceRequestAttachment
+from app.models.repair import RepairAttachment
 from app.schemas.equipment import EquipmentPhotoOut
+from app.schemas.equipment import EquipmentTimelineEntry
 from app.schemas.service_request import ServiceRequestAttachmentOut, ServiceRequestOut
 
 
@@ -48,3 +50,17 @@ def test_service_request_attachment_is_tenant_scoped_and_has_no_base64_payload()
         download_url="/api/service-requests/attachments/example",
     )
     assert attachment.download_url.startswith("/api/service-requests/attachments/")
+
+
+def test_repair_attachment_has_durable_client_id_for_idempotent_photo_retry():
+    columns = set(RepairAttachment.__table__.columns.keys())
+    assert "client_id" in columns
+    assert any(constraint.name == "uq_repair_attachment_client" for constraint in RepairAttachment.__table__.constraints)
+
+
+def test_equipment_history_contract_can_return_compact_protected_repair_photos():
+    entry = EquipmentTimelineEntry(
+        id="repair:example", kind="repair.completed", title="Ремонт и сервисный акт",
+        photos=[{"id": "attachment-id", "kind": "after", "download_url": "/api/repairs/attachments/attachment-id"}],
+    )
+    assert entry.photos[0]["download_url"].startswith("/api/repairs/attachments/")
