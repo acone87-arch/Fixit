@@ -74,3 +74,24 @@ def test_client_management_has_a_route_level_mobile_detail_not_a_hidden_table_co
     styles = Path("app/static/styles.css").read_text(encoding="utf8")
     assert ".client-mobile-list,.site-mobile-list { display:grid" in styles
     assert ".client-desktop-table { display:none; }" in styles
+
+
+def test_client_detail_connects_sites_equipment_summary_and_existing_passport():
+    customers = Path("app/routers/customers.py").read_text(encoding="utf8")
+    assert '@router.get("/{client_id}/summary")' in customers
+    assert "Client.id == client_id, Client.organization_id == user.organization_id" in customers
+    assert "completed_last_30_days" in customers
+    assert 'Site.client_id == client_id' in customers
+    assert "renderClientSiteDetail(content, client, state.clientSiteId)" in FRONTEND
+    assert "clients/${client.id}/sites/${button.dataset.clientSite}" in FRONTEND
+    assert "openEquipmentPassport(button.dataset.clientEquipment)" in FRONTEND
+    assert "apiBlob(`/equipment/${frame.dataset.clientEquipmentPhoto}/photo`)" in FRONTEND
+    assert "Пользователи${canManageUsers ? ` (${accessCount})` : ''}" in FRONTEND
+    assert "У клиента пока нет пользователей кабинета" in FRONTEND
+
+
+def test_client_quick_actions_are_limited_to_service_staff():
+    assert "const canManageUsers = ['owner', 'admin', 'dispatcher'].includes(state.me.role);" in FRONTEND
+    assert "id=\"client-action-site\"" in FRONTEND
+    assert "id=\"client-action-user\"" in FRONTEND
+    assert "id=\"client-action-equipment\"" in FRONTEND

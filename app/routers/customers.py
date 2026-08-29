@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import func, select
@@ -10,6 +11,7 @@ from app.database import get_db
 from app.models.core import Equipment, UserRole
 from app.models.customer import Client, Site
 from app.models.organization import AuditEvent
+from app.models.service_request import ServiceRequest
 from app.schemas.customer import ClientCreate, ClientOut, ClientUpdate, SiteCreate, SiteOut, SiteUpdate
 from app.services.client_portal import CLIENT_ROLES, client_scope
 
@@ -63,6 +65,47 @@ async def list_clients(
     return [ClientOut.model_validate(client).model_copy(update={
         "site_count": site_count, "equipment_count": equipment_count,
     }) for client, site_count, equipment_count in rows]
+
+
+@router.get("/{client_id}/summary")
+async def client_summary(
+    client_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(get_current_user),
+):
+    """Small, tenant-scoped operational summary for the client detail view."""
+    client = await db.scalar(select(Client).where(
+        Client.id == client_id, Client.organization_id == user.organization_id,
+    ))
+    if not client:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Клиент не найден")
+    allowed_site_ids = None
+    if user.role in CLIENT_ROLES:
+        scoped_client_id, allowed_site_ids = await client_scope(user, db)
+        if scoped_client_id != client_id:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Клиент не найден")
+    query = (select(ServiceRequest.status, ServiceRequest.completed_at, Equipment.site_id)
+             .join(Equipment, Equipment.id == ServiceRequest.equipment_id)
+             .join(Site, Site.id == Equipment.site_id)
+             .where(ServiceRequest.organization_id == user.organization_id, Site.client_id == client_id))
+    if allowed_site_ids is not None:
+        query = query.where(Site.id.in_(allowed_site_ids))
+    rows = (await db.execute(query)).all()
+    active_statuses = {"new", "assigned", "on_the_way", "arrived", "in_progress", "waiting_parts", "waiting_approval"}
+    repair_statuses = {"assigned", "on_the_way", "arrived", "in_progress", "waiting_parts", "waiting_approval"}
+    cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+    per_site = {}
+    for request_status, completed_at, site_id in rows:
+        is_active = request_status in active_statuses
+        site = per_site.setdefault(str(site_id), {"active_requests": 0})
+        if is_active:
+            site["active_requests"] += 1
+    return {
+        "active_requests": sum(status in active_statuses for status, _, _ in rows),
+        "in_repair": sum(status in repair_statuses for status, _, _ in rows),
+        "waiting_approval": sum(status == "waiting_approval" for status, _, _ in rows),
+        "completed_last_30_days": sum(status in {"completed", "closed"} and completed_at and completed_at >= cutoff for status, completed_at, _ in rows),
+        "sites": per_site,
+    }
 
 
 @router.post("", response_model=ClientOut, status_code=status.HTTP_201_CREATED)

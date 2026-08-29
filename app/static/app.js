@@ -432,11 +432,12 @@ async function router() {
   activeClientPhotoUrls = [];
   const defaultRoute = 'pulse';
   const hashRoute = location.hash.replace('#', '') || defaultRoute;
-  const [route, routeId, routeTab] = hashRoute.split('/');
+  const [route, routeId, routeTab, routeChildId] = hashRoute.split('/');
   state.route = route === 'tasks' ? 'requests' : route;
   state.requestId = route === 'requests' && routeId ? routeId : null;
   state.clientId = route === 'clients' && routeId ? routeId : null;
   state.clientTab = state.clientId ? (routeTab || 'overview') : null;
+  state.clientSiteId = state.clientTab === 'sites' && routeChildId ? routeChildId : null;
   if (route === 'tasks') history.replaceState(null, '', '#requests');
   const allowedRoutes = (NAV[state.me?.role] || []).map(([key]) => key);
   if (!allowedRoutes.includes(state.route)) {
@@ -1092,32 +1093,66 @@ async function renderClientDetail(content, clientId, tab = 'overview') {
   const client = state.clients.find((item) => item.id === clientId);
   if (!client) { content.innerHTML = '<div class="section-loading">Клиент не найден</div>'; return; }
   const canManageUsers = ['owner', 'admin', 'dispatcher'].includes(state.me.role);
-  const tabs = [['overview', 'Обзор'], ['sites', 'Объекты'], ['equipment', 'Оборудование'], ['users', 'Пользователи']];
-  content.innerHTML = `<section class="client-detail-screen"><button class="sr-back" id="client-detail-back">← Клиенты</button><header class="client-detail-hero"><div><span>КЛИЕНТ</span><h1>${esc(client.legal_name || client.name)}</h1><p>${client.is_active ? '● Активен' : '● Отключён'}</p></div></header><div class="client-detail-meta">${client.tax_id ? `<div><span>ИНН</span><strong>${esc(client.tax_id)}</strong></div>` : ''}<div><span>Контакт</span><strong>${esc(client.contact_name || 'Не указан')}</strong><small>${esc(client.contact_phone || client.contact_email || '')}</small></div></div><nav class="client-detail-tabs">${tabs.map(([key,label]) => `<button data-client-tab="${key}" class="${tab === key ? 'active' : ''}">${label}</button>`).join('')}</nav><div id="client-detail-panel"></div></section>`;
+  const accessCount = canManageUsers ? (await api(`/client-portal/access?client_id=${encodeURIComponent(client.id)}`)).length : 0;
+  const tabs = [['overview', 'Обзор'], ['sites', 'Объекты'], ['equipment', 'Оборудование'], ['users', `Пользователи${canManageUsers ? ` (${accessCount})` : ''}`]];
+  const actions = canManageUsers ? `<div class="client-detail-actions"><button class="btn btn-secondary" id="client-action-site">+ Объект</button><button class="btn btn-secondary" id="client-action-user">+ Пользователь</button><button class="btn btn-primary" id="client-action-equipment">+ Оборудование</button></div>` : '';
+  content.innerHTML = `<section class="client-detail-screen"><button class="sr-back" id="client-detail-back">← Клиенты</button><header class="client-detail-hero"><div><span>КЛИЕНТ</span><h1>${esc(client.legal_name || client.name)}</h1><p>${client.is_active ? '● Активен' : '● Отключён'}</p></div>${actions}</header><div class="client-detail-meta">${client.tax_id ? `<div><span>ИНН</span><strong>${esc(client.tax_id)}</strong></div>` : ''}<div><span>Контакт</span><strong>${esc(client.contact_name || 'Не указан')}</strong><small>${esc(client.contact_phone || client.contact_email || '')}</small></div></div><nav class="client-detail-tabs">${tabs.map(([key,label]) => `<button data-client-tab="${key}" class="${tab === key ? 'active' : ''}">${label}</button>`).join('')}</nav><div id="client-detail-panel"></div></section>`;
   content.querySelector('#client-detail-back').addEventListener('click', () => location.hash = 'clients');
   content.querySelectorAll('[data-client-tab]').forEach((button) => button.addEventListener('click', () => location.hash = `clients/${client.id}/${button.dataset.clientTab}`));
+  content.querySelector('#client-action-site')?.addEventListener('click', () => openCreateSiteModal(client.id));
+  content.querySelector('#client-action-user')?.addEventListener('click', () => openClientUserEditor(client, null, () => router(), false));
+  content.querySelector('#client-action-equipment')?.addEventListener('click', () => openCreateEquipmentModal(client.id));
   const panel = content.querySelector('#client-detail-panel');
   if (tab === 'sites') {
+    if (state.clientSiteId) return renderClientSiteDetail(content, client, state.clientSiteId);
     const sites = state.sites.filter((site) => site.client_id === client.id);
-    panel.innerHTML = `<div class="client-detail-card-list">${sites.length ? sites.map((site) => `<article><strong>${esc(site.name)}</strong><span>${esc(site.address || 'Адрес не указан')}</span><small>${esc([site.contact_name, site.contact_phone].filter(Boolean).join(' · ') || 'Контакт не указан')} · Оборудование: ${site.equipment_count}</small></article>`).join('') : '<div class="client-empty">У клиента пока нет объектов.</div>'}</div>`;
+    panel.innerHTML = `<div class="client-detail-card-list">${sites.length ? sites.map((site) => `<button class="client-site-card" data-client-site="${site.id}"><strong>${esc(site.name)}</strong><span>${esc(site.address || 'Адрес не указан')}</span><small>${esc([site.contact_name, site.contact_phone].filter(Boolean).join(' · ') || 'Контакт не указан')} · Оборудование: ${site.equipment_count}</small><b>Открыть объект →</b></button>`).join('') : '<div class="client-empty">У клиента пока нет объектов.</div>'}</div>`;
+    panel.querySelectorAll('[data-client-site]').forEach((button) => button.addEventListener('click', () => location.hash = `clients/${client.id}/sites/${button.dataset.clientSite}`));
   } else if (tab === 'equipment') {
     const items = await api('/equipment');
     const sites = new Map(state.sites.filter((site) => site.client_id === client.id).map((site) => [site.id, site]));
     const equipment = items.filter((item) => sites.has(item.site_id));
-    panel.innerHTML = `<div class="client-detail-card-list">${equipment.length ? equipment.map((item) => `<article><strong>${esc(item.name)}</strong><span>${esc([item.manufacturer, item.model].filter(Boolean).join(' ') || 'Модель не указана')}</span><small>S/N ${esc(item.serial_number || '—')} · ${esc(sites.get(item.site_id).name)}</small></article>`).join('') : '<div class="client-empty">Оборудования пока нет.</div>'}</div>`;
+    panel.innerHTML = `<div class="client-equipment-detail-list">${equipment.length ? equipment.map((item) => `<button class="client-equipment-detail-card" data-client-equipment="${item.id}"><span class="client-equipment-photo" data-client-equipment-photo="${item.id}">FIXIT</span><div><strong>${esc([item.manufacturer, item.model].filter(Boolean).join(' ') || item.name)}</strong><span>${esc(item.name || 'Оборудование')}</span><small>S/N ${esc(item.serial_number || '—')} · ${esc(sites.get(item.site_id).name)}</small>${badge(EQUIPMENT_STATUS, item.status)}</div></button>`).join('') : '<div class="client-empty">Оборудования пока нет.</div>'}</div>`;
+    bindClientEquipmentCards(panel);
   } else if (tab === 'users') {
     if (!canManageUsers) { panel.innerHTML = '<div class="client-empty">У вас нет права управлять пользователями клиента.</div>'; return; }
     await renderClientUsersPanel(panel, client);
   } else {
-    panel.innerHTML = `<div class="client-detail-overview"><article><span>ОБЪЕКТЫ</span><strong>${client.site_count}</strong><p>Площадки обслуживания клиента</p></article><article><span>ОБОРУДОВАНИЕ</span><strong>${client.equipment_count}</strong><p>Единиц в сервисе</p></article></div><section class="client-detail-contact"><h2>Контактные данные</h2><p>${esc(client.contact_name || 'Контактное лицо не указано')}</p><a href="tel:${esc(client.contact_phone || '')}">${esc(client.contact_phone || '')}</a><p>${esc(client.contact_email || '')}</p></section>`;
+    const summary = await api(`/clients/${client.id}/summary`);
+    panel.innerHTML = `<div class="client-detail-overview"><article><span>ОБЪЕКТЫ</span><strong>${client.site_count}</strong><p>Площадки обслуживания клиента</p></article><article><span>ОБОРУДОВАНИЕ</span><strong>${client.equipment_count}</strong><p>Единиц в сервисе</p></article><article><span>АКТИВНЫЕ ЗАЯВКИ</span><strong>${summary.active_requests}</strong><p>Требуют внимания</p></article><article><span>В РЕМОНТЕ</span><strong>${summary.in_repair}</strong><p>${summary.waiting_approval} ожидают согласования</p></article><article><span>ЗАВЕРШЕНО · 30 ДНЕЙ</span><strong>${summary.completed_last_30_days}</strong><p>Закрытых сервисных работ</p></article></div><section class="client-detail-contact"><h2>Контактные данные</h2><p>${esc(client.contact_name || 'Контактное лицо не указано')}</p><a href="tel:${esc(client.contact_phone || '')}">${esc(client.contact_phone || '')}</a><p>${esc(client.contact_email || '')}</p></section>`;
   }
+}
+
+async function renderClientSiteDetail(content, client, siteId) {
+  const site = state.sites.find((item) => item.id === siteId && item.client_id === client.id);
+  if (!site) { content.innerHTML = '<div class="section-loading">Объект не найден</div>'; return; }
+  const [items, summary] = await Promise.all([api('/equipment'), api(`/clients/${client.id}/summary`)]);
+  const equipment = items.filter((item) => item.site_id === site.id);
+  const activeRequests = summary.sites?.[site.id]?.active_requests || 0;
+  content.innerHTML = `<section class="client-detail-screen"><button class="sr-back" id="client-site-back">← ${esc(client.legal_name || client.name)}</button><header class="client-detail-hero"><div><span>ОБЪЕКТ</span><h1>${esc(site.name)}</h1><p>${esc(site.address || 'Адрес не указан')}</p></div></header><div class="client-detail-meta"><div><span>КОНТАКТ</span><strong>${esc(site.contact_name || 'Не указан')}</strong><small>${esc(site.contact_phone || '')}</small></div><div><span>АКТИВНЫЕ ЗАЯВКИ</span><strong>${activeRequests}</strong><small>Оборудование: ${equipment.length}</small></div></div><section class="client-site-equipment"><h2>Оборудование на объекте</h2><div class="client-equipment-detail-list">${equipment.length ? equipment.map((item) => `<button class="client-equipment-detail-card" data-client-equipment="${item.id}"><span class="client-equipment-photo" data-client-equipment-photo="${item.id}">FIXIT</span><div><strong>${esc([item.manufacturer, item.model].filter(Boolean).join(' ') || item.name)}</strong><span>${esc(item.name || 'Оборудование')}</span><small>S/N ${esc(item.serial_number || '—')}</small>${badge(EQUIPMENT_STATUS, item.status)}</div></button>`).join('') : '<div class="client-empty">На объекте пока нет оборудования.</div>'}</div></section></section>`;
+  content.querySelector('#client-site-back').addEventListener('click', () => location.hash = `clients/${client.id}/sites`);
+  bindClientEquipmentCards(content);
+}
+
+function bindClientEquipmentCards(container) {
+  container.querySelectorAll('[data-client-equipment]').forEach((button) => button.addEventListener('click', () => openEquipmentPassport(button.dataset.clientEquipment)));
+  container.querySelectorAll('[data-client-equipment-photo]').forEach((frame) => {
+    apiBlob(`/equipment/${frame.dataset.clientEquipmentPhoto}/photo`).then((blob) => {
+      const url = URL.createObjectURL(blob); activeClientPhotoUrls.push(url);
+      frame.innerHTML = `<img src="${url}" alt="Фото оборудования">`;
+    }).catch(() => { /* Placeholder is intentional when a primary photo is absent. */ });
+  });
 }
 
 async function renderClientUsersPanel(panel, client) {
   panel.innerHTML = '<div class="section-loading">Загрузка пользователей…</div>';
   try {
     const accesses = await api(`/client-portal/access?client_id=${encodeURIComponent(client.id)}`);
-    panel.innerHTML = `<div class="client-users-head"><div><span>ПОЛЬЗОВАТЕЛИ</span><p>Доступ к личному кабинету клиента и его объектам.</p></div><button class="btn btn-primary" id="client-user-add">+ Добавить пользователя</button></div><div class="client-users-list">${accesses.length ? accesses.map((access) => `<article class="client-user-row ${access.is_active ? '' : 'is-disabled'}"><div><strong>${esc(access.full_name)}</strong><small>${esc(access.email)}</small></div><div><span>${esc(clientRoleLabel(access.role))}</span><small>${esc(clientAccessLabel(access))}</small></div><div class="client-user-state">${access.is_active ? 'Активен' : 'Отключён'}</div><button class="client-user-more" data-client-access-menu="${access.id}" aria-label="Действия">⋯</button></article>`).join('') : '<div class="client-empty">Пользователей с доступом пока нет</div>'}</div>`;
+    const grouped = Object.values(accesses.reduce((result, access) => {
+      const group = result[access.user_id] || (result[access.user_id] = { ...access, accesses: [] });
+      group.accesses.push(access); return result;
+    }, {}));
+    panel.innerHTML = `<div class="client-users-head"><div><span>ПОЛЬЗОВАТЕЛИ</span><p>Доступ к личному кабинету клиента и его объектам.</p></div><button class="btn btn-primary" id="client-user-add">+ Добавить пользователя</button></div><div class="client-users-list">${grouped.length ? grouped.map((group) => `<article class="client-user-group"><header><div><strong>${esc(group.full_name)}</strong><small>${esc(group.email)}</small></div><span>${esc(clientRoleLabel(group.role))}</span></header><div class="client-user-scopes">${group.accesses.map((access) => `<div class="client-user-row ${access.is_active ? '' : 'is-disabled'}"><div><span>${esc(clientAccessLabel(access))}</span><small>${access.is_active ? 'Активен' : 'Отключён'}</small></div><button class="client-user-more" data-client-access-menu="${access.id}" aria-label="Действия для доступа">⋯</button></div>`).join('')}</div></article>`).join('') : '<div class="client-empty">У клиента пока нет пользователей кабинета</div>'}</div>`;
     const refresh = () => renderClientDetail(document.getElementById('content'), client.id, 'users');
     panel.querySelector('#client-user-add').addEventListener('click', () => openClientUserEditor(client, null, refresh, false));
     panel.querySelectorAll('[data-client-access-menu]').forEach((button) => button.addEventListener('click', () => {
@@ -1243,12 +1278,12 @@ function openCreateClientModal() {
   });
 }
 
-function openCreateSiteModal() {
+function openCreateSiteModal(preselectedClientId = null) {
   const activeClients = state.clients.filter((client) => client.is_active);
   if (!activeClients.length) return toast('Сначала создайте активного клиента', 'error');
   const backdrop = openModal('Новый объект обслуживания', `
     <form id="site-form">
-      <div class="field"><label>Клиент</label><select id="f-site-client" required>${activeClients.map((client) => `<option value="${client.id}">${esc(client.name)}</option>`).join('')}</select></div>
+      <div class="field"><label>Клиент</label><select id="f-site-client" required>${activeClients.map((client) => `<option value="${client.id}" ${client.id === preselectedClientId ? 'selected' : ''}>${esc(client.name)}</option>`).join('')}</select></div>
       <div class="field"><label>Название объекта</label><input id="f-site-name" required></div>
       <div class="field"><label>Адрес</label><input id="f-site-address"></div>
       <div class="field-row"><div class="field"><label>Контактное лицо</label><input id="f-site-contact"></div><div class="field"><label>Телефон</label><input id="f-site-phone"></div></div>
@@ -1363,9 +1398,9 @@ async function renderEquipment(content) {
   }
 }
 
-function openCreateEquipmentModal() {
+function openCreateEquipmentModal(preselectedClientId = null) {
   const typeOptions = state.equipmentTypes.map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join('');
-  const activeSites = state.sites.filter((site) => site.is_active);
+  const activeSites = state.sites.filter((site) => site.is_active && (!preselectedClientId || site.client_id === preselectedClientId));
   if (!activeSites.length) return toast('Сначала создайте объект обслуживания', 'error');
   const siteOptions = activeSites.map((site) => {
     const client = state.clients.find((item) => item.id === site.client_id);
