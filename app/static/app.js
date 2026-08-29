@@ -1044,13 +1044,14 @@ async function renderClients(content) {
     </div>
     <div class="card" style="padding:0;margin-bottom:18px">
       <table>
-        <thead><tr><th>Клиент</th><th>Реквизиты и контакт</th><th>Объектов</th><th>Оборудования</th><th>Статус</th></tr></thead>
+        <thead><tr><th>Клиент</th><th>Реквизиты и контакт</th><th>Объектов</th><th>Оборудования</th><th>Статус</th>${canEdit ? '<th></th>' : ''}</tr></thead>
         <tbody>${state.clients.length ? state.clients.map((client) => `
           <tr>
             <td><strong>${esc(client.name)}</strong>${client.legal_name ? `<div class="text-soft">${esc(client.legal_name)}</div>` : ''}</td>
             <td>${client.tax_id ? `<div>ИНН ${esc(client.tax_id)}</div>` : ''}<div class="text-soft">${esc(client.contact_name || '')} ${esc(client.contact_phone || '')}</div></td>
             <td>${client.site_count}</td><td>${client.equipment_count}</td>
             <td>${client.is_active ? badge({ active: { label: 'Активен', cls: 'good' } }, 'active') : badge({ inactive: { label: 'Отключён', cls: 'idle' } }, 'inactive')}</td>
+            ${canEdit ? `<td><button class="btn btn-secondary client-users-btn" data-client-users="${client.id}">Пользователи</button></td>` : ''}
           </tr>`).join('') : '<tr class="empty-row"><td colspan="5">Клиентов пока нет</td></tr>'}</tbody>
       </table>
     </div>
@@ -1071,7 +1072,100 @@ async function renderClients(content) {
   if (canEdit) {
     document.getElementById('add-client-btn').addEventListener('click', openCreateClientModal);
     document.getElementById('add-site-btn').addEventListener('click', openCreateSiteModal);
+    content.querySelectorAll('[data-client-users]').forEach((button) => button.addEventListener('click', () => {
+      const client = state.clients.find((item) => item.id === button.dataset.clientUsers);
+      if (client) openClientUsersModal(client);
+    }));
   }
+}
+
+function clientRoleLabel(role) {
+  return role === 'client_admin' ? 'Администратор клиента' : 'Менеджер объекта';
+}
+
+function clientAccessLabel(access) {
+  return access.role === 'client_admin' ? 'Все объекты' : (access.site_name ? `Объект ${access.site_name}` : 'Объект не выбран');
+}
+
+async function openClientUsersModal(client) {
+  let accesses = [];
+  const backdrop = openModal(`Пользователи · ${client.name}`, '<div class="client-users-loading">Загрузка пользователей…</div>');
+  const draw = () => {
+    const body = backdrop.querySelector('#modal-body');
+    body.innerHTML = `<div class="client-users-head"><div><span>ДОСТУП К КАБИНЕТУ КЛИЕНТА</span><p>Пользователь получает доступ только к выбранному клиенту и его объектам.</p></div><button class="btn btn-primary" id="client-user-add">+ Добавить пользователя</button></div>
+      <div class="client-users-list">${accesses.length ? accesses.map((access) => `<article class="client-user-row ${access.is_active ? '' : 'is-disabled'}">
+        <div><strong>${esc(access.full_name)}</strong><small>${esc(access.email)}</small></div>
+        <div><span>${esc(clientRoleLabel(access.role))}</span><small>${esc(clientAccessLabel(access))}</small></div>
+        <div class="client-user-state">${access.is_active ? 'Активен' : 'Отключён'}</div>
+        <button class="client-user-more" data-client-access-menu="${access.id}" aria-label="Действия">⋯</button>
+      </article>`).join('') : '<div class="client-empty">Пользователей с доступом пока нет</div>'}</div>`;
+    body.querySelector('#client-user-add').addEventListener('click', () => openClientUserEditor(client, null, refresh));
+    body.querySelectorAll('[data-client-access-menu]').forEach((button) => button.addEventListener('click', () => {
+      const access = accesses.find((item) => item.id === button.dataset.clientAccessMenu);
+      if (access) openClientAccessActions(client, access, refresh);
+    }));
+  };
+  const refresh = async () => {
+    try { accesses = await api(`/client-portal/access?client_id=${encodeURIComponent(client.id)}`); draw(); }
+    catch (error) { backdrop.querySelector('#modal-body').innerHTML = `<div class="client-empty">${esc(error.message)}</div>`; }
+  };
+  await refresh();
+}
+
+async function openClientUserEditor(client, access = null, done = () => {}) {
+  let users = [];
+  try { users = await api('/users'); } catch (error) { return toast(error.message, 'error'); }
+  const clientUsers = users.filter((item) => ['client_admin', 'client_site_user'].includes(item.role));
+  const sites = state.sites.filter((site) => site.client_id === client.id && site.is_active);
+  const backdrop = openModal(access ? 'Изменить доступ' : 'Добавить пользователя', `
+    <form class="client-user-editor" id="client-user-access-form">
+      ${access ? `<div class="field"><label>Пользователь</label><input value="${esc(access.full_name)}" disabled></div>` : `
+      <div class="field"><label>Пользователь</label><select id="client-access-user"><option value="">Создать нового пользователя…</option>${clientUsers.map((item) => `<option value="${item.id}">${esc(item.full_name)} · ${esc(item.email)}</option>`).join('')}</select></div>
+      <div class="client-new-user-fields"><div class="field"><label>ФИО</label><input id="client-user-name" autocomplete="name"></div><div class="field"><label>Email</label><input id="client-user-email" type="email" autocomplete="email"></div><div class="field"><label>Телефон</label><input id="client-user-phone" autocomplete="tel"></div><div class="field"><label>Временный пароль</label><input id="client-user-password" type="password" autocomplete="new-password"></div></div>`}
+      <div class="field"><label>Роль</label><select id="client-access-role" ${access ? 'disabled' : ''}><option value="client_admin" ${access?.role === 'client_admin' ? 'selected' : ''}>Администратор клиента — все объекты</option><option value="client_site_user" ${access?.role === 'client_site_user' ? 'selected' : ''}>Менеджер объекта — один объект</option></select></div>
+      <div class="field" id="client-access-site-field"><label>Объект</label><select id="client-access-site"><option value="">Выберите объект</option>${sites.map((site) => `<option value="${site.id}" ${access?.site_id === site.id ? 'selected' : ''}>${esc(site.name)}</option>`).join('')}</select></div>
+      ${access ? `<div class="field"><label><input id="client-access-active" type="checkbox" ${access.is_active ? 'checked' : ''}> Доступ активен</label></div>` : ''}
+    </form>`, '<button class="btn btn-secondary" id="modal-cancel">Отмена</button><button class="btn btn-primary" id="modal-save">Сохранить</button>');
+  const roleInput = backdrop.querySelector('#client-access-role');
+  const siteField = backdrop.querySelector('#client-access-site-field');
+  const toggleScope = () => { siteField.classList.toggle('hidden', roleInput.value === 'client_admin'); };
+  roleInput.addEventListener('change', toggleScope); toggleScope();
+  backdrop.querySelector('#modal-cancel').addEventListener('click', () => { closeModal(); openClientUsersModal(client); });
+  backdrop.querySelector('#modal-save').addEventListener('click', async () => {
+    try {
+      let userId = access?.user_id;
+      const role = roleInput.value;
+      const siteId = role === 'client_site_user' ? backdrop.querySelector('#client-access-site').value : null;
+      if (role === 'client_site_user' && !siteId) return toast('Выберите объект для менеджера', 'error');
+      if (!userId) {
+        userId = backdrop.querySelector('#client-access-user').value;
+        if (!userId) {
+          const full_name = backdrop.querySelector('#client-user-name').value.trim();
+          const email = backdrop.querySelector('#client-user-email').value.trim();
+          const password = backdrop.querySelector('#client-user-password').value;
+          if (!full_name || !email || password.length < 8) return toast('Укажите ФИО, email и временный пароль не короче 8 символов', 'error');
+          const account = await api('/users', { method: 'POST', body: JSON.stringify({ full_name, email, password, role, phone: backdrop.querySelector('#client-user-phone').value.trim() || null }) });
+          userId = account.id;
+        }
+      }
+      if (access) await api(`/client-portal/access/${access.id}`, { method: 'PATCH', body: JSON.stringify({ site_id: siteId, is_active: backdrop.querySelector('#client-access-active').checked }) });
+      else await api('/client-portal/access', { method: 'POST', body: JSON.stringify({ user_id: userId, client_id: client.id, site_id: siteId }) });
+      closeModal(); toast(access ? 'Доступ обновлён' : 'Пользователь добавлен'); await done(); openClientUsersModal(client);
+    } catch (error) { toast(error.message, 'error'); }
+  });
+}
+
+function openClientAccessActions(client, access, done) {
+  const backdrop = openModal(access.full_name, `<div class="client-access-actions"><button id="client-access-edit">Изменить доступ</button><button id="client-access-toggle">${access.is_active ? 'Отключить' : 'Активировать'}</button><button class="danger" id="client-access-delete">Удалить доступ</button></div>`);
+  backdrop.querySelector('#client-access-edit').addEventListener('click', () => openClientUserEditor(client, access, done));
+  backdrop.querySelector('#client-access-toggle').addEventListener('click', async () => {
+    try { await api(`/client-portal/access/${access.id}`, { method: 'PATCH', body: JSON.stringify({ is_active: !access.is_active }) }); closeModal(); await done(); openClientUsersModal(client); }
+    catch (error) { toast(error.message, 'error'); }
+  });
+  backdrop.querySelector('#client-access-delete').addEventListener('click', async () => {
+    try { await api(`/client-portal/access/${access.id}`, { method: 'DELETE' }); closeModal(); toast('Доступ удалён'); await done(); openClientUsersModal(client); }
+    catch (error) { toast(error.message, 'error'); }
+  });
 }
 
 function openCreateClientModal() {

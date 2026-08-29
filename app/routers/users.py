@@ -39,8 +39,12 @@ async def list_users(
 async def create_user(
     payload: UserCreate,
     db: AsyncSession = Depends(get_db),
-    current=Depends(require_roles(UserRole.admin)),
+    current=Depends(require_roles(UserRole.admin, UserRole.dispatcher)),
 ):
+    # A dispatcher may onboard only a client representative.  Creating or
+    # elevating internal staff remains an administrator/owner operation.
+    if current.role == UserRole.dispatcher and payload.role not in {UserRole.client_admin, UserRole.client_site_user}:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Диспетчер может создавать только пользователей клиента")
     existing = await db.scalar(select(User).where(User.email == payload.email))
     user = existing or User(
         full_name=payload.full_name, email=payload.email, phone=payload.phone,

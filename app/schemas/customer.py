@@ -66,3 +66,29 @@ class SiteOut(SiteBase):
     is_active: bool
     equipment_count: int = 0
     created_at: datetime
+
+
+class ClientAccessCreate(BaseModel):
+    """A human-readable client cabinet access assignment."""
+    user_id: uuid.UUID
+    client_id: uuid.UUID
+    site_id: uuid.UUID | None = None
+
+
+class ClientAccessUpdate(BaseModel):
+    # An omitted field means "leave unchanged"; explicit null is meaningful
+    # for a CLIENT_ADMIN whose scope is all sites of the client.
+    site_id: uuid.UUID | None = None
+    is_active: bool | None = None
+
+
+class ClientAccessOut(BaseModel):
+    id: uuid.UUID
+    user_id: uuid.UUID
+    full_name: str
+    email: EmailStr
+    role: str
+    client_id: uuid.UUID
+    site_id: uuid.UUID | None = None
+    site_name: str | None = None
+    is_active: bool
