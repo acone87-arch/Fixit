@@ -30,6 +30,7 @@ from app.schemas.equipment import (
     EquipmentTypeOut,
     RepairHistoryEntry,
 )
+from app.services.client_portal import CLIENT_ROLES, client_scope, ensure_client_equipment
 
 router = APIRouter(prefix="/api/equipment", tags=["equipment"])
 types_router = APIRouter(prefix="/api/equipment-types", tags=["equipment"])
@@ -46,6 +47,8 @@ def _photo_out(item: EquipmentAttachment) -> EquipmentPhotoOut:
 
 
 async def _equipment_for_user(equipment_id: uuid.UUID, db: AsyncSession, user: CurrentUser) -> Equipment:
+    if user.role in CLIENT_ROLES:
+        return await ensure_client_equipment(equipment_id, user, db)
     equipment = await db.scalar(select(Equipment).where(
         Equipment.id == equipment_id, Equipment.organization_id == user.organization_id,
     ))
@@ -76,15 +79,23 @@ async def create_equipment_type(
 
 @router.get("", response_model=list[EquipmentOut])
 async def list_equipment(db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
-    rows = (
-        await db.execute(
-            select(Equipment, EquipmentType.name, EquipmentAttachment)
+    statement = (select(Equipment, EquipmentType.name, EquipmentAttachment)
+        .join(EquipmentType, Equipment.equipment_type_id == EquipmentType.id)
+        .outerjoin(EquipmentAttachment, (EquipmentAttachment.equipment_id == Equipment.id) & (EquipmentAttachment.organization_id == user.organization_id))
+        .where(Equipment.organization_id == user.organization_id)
+        .order_by(Equipment.updated_at.desc()))
+    # Keep legacy internal list fast, but never expose another client's units
+    # when this generic endpoint is used by a client representative.
+    if user.role in CLIENT_ROLES:
+        client_id, site_ids = await client_scope(user, db)
+        statement = (select(Equipment, EquipmentType.name, EquipmentAttachment)
             .join(EquipmentType, Equipment.equipment_type_id == EquipmentType.id)
+            .join(Site, Site.id == Equipment.site_id)
             .outerjoin(EquipmentAttachment, (EquipmentAttachment.equipment_id == Equipment.id) & (EquipmentAttachment.organization_id == user.organization_id))
-            .where(Equipment.organization_id == user.organization_id)
-            .order_by(Equipment.updated_at.desc())
-        )
-    ).all()
+            .where(Equipment.organization_id == user.organization_id, Site.client_id == client_id)
+            .order_by(Equipment.updated_at.desc()))
+        if site_ids is not None: statement = statement.where(Site.id.in_(site_ids))
+    rows = (await db.execute(statement)).all()
     # Для старых записей сохраняем историческое поле name в БД, но наружу
     # всегда отдаём тип: все клиенты показывают единое обозначение техники.
     return [EquipmentOut.model_validate(equipment).model_copy(update={
@@ -298,6 +309,8 @@ async def delete_equipment(
 @router.get("/{equipment_id}/passport", response_model=EquipmentPassport)
 async def get_passport(equipment_id: uuid.UUID, db: AsyncSession = Depends(get_db),
                        user: CurrentUser = Depends(get_current_user)):
+    if user.role in CLIENT_ROLES:
+        await ensure_client_equipment(equipment_id, user, db)
     equipment_row = (await db.execute(
         select(Equipment, EquipmentType.name, Site, Client, EquipmentAttachment)
         .join(EquipmentType, EquipmentType.id == Equipment.equipment_type_id)

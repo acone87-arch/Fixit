@@ -32,9 +32,12 @@ class TicketOut(BaseModel):
 
 
 class TicketCreateResult(BaseModel):
-    ticket_id: uuid.UUID
+    ticket_id: uuid.UUID | None = None
+    service_request_id: uuid.UUID | None = None
+    number: int | None = None
     status: TicketStatus
     duplicate: bool
+    active_request: bool = False
 
 
 class TicketAssign(BaseModel):

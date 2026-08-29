@@ -11,6 +11,7 @@ from app.models.core import Equipment, UserRole
 from app.models.customer import Client, Site
 from app.models.organization import AuditEvent
 from app.schemas.customer import ClientCreate, ClientOut, ClientUpdate, SiteCreate, SiteOut, SiteUpdate
+from app.services.client_portal import CLIENT_ROLES, client_scope
 
 router = APIRouter(prefix="/api/clients", tags=["clients"])
 sites_router = APIRouter(prefix="/api/sites", tags=["sites"])
@@ -43,7 +44,7 @@ async def _commit_or_conflict(db: AsyncSession, detail: str) -> None:
 async def list_clients(
     db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(get_current_user),
 ):
-    rows = (await db.execute(
+    query = (
         select(
             Client,
             func.count(func.distinct(Site.id)).label("site_count"),
@@ -54,7 +55,11 @@ async def list_clients(
         .where(Client.organization_id == user.organization_id)
         .group_by(Client.id)
         .order_by(Client.name)
-    )).all()
+    )
+    if user.role in CLIENT_ROLES:
+        client_id, _ = await client_scope(user, db)
+        query = query.where(Client.id == client_id)
+    rows = (await db.execute(query)).all()
     return [ClientOut.model_validate(client).model_copy(update={
         "site_count": site_count, "equipment_count": equipment_count,
     }) for client, site_count, equipment_count in rows]
@@ -129,6 +134,11 @@ async def list_sites(
     )
     if client_id:
         query = query.where(Site.client_id == client_id)
+    if user.role in CLIENT_ROLES:
+        scoped_client_id, site_ids = await client_scope(user, db)
+        query = query.where(Site.client_id == scoped_client_id)
+        if site_ids is not None:
+            query = query.where(Site.id.in_(site_ids))
     rows = (await db.execute(query)).all()
     return [SiteOut.model_validate(site).model_copy(update={
         "client_name": client_name, "equipment_count": equipment_count,

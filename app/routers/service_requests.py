@@ -15,6 +15,7 @@ from app.models.service_request import ServiceRequest, ServiceRequestAttachment,
 from app.models.warehouse import Part
 from app.schemas.service_request import REQUEST_STATUSES, ServiceRequestApproval, ServiceRequestAttachmentOut, ServiceRequestCreate, ServiceRequestDetail, ServiceRequestListItem, ServiceRequestOut, ServiceRequestStatusUpdate
 from app.services.service_requests import event, next_number
+from app.services.client_portal import CLIENT_ROLES, client_scope, ensure_client_equipment
 
 router = APIRouter(prefix="/api/service-requests", tags=["service requests"])
 UPLOAD_ROOT = Path("uploads")
@@ -47,6 +48,8 @@ async def request_for_user(request_id: uuid.UUID, db: AsyncSession, user: Curren
     ))
     if not request or (user.role == UserRole.technician and request.assigned_technician_id != user.id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Заявка не найдена")
+    if user.role in CLIENT_ROLES:
+        await ensure_client_equipment(request.equipment_id, user, db)
     return request
 
 
@@ -101,7 +104,7 @@ async def serialize(db, request, org):
     if not any(item["type"] == "request.created" for item in history):
         history.insert(0, {"at": request.created_at, "type": "request.created", "message": "Заявка создана", "details": {}, "actor": None})
     photo_out = {"id": primary_photo.id, "original_name": primary_photo.original_name, "media_type": primary_photo.media_type, "byte_size": primary_photo.byte_size, "uploaded_at": primary_photo.uploaded_at, "download_url": f"/api/equipment/{equipment.id}/photo"} if primary_photo else None
-    return ServiceRequestDetail(id=request.id, number=request.number, ticket_id=request.ticket_id, task_id=request.task_id, equipment_id=request.equipment_id, title=request.title, client_name=client_label(client, site), site_name=site.name, equipment_name=equipment.name, serial_number=equipment.serial_number, description=request.description, priority=request.priority, assigned_technician_id=request.assigned_technician_id, assigned_technician_name=technician_name, status=request.status, created_at=request.created_at, completed_at=request.completed_at, repair_id=repair.id if repair else None, parts_used=parts, outcome=repair.description if repair else None, history=history, site_address=site.address, contact_name=site.contact_name or client.contact_name, contact_phone=site.contact_phone or client.contact_phone, equipment_type=equipment_type, manufacturer=equipment.manufacturer, model=equipment.model, equipment_status=equipment.status.value, equipment_version=equipment.version, attachments=attachments, request_attachments=request_attachments, primary_photo=photo_out)
+    return ServiceRequestDetail(id=request.id, number=request.number, ticket_id=request.ticket_id, task_id=request.task_id, equipment_id=request.equipment_id, title=request.title, client_name=client_label(client, site), site_name=site.name, equipment_name=equipment.name, serial_number=equipment.serial_number, description=request.description, priority=request.priority, assigned_technician_id=request.assigned_technician_id, assigned_technician_name=technician_name, status=request.status, created_at=request.created_at, completed_at=request.completed_at, approval_target=request.approval_target, repair_id=repair.id if repair else None, parts_used=parts, outcome=repair.description if repair else None, history=history, site_address=site.address, contact_name=site.contact_name or client.contact_name, contact_phone=site.contact_phone or client.contact_phone, equipment_type=equipment_type, manufacturer=equipment.manufacturer, model=equipment.model, equipment_status=equipment.status.value, equipment_version=equipment.version, attachments=attachments, request_attachments=request_attachments, primary_photo=photo_out)
 
 
 @router.post("", response_model=ServiceRequestDetail, status_code=status.HTTP_201_CREATED)
@@ -221,6 +224,11 @@ async def list_requests(db: AsyncSession = Depends(get_db), user: CurrentUser = 
     )
     if user.role == UserRole.technician:
         query = query.where(ServiceRequest.assigned_technician_id == user.id)
+    elif user.role in CLIENT_ROLES:
+        client_id, site_ids = await client_scope(user, db)
+        query = query.where(Site.client_id == client_id)
+        if site_ids is not None:
+            query = query.where(Site.id.in_(site_ids))
     rows = (await db.execute(query)).all()
     return [
         ServiceRequestListItem(
@@ -236,8 +244,7 @@ async def list_requests(db: AsyncSession = Depends(get_db), user: CurrentUser = 
 
 @router.get("/{request_id}", response_model=ServiceRequestDetail)
 async def get_request(request_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
-    request = await db.scalar(select(ServiceRequest).where(ServiceRequest.id == request_id, ServiceRequest.organization_id == user.organization_id))
-    if not request or (user.role == UserRole.technician and request.assigned_technician_id != user.id): raise HTTPException(404, "Заявка не найдена")
+    request = await request_for_user(request_id, db, user)
     return await serialize(db, request, user.organization_id)
 
 @router.patch("/{request_id}/status", response_model=ServiceRequestOut)
@@ -251,6 +258,11 @@ async def update_status(request_id: uuid.UUID, payload: ServiceRequestStatusUpda
     if user.role != UserRole.technician and previous == "waiting_approval" and payload.status in {"in_progress", "cancelled"}:
         raise HTTPException(409, "Используйте действие согласования для этой заявки")
     request.status = payload.status
+    if payload.status == "waiting_approval":
+        target = (payload.details or {}).get("approval_target", "internal")
+        if target not in {"internal", "client"}:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Неизвестный получатель согласования")
+        request.approval_target = target
     if payload.status in {"completed", "closed", "cancelled"}: request.completed_at = datetime.now(timezone.utc)
     if request.task_id and payload.status == "in_progress":
         task = await db.scalar(select(Task).where(Task.id == request.task_id, Task.organization_id == user.organization_id))
@@ -260,6 +272,8 @@ async def update_status(request_id: uuid.UUID, payload: ServiceRequestStatusUpda
     details = {"from": previous, "to": payload.status, "transitioned_at": datetime.now(timezone.utc).isoformat()}
     if payload.details:
         details.update(payload.details)
+    if payload.status == "waiting_approval":
+        details["approval_target"] = request.approval_target
     db.add(event(user.organization_id, request.id, user.id, event_types.get(payload.status, "status.changed"), payload.note or event_messages.get(payload.status, f"Статус: {previous} → {payload.status}"), details))
     await db.commit(); await db.refresh(request)
     return await serialize(db, request, user.organization_id)

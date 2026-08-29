@@ -15,6 +15,8 @@ class UserRole(str, enum.Enum):
     admin = "admin"
     dispatcher = "dispatcher"
     technician = "technician"
+    client_admin = "client_admin"
+    client_site_user = "client_site_user"
 
 
 class EquipmentStatus(str, enum.Enum):

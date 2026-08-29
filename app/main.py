@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.routers import auth, customers, equipment, organizations, repairs, service_requests, sync, tasks, tickets, users, warehouses
+from app.routers import auth, client_portal, customers, equipment, organizations, repairs, service_requests, sync, tasks, tickets, users, warehouses
 
 app = FastAPI(title="Service & Warehouse Management API", version="0.1.0")
 
@@ -30,6 +30,7 @@ app.include_router(tickets.admin_router)
 app.include_router(sync.router)
 app.include_router(repairs.router)
 app.include_router(service_requests.router)
+app.include_router(client_portal.router)
 
 
 @app.get("/health", tags=["meta"])
@@ -45,7 +46,7 @@ async def qr_redirect(qr_token: str):
     # Версия в URL не даёт мобильному браузеру повторно использовать
     # закэшированную гостевую страницу со старой логикой idempotency.
     return RedirectResponse(
-        url=f"/guest/?token={qr_token}&v=20260819-2",
+        url=f"/guest/?token={qr_token}&v=20260829-1",
         headers={"Cache-Control": "no-store"},
     )
 

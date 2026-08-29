@@ -36,40 +36,26 @@
     <div id="loading">Загрузка данных об оборудовании…</div>
 
     <div id="content" class="hidden">
-      <h1>Сообщить о поломке</h1>
-      <div class="sub eq-name" id="eq-name"></div>
+      <div class="sub">FIXIT PULSE</div><img id="eq-photo" class="hidden" alt="Оборудование" style="width:100%;max-height:180px;object-fit:cover;border-radius:10px;margin:0 0 12px">
+      <h1 id="eq-name">Оборудование</h1>
+      <div class="sub" id="eq-meta"></div>
 
       <div id="error" class="msg msg-error hidden"></div>
 
       <form id="form">
-        <div class="field">
-          <label>Насколько серьёзно</label>
-          <div class="severity">
-            <button type="button" data-sev="partially_working">Работает с перебоями</button>
-            <button type="button" data-sev="not_working" class="active">Не работает</button>
-          </div>
-        </div>
-        <div class="field">
-          <label>Что не так (можно несколько)</label>
-          <div class="chip-group" id="symptoms">
-            <button type="button" class="chip" data-tag="Течёт">Течёт</button>
-            <button type="button" class="chip" data-tag="Шумит">Шумит</button>
-            <button type="button" class="chip" data-tag="Не включается">Не включается</button>
-            <button type="button" class="chip" data-tag="Плохо моет">Плохо моет</button>
-          </div>
-        </div>
-        <div class="field"><label>Комментарий</label><textarea id="comment" placeholder="Необязательно"></textarea></div>
-        <div class="field"><label>Ваше имя</label><input id="name" placeholder="Необязательно"></div>
+        <div class="field"><label>Что случилось? *</label><textarea id="comment" required placeholder="Например: не собирает воду"></textarea></div>
+        <div class="field"><label>Фото проблемы</label><input id="photos" type="file" accept="image/*" capture="environment" multiple><div class="sub" id="photo-count"></div></div>
+        <div class="field"><label>Имя</label><input id="name" placeholder="Необязательно"></div>
         <div class="field"><label>Телефон</label><input id="phone" placeholder="Необязательно, если нужно уточнить"></div>
-        <button type="submit" class="btn" id="submit-btn">Отправить</button>
+        <button type="submit" class="btn" id="submit-btn">ОТПРАВИТЬ ЗАЯВКУ</button>
       </form>
     </div>
 
     <div id="success" class="hidden">
-      <div class="msg msg-success">Спасибо! Заявка передана в сервис.</div>
+      <div class="msg msg-success"><strong>✓ Заявка отправлена</strong><br><span id="success-number"></span><br>Сервисная служба получила сообщение. Можно закрыть страницу.</div>
     </div>
   </div>
 
-<script src="/guest/app.js?v=20260819-2"></script>
+<script src="/guest/app.js?v=20260829-1"></script>
 </body>
 </html>

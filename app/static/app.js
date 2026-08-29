@@ -17,6 +17,7 @@ let adminScanStream = null;
 let activeTechnicianWorkspaceCleanup = null;
 let activeServiceRequestDetailCleanup = null;
 let activeImageLightbox = null;
+let activeClientPhotoUrls = [];
 
 // ---------- API-клиент ----------
 
@@ -283,7 +284,7 @@ const TICKET_SEVERITY = {
   not_working: 'Не работает',
   partially_working: 'Работает с перебоями',
 };
-const ROLE_LABEL = { owner: 'Владелец', admin: 'Администратор', dispatcher: 'Диспетчер', technician: 'Техник' };
+const ROLE_LABEL = { owner: 'Владелец', admin: 'Администратор', dispatcher: 'Диспетчер', technician: 'Техник', client_admin: 'Представитель клиента', client_site_user: 'Представитель объекта' };
 
 function badge(map, key) {
   const info = map[key] || { label: key, cls: 'idle' };
@@ -315,6 +316,8 @@ const NAV = {
     ['pulse', 'Pulse'], ['requests', 'Мои заявки'], ['equipment', 'Оборудование'],
     ['warehouse', 'Мой склад'],
   ],
+  client_admin: [['pulse', 'Главная'], ['requests', 'Заявки'], ['equipment', 'Оборудование'], ['documents', 'Документы']],
+  client_site_user: [['pulse', 'Главная'], ['requests', 'Заявки'], ['equipment', 'Оборудование'], ['documents', 'Документы']],
 };
 
 function renderNav() {
@@ -333,7 +336,9 @@ function renderNav() {
 function renderMobileNav(items) {
   const mobileNav = document.getElementById('mobile-nav');
   const moreMenu = document.getElementById('more-menu');
-  const primary = [
+  const primary = state.me.role.startsWith('client_') ? [
+    ['pulse', 'Главная', 'pulse'], ['requests', 'Заявки', 'tasks'], ['equipment', 'Оборудование', 'equipment'], ['documents', 'Документы', 'warehouse'], ['more', 'Ещё', 'more'],
+  ] : [
     ['pulse', 'Пульс', 'pulse'], ['requests', 'Заявки', 'tasks'], ['qr', 'QR', 'qr'],
     ['equipment', 'Оборудование', 'equipment'], ['more', 'Ещё', 'more'],
   ];
@@ -423,6 +428,8 @@ function openQrQuickAction() {
 
 async function router() {
   closeImageLightbox();
+  activeClientPhotoUrls.forEach((url) => URL.revokeObjectURL(url));
+  activeClientPhotoUrls = [];
   const defaultRoute = 'pulse';
   const hashRoute = location.hash.replace('#', '') || defaultRoute;
   const [route, requestId] = hashRoute.split('/');
@@ -451,10 +458,14 @@ async function router() {
   content.innerHTML = '<div class="section-loading">Загрузка…</div>';
   try {
     if (state.route === 'pulse') await renderPulse(content);
+    else if (state.me.role.startsWith('client_') && state.route === 'requests' && state.requestId) await renderClientRequest(content, state.requestId);
     else if (state.route === 'requests' && state.requestId) await openServiceRequest(state.requestId);
+    else if (state.me.role.startsWith('client_') && state.route === 'requests') await renderClientRequests(content);
     else if (state.route === 'requests') await renderServiceRequests(content);
     else if (state.route === 'clients') await renderClients(content);
+    else if (state.me.role.startsWith('client_') && state.route === 'equipment') await renderClientEquipment(content);
     else if (state.route === 'equipment') await renderEquipment(content);
+    else if (state.me.role.startsWith('client_') && state.route === 'documents') await renderClientDocuments(content);
     else if (state.route === 'tasks') await renderServiceRequests(content);
     else if (state.route === 'tickets') await renderServiceRequests(content);
     else if (state.route === 'warehouse') await renderWarehouse(content);
@@ -474,6 +485,58 @@ async function renderServiceRequests(content) {
   const requestCards = requests.length ? requests.map((item) => `<button class="mobile-info-card request-card request-row" data-id="${item.id}"><div class="mobile-card-top"><span class="request-number">SR-${String(item.number).padStart(5, '0')}</span>${requestBadge(item)}</div><strong>${esc(item.title || item.description || 'Без описания')}</strong><span class="text-soft">${esc(item.equipment_name || 'Оборудование не указано')} · <span class="mono">${esc(item.serial_number || '—')}</span></span><div class="request-card-detail"><span>${esc(item.client_name || 'Клиент не указан')}<small>${esc(item.site_name || 'Объект не указан')}</small></span><span class="assigned-master">${esc(item.assigned_technician_name || 'Мастер не назначен')}</span></div></button>`).join('') : '<div class="mobile-empty">Заявок пока нет</div>';
   content.innerHTML = `<div class="page-header"><div><h1>Заявки</h1><div class="page-subtitle">Единый путь обращения: от QR до сервисного акта</div></div></div><div class="card mobile-table" style="padding:0"><table><thead><tr><th>№ / проблема</th><th>Клиент и объект</th><th>Оборудование</th><th>Мастер</th><th>Статус</th></tr></thead><tbody>${requestRows}</tbody></table></div><div class="mobile-card-list" id="request-cards">${requestCards}</div>`;
   content.querySelectorAll('.request-row').forEach((row) => row.addEventListener('click', () => navigateToServiceRequest(row.dataset.id)));
+}
+
+const CLIENT_STATUS = { new: 'Заявка принята', assigned: 'Мастер назначен', on_the_way: 'Мастер в пути', arrived: 'Мастер прибыл', in_progress: 'В работе', waiting_parts: 'Ожидание запчастей', waiting_approval: 'Требуется согласование', completed: 'Ремонт выполнен', closed: 'Заявка закрыта', cancelled: 'Заявка отменена' };
+const clientBadge = (status) => `<span class="badge badge-${['completed','closed'].includes(status) ? 'good' : status === 'waiting_approval' ? 'amber' : status === 'cancelled' ? 'idle' : 'warn'}"><span class="badge-dot"></span>${esc(CLIENT_STATUS[status] || status)}</span>`;
+
+async function renderClientPulse(content) {
+  const data = await api('/client-portal/dashboard');
+  content.innerHTML = `<section class="client-home"><div class="page-header"><div><span class="client-kicker">FIXIT PULSE</span><h1>Добрый день</h1><div class="page-subtitle">${esc(data.client_name)}</div></div></div><div class="client-summary-grid"><article><span>ОБОРУДОВАНИЕ</span><strong>${data.equipment_total}</strong><p>● ${data.working} работает<br>● ${data.needs_repair} в ремонте<br>● ${data.waiting_approval} ожидают согласования</p></article><article><span>ЗАЯВКИ</span><strong>${data.active_requests}</strong><p>активных<br>${data.approval_requests ? `<b>${data.approval_requests} требует вашего решения</b>` : 'Нет заявок, требующих согласования'}</p></article></div><div class="client-actions"><button class="btn btn-primary" id="client-new-request">+ Создать заявку</button><button class="btn btn-secondary" data-client-route="equipment">Оборудование</button><button class="btn btn-secondary" data-client-route="requests">Заявки</button><button class="btn btn-secondary" data-client-route="documents">Документы</button></div></section>`;
+  content.querySelectorAll('[data-client-route]').forEach((button) => button.addEventListener('click', () => location.hash = button.dataset.clientRoute));
+  content.querySelector('#client-new-request').addEventListener('click', () => openClientRequestForm());
+}
+
+async function renderClientRequests(content) {
+  const requests = await api('/client-portal/requests');
+  const cards = requests.length ? requests.map((item) => `<button class="client-request-card" data-client-request="${item.id}"><div><span>SR-${String(item.number).padStart(5,'0')}</span>${clientBadge(item.status)}</div><strong>${esc(item.title || item.description || 'Заявка')}</strong><p>${esc(item.equipment_name)} · ${esc(item.site_name || '')}</p><small>Создана: ${fmtDate(item.created_at)}</small></button>`).join('') : '<div class="client-empty">Нет активных заявок<br><small>✓ Всё оборудование работает</small></div>';
+  content.innerHTML = `<div class="page-header"><div><h1>Заявки</h1><div class="page-subtitle">Что происходит с вашим сервисом</div></div><button class="btn btn-primary" id="client-new-request">+ Создать</button></div><div class="client-filter"><button class="active">Все</button><button>Активные</button><button>Ожидают меня</button><button>Завершённые</button></div><div class="client-request-list">${cards}</div>`;
+  content.querySelector('#client-new-request').addEventListener('click', () => openClientRequestForm());
+  content.querySelectorAll('[data-client-request]').forEach((button) => button.addEventListener('click', () => navigateToServiceRequest(button.dataset.clientRequest)));
+}
+
+async function renderClientRequest(content, id) {
+  const item = await api(`/client-portal/requests/${id}`);
+  const events = item.history.filter((entry) => ['request.created','technician.assigned','technician.arrived','work.started','request.waiting_parts','request.waiting_approval','approval.approved','approval.rejected','repair.completed','service_act.generated'].includes(entry.type));
+  const timeline = events.map((entry) => `<div class="client-timeline-item"><i></i><div><strong>${esc(entry.type === 'approval.rejected' ? 'Согласование отклонено' : entry.type === 'approval.approved' ? 'Работы согласованы' : CLIENT_STATUS[entry.details?.to] || entry.message)}</strong>${entry.details?.comment ? `<p>${esc(entry.details.comment)}</p>` : ''}<small>${fmtDate(entry.at)}</small></div></div>`).join('') || '<div class="client-empty">История появится после начала работы.</div>';
+  const approval = item.status === 'waiting_approval' && item.approval_target === 'client' ? `<section class="client-approval"><span>ТРЕБУЕТСЯ СОГЛАСОВАНИЕ</span><h3>Сервис просит подтвердить работы</h3><p>${esc(item.outcome || item.description || 'Откройте историю и фотографии для деталей.')}</p><button class="btn btn-secondary" id="client-reject">Отклонить</button><button class="btn btn-primary" id="client-approve">Согласовать</button></section>` : '';
+  content.innerHTML = `<section class="client-request-detail"><button class="sr-back" id="client-back">← К заявкам</button><header><span>SR-${String(item.number).padStart(5,'0')}</span>${clientBadge(item.status)}</header><h1>${esc(item.title || item.description || 'Заявка')}</h1><section><h3>Оборудование</h3><strong>${esc(item.equipment_type || item.equipment_name)}</strong><p>${esc([item.manufacturer,item.model].filter(Boolean).join(' '))} · S/N ${esc(item.serial_number)}</p><small>${esc(item.site_name || '')}</small></section><section><h3>Проблема</h3><p>${esc(item.description || 'Описание не добавлено')}</p></section>${approval}<section><h3>Ход заявки</h3>${timeline}</section></section>`;
+  content.querySelector('#client-back').addEventListener('click', () => location.hash = 'requests');
+  const approve = async (action) => { const comment = action === 'rejected' ? prompt('Причина отказа (обязательно):') : prompt('Комментарий (необязательно):'); if (action === 'rejected' && !comment?.trim()) return; await api(`/client-portal/requests/${id}/approval`, { method: 'PATCH', body: JSON.stringify({ action, comment: comment || null }) }); await renderClientRequest(content, id); };
+  content.querySelector('#client-approve')?.addEventListener('click', () => approve('approved'));
+  content.querySelector('#client-reject')?.addEventListener('click', () => approve('rejected'));
+}
+
+async function renderClientEquipment(content) {
+  const equipment = await api('/client-portal/equipment');
+  const cards = equipment.length ? equipment.map((item) => `<button class="client-equipment-card" data-client-equipment="${item.id}">${item.primary_photo ? `<img data-client-equipment-photo="${item.id}" alt="Фото оборудования">` : '<div class="client-equipment-placeholder">FIXIT</div>'}<div><strong>${esc([item.manufacturer,item.model].filter(Boolean).join(' ') || item.name)}</strong><span>${esc(item.name)}</span><small>S/N ${esc(item.serial_number)} · ${esc(item.site_name)}</small>${clientBadge(item.status === 'needs_repair' ? 'in_progress' : 'completed')}</div></button>`).join('') : '<div class="client-empty">Нет оборудования на объекте</div>';
+  content.innerHTML = `<div class="page-header"><div><h1>Оборудование</h1><div class="page-subtitle">Моё оборудование и сервис</div></div></div><input class="client-search" placeholder="Поиск оборудования"><div class="client-equipment-list">${cards}</div>`;
+  content.querySelectorAll('[data-client-equipment]').forEach((button) => button.addEventListener('click', () => openClientRequestForm(button.dataset.clientEquipment)));
+  content.querySelectorAll('[data-client-equipment-photo]').forEach((image) => apiBlob(`/equipment/${image.dataset.clientEquipmentPhoto}/photo`).then((blob) => { const url = URL.createObjectURL(blob); activeClientPhotoUrls.push(url); image.src = url; }).catch(() => image.remove()));
+}
+
+async function renderClientDocuments(content) {
+  const documents = await api('/client-portal/documents');
+  content.innerHTML = `<div class="page-header"><div><h1>Документы</h1><div class="page-subtitle">Сервисные акты и документы оборудования</div></div></div><div class="client-documents">${documents.length ? documents.map((item) => `<article><strong>Сервисный акт · SR-${String(item.number).padStart(5,'0')}</strong><span>${esc(item.equipment_name)} · ${esc(item.site_name)}</span><small>${fmtDate(item.closed_at)}</small><button class="btn btn-ghost btn-sm" data-client-act="${item.repair_id}">Скачать PDF</button></article>`).join('') : '<div class="client-empty">Нет документов</div>'}</div>`;
+  content.querySelectorAll('[data-client-act]').forEach((button) => button.addEventListener('click', async () => downloadBlob(await apiBlob(`/repairs/${button.dataset.clientAct}/act.pdf`), 'service-act.pdf')));
+}
+
+async function openClientRequestForm(preselectedId = null) {
+  const equipment = await api('/client-portal/equipment');
+  const options = equipment.map((item) => `<option value="${item.id}" ${item.id === preselectedId ? 'selected' : ''}>${esc([item.manufacturer,item.model].filter(Boolean).join(' ') || item.name)} · ${esc(item.site_name)}</option>`).join('');
+  const backdrop = openModal('Новая заявка', `<label>Оборудование<select id="client-request-equipment">${options}</select></label><label>Проблема<textarea id="client-request-problem" required placeholder="Что случилось?"></textarea></label><label>Приоритет<select id="client-request-priority"><option value="planned">Обычный</option><option value="urgent">Срочно</option></select></label>`, '<button class="btn btn-secondary" id="client-request-cancel">Отмена</button><button class="btn btn-primary" id="client-request-submit">Отправить</button>');
+  backdrop.querySelector('#client-request-cancel').addEventListener('click', closeModal);
+  backdrop.querySelector('#client-request-submit').addEventListener('click', async () => { const title = backdrop.querySelector('#client-request-problem').value.trim(); if (!title) return toast('Опишите проблему', 'error'); const result = await api('/client-portal/requests', { method: 'POST', body: JSON.stringify({ equipment_id: backdrop.querySelector('#client-request-equipment').value, title, description: title, priority: backdrop.querySelector('#client-request-priority').value }) }); closeModal(); navigateToServiceRequest(result.id); });
 }
 
 async function openServiceRequest(id) {
@@ -851,6 +914,7 @@ async function openTechnicianRequestWorkspace(id, loadedRequest = null) {
 
 async function renderPulse(content) {
   if (state.me.role === 'technician') return renderTechnicianPulse(content);
+  if (state.me.role.startsWith('client_')) return renderClientPulse(content);
   const [clients, sites, equipment, requests, users] = await Promise.all([
     api('/clients'), api('/sites'), api('/equipment'), api('/service-requests'), api('/users'), ensureEquipmentTypes(),
   ]);

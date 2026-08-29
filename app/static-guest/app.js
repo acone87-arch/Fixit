@@ -4,7 +4,7 @@
 const params = new URLSearchParams(location.search);
 const qrToken = params.get('token');
 
-const state = { severity: 'not_working', tags: new Set() };
+const state = { severity: 'not_working', tags: new Set(), equipment: null };
 
 function createIdempotencyKey() {
   if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
@@ -21,7 +21,10 @@ async function init() {
     const res = await fetch(`/api/public/equipment/${qrToken}`);
     if (!res.ok) throw new Error();
     const eq = await res.json();
+    state.equipment = eq;
     document.getElementById('eq-name').textContent = `${eq.name}${eq.model ? ' · ' + eq.model : ''}`;
+    document.getElementById('eq-meta').textContent = `S/N ${eq.serial_number || '—'} · ${eq.site_name || 'Объект'} · ${eq.status === 'needs_repair' ? 'Требует ремонта' : 'Работает'}`;
+    if (eq.photo_url) { const photo = document.getElementById('eq-photo'); photo.src = eq.photo_url; photo.classList.remove('hidden'); }
     document.getElementById('loading').classList.add('hidden');
     document.getElementById('content').classList.remove('hidden');
   } catch (_) {
@@ -34,18 +37,7 @@ function showError(text) {
   document.getElementById('card').innerHTML = `<div class="msg msg-error">${text}</div>`;
 }
 
-document.addEventListener('click', (e) => {
-  if (e.target.dataset.sev) {
-    document.querySelectorAll('.severity button').forEach((b) => b.classList.remove('active'));
-    e.target.classList.add('active');
-    state.severity = e.target.dataset.sev;
-  }
-  if (e.target.dataset.tag) {
-    e.target.classList.toggle('active');
-    if (state.tags.has(e.target.dataset.tag)) state.tags.delete(e.target.dataset.tag);
-    else state.tags.add(e.target.dataset.tag);
-  }
-});
+document.getElementById('photos').addEventListener('change', (event) => { document.getElementById('photo-count').textContent = `Выбрано: ${Math.min(event.target.files.length, 3)} из 3`; });
 
 document.getElementById('form').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -71,8 +63,8 @@ document.getElementById('form').addEventListener('submit', async (e) => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         severity: state.severity,
-        symptom_tags: Array.from(state.tags).length ? Array.from(state.tags) : ['Не указано'],
-        comment: document.getElementById('comment').value.trim() || null,
+        symptom_tags: ['Сообщение оператора'],
+        comment: document.getElementById('comment').value.trim(),
         reporter_name: document.getElementById('name').value.trim() || null,
         reporter_phone: document.getElementById('phone').value.trim() || null,
         idempotency_key: idempotencyKey,
@@ -82,10 +74,16 @@ document.getElementById('form').addEventListener('submit', async (e) => {
       const body = await res.json().catch(() => ({}));
       throw new Error(typeof body.detail === 'string' ? body.detail : 'Не удалось отправить заявку');
     }
+    const body = await res.json();
+    if (!body.service_request_id) throw new Error('Не удалось определить созданную заявку');
+    const files = [...document.getElementById('photos').files].slice(0, 3);
+    const uploads = await Promise.allSettled(files.map((file) => { const data = new FormData(); data.append('file', file); return fetch(`/api/public/equipment/${qrToken}/requests/${body.service_request_id}/attachments`, { method: 'POST', body: data }); }));
+    if (uploads.some((upload) => upload.status === 'rejected' || !upload.value.ok)) console.warn('Не все фотографии загружены');
     // Следующее обращение по этому QR — это уже новая заявка, а не повтор
     // предыдущей отправки. При ошибке ключ намеренно остаётся для ретрая.
     localStorage.removeItem(idKey);
     document.getElementById('content').classList.add('hidden');
+    document.getElementById('success-number').textContent = `SR-${String(body.number || '').padStart(5, '0')} · ${body.active_request ? 'Заявка уже в работе' : 'Заявка принята'}`;
     document.getElementById('success').classList.remove('hidden');
   } catch (err) {
     errorEl.textContent = err.message;

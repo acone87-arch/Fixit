@@ -17,6 +17,7 @@ from app.models.warehouse import Part
 from app.models.service_request import ServiceRequest
 from app.schemas.repair import RepairAttachmentOut
 from app.services.service_requests import event
+from app.services.client_portal import CLIENT_ROLES, ensure_client_equipment
 from app.services.service_act_pdf import build_service_act
 
 router = APIRouter(prefix="/api/repairs", tags=["repairs"])
@@ -33,6 +34,8 @@ async def _repair_for_user(repair_id: uuid.UUID, db: AsyncSession, user: Current
     ))
     if not repair:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Акт ремонта не найден")
+    if user.role in CLIENT_ROLES:
+        await ensure_client_equipment(repair.equipment_id, user, db)
     if user.role == UserRole.technician and repair.technician_id != user.id:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Можно работать только со своими актами")
     return repair

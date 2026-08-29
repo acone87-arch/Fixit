@@ -120,7 +120,10 @@ class PublicEquipmentOut(BaseModel):
     name: str
     manufacturer: str | None
     model: str | None
+    serial_number: str
     status: EquipmentStatus
+    site_name: str | None = None
+    photo_url: str | None = None
 
 
 class TaskBase(BaseModel):

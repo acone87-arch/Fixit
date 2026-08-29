@@ -23,6 +23,9 @@ class ServiceRequest(Base):
     assigned_technician_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
     title: Mapped[str] = mapped_column(String(255))
     description: Mapped[str | None] = mapped_column(Text)
+    # INTERNAL means dispatcher approves; CLIENT exposes the same request to
+    # the authorised representative of the client through the portal.
+    approval_target: Mapped[str] = mapped_column(String(20), default="internal")
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     completed_at: Mapped[datetime | None]
 
