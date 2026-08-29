@@ -432,9 +432,11 @@ async function router() {
   activeClientPhotoUrls = [];
   const defaultRoute = 'pulse';
   const hashRoute = location.hash.replace('#', '') || defaultRoute;
-  const [route, requestId] = hashRoute.split('/');
+  const [route, routeId, routeTab] = hashRoute.split('/');
   state.route = route === 'tasks' ? 'requests' : route;
-  state.requestId = route === 'requests' && requestId ? requestId : null;
+  state.requestId = route === 'requests' && routeId ? routeId : null;
+  state.clientId = route === 'clients' && routeId ? routeId : null;
+  state.clientTab = state.clientId ? (routeTab || 'overview') : null;
   if (route === 'tasks') history.replaceState(null, '', '#requests');
   const allowedRoutes = (NAV[state.me?.role] || []).map(([key]) => key);
   if (!allowedRoutes.includes(state.route)) {
@@ -462,6 +464,7 @@ async function router() {
     else if (state.route === 'requests' && state.requestId) await openServiceRequest(state.requestId);
     else if (state.me.role.startsWith('client_') && state.route === 'requests') await renderClientRequests(content);
     else if (state.route === 'requests') await renderServiceRequests(content);
+    else if (state.route === 'clients' && state.clientId) await renderClientDetail(content, state.clientId, state.clientTab);
     else if (state.route === 'clients') await renderClients(content);
     else if (state.me.role.startsWith('client_') && state.route === 'equipment') await renderClientEquipment(content);
     else if (state.route === 'equipment') await renderEquipment(content);
@@ -1042,11 +1045,11 @@ async function renderClients(content) {
         <button class="btn btn-primary" id="add-site-btn">+ Объект</button>
       </div>` : ''}
     </div>
-    <div class="card" style="padding:0;margin-bottom:18px">
+    <div class="card client-desktop-table" style="padding:0;margin-bottom:18px">
       <table>
         <thead><tr><th>Клиент</th><th>Реквизиты и контакт</th><th>Объектов</th><th>Оборудования</th><th>Статус</th>${canEdit ? '<th></th>' : ''}</tr></thead>
         <tbody>${state.clients.length ? state.clients.map((client) => `
-          <tr>
+          <tr class="client-table-row" data-client-open="${client.id}">
             <td><strong>${esc(client.name)}</strong>${client.legal_name ? `<div class="text-soft">${esc(client.legal_name)}</div>` : ''}</td>
             <td>${client.tax_id ? `<div>ИНН ${esc(client.tax_id)}</div>` : ''}<div class="text-soft">${esc(client.contact_name || '')} ${esc(client.contact_phone || '')}</div></td>
             <td>${client.site_count}</td><td>${client.equipment_count}</td>
@@ -1055,8 +1058,9 @@ async function renderClients(content) {
           </tr>`).join('') : '<tr class="empty-row"><td colspan="5">Клиентов пока нет</td></tr>'}</tbody>
       </table>
     </div>
+    <div class="client-mobile-list">${state.clients.length ? state.clients.map((client) => `<button class="client-mobile-card" data-client-open="${client.id}"><div><strong>${esc(client.legal_name || client.name)}</strong>${client.tax_id ? `<small>ИНН ${esc(client.tax_id)}</small>` : ''}</div><p>${client.site_count} объект(ов) · ${client.equipment_count} оборудование</p>${client.contact_name || client.contact_phone ? `<span>Контакт: ${esc([client.contact_name, client.contact_phone].filter(Boolean).join(' · '))}</span>` : '<span>Контакт не указан</span>'}<b>Открыть клиента →</b></button>`).join('') : '<div class="client-empty">Клиентов пока нет</div>'}</div>
     <div class="page-header" style="margin-bottom:10px"><div><h1 style="font-size:20px">Объекты обслуживания</h1></div></div>
-    <div class="card" style="padding:0">
+    <div class="card client-desktop-table" style="padding:0">
       <table>
         <thead><tr><th>Клиент</th><th>Объект</th><th>Адрес</th><th>Контакт</th><th>Оборудования</th></tr></thead>
         <tbody>${state.sites.length ? state.sites.map((site) => `
@@ -1067,16 +1071,60 @@ async function renderClients(content) {
             <td>${site.equipment_count}</td>
           </tr>`).join('') : '<tr class="empty-row"><td colspan="5">Объектов пока нет</td></tr>'}</tbody>
       </table>
-    </div>`;
+    </div>
+    <div class="site-mobile-list">${state.sites.length ? state.sites.map((site) => `<article class="site-mobile-card"><strong>${esc(site.name)}</strong><span>${esc(clientName(site.client_id))}</span><p>${esc(site.address || 'Адрес не указан')}</p><small>Оборудование: ${site.equipment_count}</small></article>`).join('') : '<div class="client-empty">Объектов пока нет</div>'}</div>`;
 
   if (canEdit) {
     document.getElementById('add-client-btn').addEventListener('click', openCreateClientModal);
     document.getElementById('add-site-btn').addEventListener('click', openCreateSiteModal);
-    content.querySelectorAll('[data-client-users]').forEach((button) => button.addEventListener('click', () => {
-      const client = state.clients.find((item) => item.id === button.dataset.clientUsers);
-      if (client) openClientUsersModal(client);
-    }));
   }
+  content.querySelectorAll('[data-client-open]').forEach((element) => element.addEventListener('click', (event) => {
+    if (event.target.closest('[data-client-users]')) return;
+    location.hash = `clients/${element.dataset.clientOpen}`;
+  }));
+  content.querySelectorAll('[data-client-users]').forEach((button) => button.addEventListener('click', () => {
+    location.hash = `clients/${button.dataset.clientUsers}/users`;
+  }));
+}
+
+async function renderClientDetail(content, clientId, tab = 'overview') {
+  await ensureCustomers(true);
+  const client = state.clients.find((item) => item.id === clientId);
+  if (!client) { content.innerHTML = '<div class="section-loading">Клиент не найден</div>'; return; }
+  const canManageUsers = ['owner', 'admin', 'dispatcher'].includes(state.me.role);
+  const tabs = [['overview', 'Обзор'], ['sites', 'Объекты'], ['equipment', 'Оборудование'], ['users', 'Пользователи']];
+  content.innerHTML = `<section class="client-detail-screen"><button class="sr-back" id="client-detail-back">← Клиенты</button><header class="client-detail-hero"><div><span>КЛИЕНТ</span><h1>${esc(client.legal_name || client.name)}</h1><p>${client.is_active ? '● Активен' : '● Отключён'}</p></div></header><div class="client-detail-meta">${client.tax_id ? `<div><span>ИНН</span><strong>${esc(client.tax_id)}</strong></div>` : ''}<div><span>Контакт</span><strong>${esc(client.contact_name || 'Не указан')}</strong><small>${esc(client.contact_phone || client.contact_email || '')}</small></div></div><nav class="client-detail-tabs">${tabs.map(([key,label]) => `<button data-client-tab="${key}" class="${tab === key ? 'active' : ''}">${label}</button>`).join('')}</nav><div id="client-detail-panel"></div></section>`;
+  content.querySelector('#client-detail-back').addEventListener('click', () => location.hash = 'clients');
+  content.querySelectorAll('[data-client-tab]').forEach((button) => button.addEventListener('click', () => location.hash = `clients/${client.id}/${button.dataset.clientTab}`));
+  const panel = content.querySelector('#client-detail-panel');
+  if (tab === 'sites') {
+    const sites = state.sites.filter((site) => site.client_id === client.id);
+    panel.innerHTML = `<div class="client-detail-card-list">${sites.length ? sites.map((site) => `<article><strong>${esc(site.name)}</strong><span>${esc(site.address || 'Адрес не указан')}</span><small>${esc([site.contact_name, site.contact_phone].filter(Boolean).join(' · ') || 'Контакт не указан')} · Оборудование: ${site.equipment_count}</small></article>`).join('') : '<div class="client-empty">У клиента пока нет объектов.</div>'}</div>`;
+  } else if (tab === 'equipment') {
+    const items = await api('/equipment');
+    const sites = new Map(state.sites.filter((site) => site.client_id === client.id).map((site) => [site.id, site]));
+    const equipment = items.filter((item) => sites.has(item.site_id));
+    panel.innerHTML = `<div class="client-detail-card-list">${equipment.length ? equipment.map((item) => `<article><strong>${esc(item.name)}</strong><span>${esc([item.manufacturer, item.model].filter(Boolean).join(' ') || 'Модель не указана')}</span><small>S/N ${esc(item.serial_number || '—')} · ${esc(sites.get(item.site_id).name)}</small></article>`).join('') : '<div class="client-empty">Оборудования пока нет.</div>'}</div>`;
+  } else if (tab === 'users') {
+    if (!canManageUsers) { panel.innerHTML = '<div class="client-empty">У вас нет права управлять пользователями клиента.</div>'; return; }
+    await renderClientUsersPanel(panel, client);
+  } else {
+    panel.innerHTML = `<div class="client-detail-overview"><article><span>ОБЪЕКТЫ</span><strong>${client.site_count}</strong><p>Площадки обслуживания клиента</p></article><article><span>ОБОРУДОВАНИЕ</span><strong>${client.equipment_count}</strong><p>Единиц в сервисе</p></article></div><section class="client-detail-contact"><h2>Контактные данные</h2><p>${esc(client.contact_name || 'Контактное лицо не указано')}</p><a href="tel:${esc(client.contact_phone || '')}">${esc(client.contact_phone || '')}</a><p>${esc(client.contact_email || '')}</p></section>`;
+  }
+}
+
+async function renderClientUsersPanel(panel, client) {
+  panel.innerHTML = '<div class="section-loading">Загрузка пользователей…</div>';
+  try {
+    const accesses = await api(`/client-portal/access?client_id=${encodeURIComponent(client.id)}`);
+    panel.innerHTML = `<div class="client-users-head"><div><span>ПОЛЬЗОВАТЕЛИ</span><p>Доступ к личному кабинету клиента и его объектам.</p></div><button class="btn btn-primary" id="client-user-add">+ Добавить пользователя</button></div><div class="client-users-list">${accesses.length ? accesses.map((access) => `<article class="client-user-row ${access.is_active ? '' : 'is-disabled'}"><div><strong>${esc(access.full_name)}</strong><small>${esc(access.email)}</small></div><div><span>${esc(clientRoleLabel(access.role))}</span><small>${esc(clientAccessLabel(access))}</small></div><div class="client-user-state">${access.is_active ? 'Активен' : 'Отключён'}</div><button class="client-user-more" data-client-access-menu="${access.id}" aria-label="Действия">⋯</button></article>`).join('') : '<div class="client-empty">Пользователей с доступом пока нет</div>'}</div>`;
+    const refresh = () => renderClientDetail(document.getElementById('content'), client.id, 'users');
+    panel.querySelector('#client-user-add').addEventListener('click', () => openClientUserEditor(client, null, refresh, false));
+    panel.querySelectorAll('[data-client-access-menu]').forEach((button) => button.addEventListener('click', () => {
+      const access = accesses.find((item) => item.id === button.dataset.clientAccessMenu);
+      if (access) openClientAccessActions(client, access, refresh, false);
+    }));
+  } catch (error) { panel.innerHTML = `<div class="client-empty">${esc(error.message)}</div>`; }
 }
 
 function clientRoleLabel(role) {
@@ -1112,7 +1160,7 @@ async function openClientUsersModal(client) {
   await refresh();
 }
 
-async function openClientUserEditor(client, access = null, done = () => {}) {
+async function openClientUserEditor(client, access = null, done = () => {}, reopenModal = true) {
   let users = [];
   try { users = await api('/users'); } catch (error) { return toast(error.message, 'error'); }
   const clientUsers = users.filter((item) => ['client_admin', 'client_site_user'].includes(item.role));
@@ -1130,7 +1178,7 @@ async function openClientUserEditor(client, access = null, done = () => {}) {
   const siteField = backdrop.querySelector('#client-access-site-field');
   const toggleScope = () => { siteField.classList.toggle('hidden', roleInput.value === 'client_admin'); };
   roleInput.addEventListener('change', toggleScope); toggleScope();
-  backdrop.querySelector('#modal-cancel').addEventListener('click', () => { closeModal(); openClientUsersModal(client); });
+  backdrop.querySelector('#modal-cancel').addEventListener('click', () => { closeModal(); if (reopenModal) openClientUsersModal(client); else done(); });
   backdrop.querySelector('#modal-save').addEventListener('click', async () => {
     try {
       let userId = access?.user_id;
@@ -1150,20 +1198,20 @@ async function openClientUserEditor(client, access = null, done = () => {}) {
       }
       if (access) await api(`/client-portal/access/${access.id}`, { method: 'PATCH', body: JSON.stringify({ site_id: siteId, is_active: backdrop.querySelector('#client-access-active').checked }) });
       else await api('/client-portal/access', { method: 'POST', body: JSON.stringify({ user_id: userId, client_id: client.id, site_id: siteId }) });
-      closeModal(); toast(access ? 'Доступ обновлён' : 'Пользователь добавлен'); await done(); openClientUsersModal(client);
+      closeModal(); toast(access ? 'Доступ обновлён' : 'Пользователь добавлен'); await done(); if (reopenModal) openClientUsersModal(client);
     } catch (error) { toast(error.message, 'error'); }
   });
 }
 
-function openClientAccessActions(client, access, done) {
+function openClientAccessActions(client, access, done, reopenModal = true) {
   const backdrop = openModal(access.full_name, `<div class="client-access-actions"><button id="client-access-edit">Изменить доступ</button><button id="client-access-toggle">${access.is_active ? 'Отключить' : 'Активировать'}</button><button class="danger" id="client-access-delete">Удалить доступ</button></div>`);
-  backdrop.querySelector('#client-access-edit').addEventListener('click', () => openClientUserEditor(client, access, done));
+  backdrop.querySelector('#client-access-edit').addEventListener('click', () => openClientUserEditor(client, access, done, reopenModal));
   backdrop.querySelector('#client-access-toggle').addEventListener('click', async () => {
-    try { await api(`/client-portal/access/${access.id}`, { method: 'PATCH', body: JSON.stringify({ is_active: !access.is_active }) }); closeModal(); await done(); openClientUsersModal(client); }
+    try { await api(`/client-portal/access/${access.id}`, { method: 'PATCH', body: JSON.stringify({ is_active: !access.is_active }) }); closeModal(); await done(); if (reopenModal) openClientUsersModal(client); }
     catch (error) { toast(error.message, 'error'); }
   });
   backdrop.querySelector('#client-access-delete').addEventListener('click', async () => {
-    try { await api(`/client-portal/access/${access.id}`, { method: 'DELETE' }); closeModal(); toast('Доступ удалён'); await done(); openClientUsersModal(client); }
+    try { await api(`/client-portal/access/${access.id}`, { method: 'DELETE' }); closeModal(); toast('Доступ удалён'); await done(); if (reopenModal) openClientUsersModal(client); }
     catch (error) { toast(error.message, 'error'); }
   });
 }

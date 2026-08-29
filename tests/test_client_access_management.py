@@ -63,3 +63,14 @@ def test_client_user_management_ui_uses_human_labels_and_existing_user_api():
     assert "Все объекты" in FRONTEND
     assert "api('/users'" in FRONTEND
     assert "api('/client-portal/access'" in FRONTEND
+
+
+def test_client_management_has_a_route_level_mobile_detail_not_a_hidden_table_column():
+    assert "state.clientId = route === 'clients' && routeId ? routeId : null" in FRONTEND
+    assert "renderClientDetail(content, state.clientId, state.clientTab)" in FRONTEND
+    assert "renderClientUsersPanel(panel, client)" in FRONTEND
+    assert "location.hash = `clients/${element.dataset.clientOpen}`" in FRONTEND
+    assert "clients/${button.dataset.clientUsers}/users" in FRONTEND
+    styles = Path("app/static/styles.css").read_text(encoding="utf8")
+    assert ".client-mobile-list,.site-mobile-list { display:grid" in styles
+    assert ".client-desktop-table { display:none; }" in styles

@@ -40,7 +40,7 @@ assert.match(source, /\['on_the_way', 'arrived', 'in_progress'\]/);
 assert.match(source, /Ожидается согласование/);
 assert.match(source, /approval: \{ diagnostic: draft\.diagnostic/);
 assert.match(source, /\/approval`, \{ method: 'PATCH'/);
-assert.match(source, /const \[route, requestId\] = hashRoute\.split\('\/'\)/);
+assert.match(source, /const \[route, routeId, routeTab\] = hashRoute\.split\('\/'\)/);
 assert.match(source, /state\.route === 'requests' && state\.requestId/);
 assert.match(source, /RequestDraftStore\.put/);
 assert.match(source, /window\.addEventListener\('pagehide', persistOnBackground\)/);
