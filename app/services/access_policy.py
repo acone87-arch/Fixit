@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import CurrentUser
 from app.models.core import Equipment, UserRole
+from app.models.customer import TechnicianClientAccess, Site
 from app.models.repair import Repair
 from app.models.service_request import ServiceRequest
 from app.services.client_portal import CLIENT_ROLES, ensure_client_equipment
@@ -36,14 +37,11 @@ async def ensure_equipment_access(equipment_id: uuid.UUID, user: CurrentUser, db
     if not equipment:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Оборудование не найдено")
     if user.role == UserRole.technician:
-        assigned = await db.scalar(select(ServiceRequest.id).where(
-            ServiceRequest.organization_id == user.organization_id,
-            ServiceRequest.equipment_id == equipment_id,
-            ServiceRequest.assigned_technician_id == user.id,
-            ServiceRequest.status.in_(ACTIVE_ASSIGNED_STATES),
-        ).limit(1))
-        if not assigned:
-            raise HTTPException(status.HTTP_403_FORBIDDEN, "Оборудование доступно только по активной назначенной заявке")
+        fleet_access = await db.scalar(select(TechnicianClientAccess.id).join(Site, Site.client_id == TechnicianClientAccess.client_id).where(
+            TechnicianClientAccess.organization_id == user.organization_id, TechnicianClientAccess.technician_id == user.id,
+            Site.id == equipment.site_id, Site.organization_id == user.organization_id).limit(1))
+        if not fleet_access:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Оборудование не назначено вам для обслуживания")
     return equipment
 
 
@@ -53,14 +51,5 @@ async def ensure_repair_access(repair: Repair, user: CurrentUser, db: AsyncSessi
     if user.role in CLIENT_ROLES:
         await ensure_client_equipment(repair.equipment_id, user, db)
     elif user.role == UserRole.technician:
-        if repair.technician_id == user.id:
-            return repair  # Explicit, limited history of the technician's own completed work.
-        if repair.service_request_id:
-            request = await db.scalar(select(ServiceRequest).where(
-                ServiceRequest.id == repair.service_request_id,
-                ServiceRequest.organization_id == user.organization_id,
-            ))
-            if request and request.assigned_technician_id == user.id and request.status in ACTIVE_ASSIGNED_STATES:
-                return repair
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Можно просматривать только свои или назначенные работы")
+        await ensure_equipment_access(repair.equipment_id, user, db)
     return repair

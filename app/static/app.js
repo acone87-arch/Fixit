@@ -384,7 +384,7 @@ function openQrQuickAction() {
       const equipment = await api(`/equipment/by-qr/${encodeURIComponent(token)}`);
       closeModal();
       if (equipment.passport_allowed === false) {
-        toast(`Оборудование: ${equipment.serial_number || equipment.id}. Полный паспорт доступен после назначения заявки.`, 'info');
+        toast(`Оборудование: ${equipment.serial_number || equipment.id}. Полный паспорт доступен после назначения клиента в обслуживание.`, 'info');
         return;
       }
       await openEquipmentPassport(equipment.id);
@@ -1122,8 +1122,19 @@ async function renderClientDetail(content, clientId, tab = 'overview') {
     if (!canManageUsers) { panel.innerHTML = '<div class="client-empty">У вас нет права управлять пользователями клиента.</div>'; return; }
     await renderClientUsersPanel(panel, client);
   } else {
-    const summary = await api(`/clients/${client.id}/summary`);
-    panel.innerHTML = `<div class="client-detail-overview"><article><span>ОБЪЕКТЫ</span><strong>${client.site_count}</strong><p>Площадки обслуживания клиента</p></article><article><span>ОБОРУДОВАНИЕ</span><strong>${client.equipment_count}</strong><p>Единиц в сервисе</p></article><article><span>АКТИВНЫЕ ЗАЯВКИ</span><strong>${summary.active_requests}</strong><p>Требуют внимания</p></article><article><span>В РЕМОНТЕ</span><strong>${summary.in_repair}</strong><p>${summary.waiting_approval} ожидают согласования</p></article><article><span>ЗАВЕРШЕНО · 30 ДНЕЙ</span><strong>${summary.completed_last_30_days}</strong><p>Закрытых сервисных работ</p></article></div><section class="client-detail-contact"><h2>Контактные данные</h2><p>${esc(client.contact_name || 'Контактное лицо не указано')}</p><a href="tel:${esc(client.contact_phone || '')}">${esc(client.contact_phone || '')}</a><p>${esc(client.contact_email || '')}</p></section>`;
+    const [summary, serviceTechnicians] = await Promise.all([
+      api(`/clients/${client.id}/summary`),
+      canManageUsers ? api(`/clients/${client.id}/technicians`) : Promise.resolve([]),
+    ]);
+    const technicianPanel = canManageUsers ? `<section class="client-detail-contact"><h2>Сервисные техники</h2><p>Техники видят всё оборудование этого клиента, но работают только со своими назначенными заявками.</p><div class="client-technician-list">${serviceTechnicians.length ? serviceTechnicians.map((item) => `<label><input type="checkbox" data-service-technician="${item.id}" ${item.assigned ? 'checked' : ''}> ${esc(item.full_name)}</label>`).join('') : '<p>Нет активных техников организации.</p>'}</div><button class="btn btn-primary" id="save-service-technicians">Сохранить назначение</button></section>` : '';
+    panel.innerHTML = `<div class="client-detail-overview"><article><span>ОБЪЕКТЫ</span><strong>${client.site_count}</strong><p>Площадки обслуживания клиента</p></article><article><span>ОБОРУДОВАНИЕ</span><strong>${client.equipment_count}</strong><p>Единиц в сервисе</p></article><article><span>АКТИВНЫЕ ЗАЯВКИ</span><strong>${summary.active_requests}</strong><p>Требуют внимания</p></article><article><span>В РЕМОНТЕ</span><strong>${summary.in_repair}</strong><p>${summary.waiting_approval} ожидают согласования</p></article><article><span>ЗАВЕРШЕНО · 30 ДНЕЙ</span><strong>${summary.completed_last_30_days}</strong><p>Закрытых сервисных работ</p></article></div><section class="client-detail-contact"><h2>Контактные данные</h2><p>${esc(client.contact_name || 'Контактное лицо не указано')}</p><a href="tel:${esc(client.contact_phone || '')}">${esc(client.contact_phone || '')}</a><p>${esc(client.contact_email || '')}</p></section>${technicianPanel}`;
+    panel.querySelector('#save-service-technicians')?.addEventListener('click', async () => {
+      const technician_ids = [...panel.querySelectorAll('[data-service-technician]:checked')].map((input) => input.dataset.serviceTechnician);
+      try {
+        await api(`/clients/${client.id}/technicians`, { method: 'PUT', body: JSON.stringify({ technician_ids }) });
+        toast('Сервисные техники назначены');
+      } catch (error) { toast(error.message || 'Не удалось сохранить назначение', 'error'); }
+    });
   }
 }
 
@@ -1327,13 +1338,15 @@ async function renderEquipment(content) {
   const typeName = (id) => (state.equipmentTypes.find((t) => t.id === id) || {}).name || '—';
   const siteOf = (id) => state.sites.find((site) => site.id === id);
   const clientOf = (id) => state.clients.find((client) => client.id === id);
-  const canEdit = true;
+  const canEdit = state.me.role !== 'technician';
+  const technicianFleet = state.me.role === 'technician';
   const activeSites = state.sites.filter((site) => site.is_active);
 
   content.innerHTML = `
     <div class="page-header">
-      <div><h1>Оборудование</h1><div class="page-subtitle">Цифровой паспорт и лента ремонтов по каждой единице техники</div></div>
+      <div><h1>Оборудование</h1><div class="page-subtitle">${technicianFleet ? 'Оборудование закреплённых клиентов' : 'Цифровой паспорт и лента ремонтов по каждой единице техники'}</div></div>
       <div style="display:flex;gap:10px;align-items:center">
+        ${technicianFleet ? `<select id="equipment-client-filter" aria-label="Клиент"><option value="">Все закреплённые клиенты</option>${state.clients.map((client) => `<option value="${client.id}">${esc(client.legal_name || client.name)}</option>`).join('')}</select>` : ''}
         <select id="equipment-location-filter" aria-label="Фильтр по объекту"><option value="">Все объекты</option>${activeSites.map((site) => `<option value="${site.id}">${esc(readableClientName(clientOf(site.client_id)?.legal_name || clientOf(site.client_id)?.name, site.name))} · ${esc(site.name)}</option>`).join('')}</select>
         <div class="site-picker" id="equipment-site-picker">
           <button type="button" class="site-picker-trigger" id="equipment-site-trigger"><span id="equipment-site-label">Все объекты</span><i>⌄</i></button>
@@ -1382,17 +1395,34 @@ async function renderEquipment(content) {
     });
     cards.querySelectorAll('[data-id]').forEach((card) => card.addEventListener('click', () => openEquipmentPassport(card.dataset.id)));
   };
-  renderRows();
-  document.getElementById('equipment-location-filter').addEventListener('change', renderRows);
   const sitePicker = document.getElementById('equipment-site-picker');
   const siteMenu = document.getElementById('equipment-site-menu');
-  document.getElementById('equipment-site-trigger').addEventListener('click', () => siteMenu.classList.toggle('hidden'));
-  siteMenu.querySelectorAll('[data-site-value]').forEach((button) => button.addEventListener('click', () => {
+  const bindSitePicker = () => {
+    siteMenu.querySelectorAll('[data-site-value]').forEach((button) => button.addEventListener('click', () => {
+      const select = document.getElementById('equipment-location-filter');
+      select.value = button.dataset.siteValue;
+      document.getElementById('equipment-site-label').textContent = button.textContent.trim().replace(/\s+/g, ' ');
+      siteMenu.classList.add('hidden'); renderRows();
+    }));
+  };
+  const setSiteOptions = (sites) => {
     const select = document.getElementById('equipment-location-filter');
-    select.value = button.dataset.siteValue;
-    document.getElementById('equipment-site-label').textContent = button.textContent.trim().replace(/\s+/g, ' ');
-    siteMenu.classList.add('hidden'); renderRows();
-  }));
+    select.innerHTML = `<option value="">Все объекты</option>${sites.map((site) => `<option value="${site.id}">${esc(site.name)}</option>`).join('')}`;
+    siteMenu.innerHTML = `<button type="button" data-site-value="">Все объекты</button>${sites.map((site) => `<button type="button" data-site-value="${site.id}">${esc(site.name)}</button>`).join('')}`;
+    document.getElementById('equipment-site-label').textContent = 'Все объекты';
+    bindSitePicker();
+  };
+  renderRows();
+  document.getElementById('equipment-client-filter')?.addEventListener('change', async (event) => {
+    const clientId = event.target.value;
+    const sites = await api(`/sites${clientId ? `?client_id=${encodeURIComponent(clientId)}` : ''}`);
+    setSiteOptions(sites);
+    const nextItems = await api(`/equipment${clientId ? `?client_id=${encodeURIComponent(clientId)}` : ''}`);
+    items.splice(0, items.length, ...nextItems); renderRows();
+  });
+  document.getElementById('equipment-location-filter').addEventListener('change', renderRows);
+  document.getElementById('equipment-site-trigger').addEventListener('click', () => siteMenu.classList.toggle('hidden'));
+  bindSitePicker();
   content.addEventListener('click', (event) => {
     if (!sitePicker.contains(event.target)) siteMenu.classList.add('hidden');
   });
@@ -1541,7 +1571,7 @@ async function openEquipmentPassport(id) {
     const primaryAction = passport.active_request
       ? `<button class="btn btn-primary" id="passport-primary-request">Открыть заявку SR-${String(passport.active_request.number).padStart(5, '0')}</button>`
       : isStaff ? '<button class="btn btn-primary" id="passport-create-request">Создать заявку</button>' : '';
-    const photoControl = `<section class="passport-photo"><div class="passport-photo-frame">${passport.primary_photo ? '<img id="passport-primary-photo" alt="Фото оборудования">' : '<span>FIXIT<br>оборудование</span>'}</div><div><span>Фото оборудования</span><p>${passport.primary_photo ? 'Основное фото паспорта' : 'Добавьте фото, чтобы быстрее узнать машину на объекте.'}</p><label class="btn btn-ghost btn-sm">${passport.primary_photo ? 'Заменить фото' : 'Добавить фото'}<input id="passport-photo-upload" type="file" accept="image/*" hidden></label>${passport.primary_photo ? '<button class="btn btn-ghost btn-sm" id="passport-photo-delete">Удалить</button>' : ''}</div></section>`;
+    const photoControl = `<section class="passport-photo"><div class="passport-photo-frame">${passport.primary_photo ? '<img id="passport-primary-photo" alt="Фото оборудования">' : '<span>FIXIT<br>оборудование</span>'}</div><div><span>Фото оборудования</span><p>${passport.primary_photo ? 'Основное фото паспорта' : 'Добавьте фото, чтобы быстрее узнать машину на объекте.'}</p><label class="btn btn-ghost btn-sm">${passport.primary_photo ? 'Заменить фото' : 'Добавить фото'}<input id="passport-photo-upload" type="file" accept="image/*" hidden></label>${passport.primary_photo && isStaff ? '<button class="btn btn-ghost btn-sm" id="passport-photo-delete">Удалить</button>' : ''}</div></section>`;
     const backdrop = openModal('', `<section class="equipment-passport">
       <header class="passport-hero"><div><span class="passport-eyebrow">${esc(equipmentTypeName)}</span><h2>${esc([passport.manufacturer, passport.model].filter(Boolean).join(' ') || passport.name)}</h2><div class="passport-status-row">${badge(EQUIPMENT_STATUS, passport.status)}<span class="mono">S/N ${esc(passport.serial_number)}</span></div></div><button type="button" class="passport-more" id="passport-more" aria-label="Дополнительные действия" aria-expanded="false">•••</button><div class="passport-more-menu hidden" id="passport-more-menu" role="menu"><button type="button" role="menuitem" id="passport-download-qr">Скачать QR</button>${isStaff ? '<button type="button" role="menuitem" id="passport-manage">Редактировать и переместить</button><button type="button" role="menuitem" class="passport-menu-danger" id="passport-archive">Архивировать</button>' : ''}</div></header>
       <div class="passport-context"><div><small>Клиент</small><strong>${esc(clientName)}</strong></div><div><small>Объект</small><strong>${esc(passport.site_name || 'Не указан')}</strong>${passport.site_address ? `<span>${esc(passport.site_address)}</span>` : ''}</div></div>${photoControl}

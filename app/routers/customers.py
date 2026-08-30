@@ -8,11 +8,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import CurrentUser, get_current_user, require_roles
 from app.database import get_db
-from app.models.core import Equipment, UserRole
-from app.models.customer import Client, Site
+from app.models.core import Equipment, User, UserRole
+from app.models.customer import Client, Site, TechnicianClientAccess
+from app.models.organization import OrganizationMembership
 from app.models.organization import AuditEvent
 from app.models.service_request import ServiceRequest
-from app.schemas.customer import ClientCreate, ClientOut, ClientUpdate, SiteCreate, SiteOut, SiteUpdate
+from app.schemas.customer import ClientCreate, ClientOut, ClientUpdate, SiteCreate, SiteOut, SiteUpdate, TechnicianClientAccessUpdate
 from app.services.client_portal import CLIENT_ROLES, client_scope
 
 router = APIRouter(prefix="/api/clients", tags=["clients"])
@@ -61,6 +62,11 @@ async def list_clients(
     if user.role in CLIENT_ROLES:
         client_id, _ = await client_scope(user, db)
         query = query.where(Client.id == client_id)
+    elif user.role == UserRole.technician:
+        query = query.where(Client.id.in_(select(TechnicianClientAccess.client_id).where(
+            TechnicianClientAccess.organization_id == user.organization_id,
+            TechnicianClientAccess.technician_id == user.id,
+        )))
     rows = (await db.execute(query)).all()
     return [ClientOut.model_validate(client).model_copy(update={
         "site_count": site_count, "equipment_count": equipment_count,
@@ -82,6 +88,14 @@ async def client_summary(
     if user.role in CLIENT_ROLES:
         scoped_client_id, allowed_site_ids = await client_scope(user, db)
         if scoped_client_id != client_id:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Клиент не найден")
+    elif user.role == UserRole.technician:
+        has_fleet_access = await db.scalar(select(TechnicianClientAccess.id).where(
+            TechnicianClientAccess.organization_id == user.organization_id,
+            TechnicianClientAccess.technician_id == user.id,
+            TechnicianClientAccess.client_id == client_id,
+        ).limit(1))
+        if not has_fleet_access:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Клиент не найден")
     query = (select(ServiceRequest.status, ServiceRequest.completed_at, Equipment.site_id)
              .join(Equipment, Equipment.id == ServiceRequest.equipment_id)
@@ -182,10 +196,39 @@ async def list_sites(
         query = query.where(Site.client_id == scoped_client_id)
         if site_ids is not None:
             query = query.where(Site.id.in_(site_ids))
+    elif user.role == UserRole.technician:
+        query = query.where(Site.client_id.in_(select(TechnicianClientAccess.client_id).where(
+            TechnicianClientAccess.organization_id == user.organization_id,
+            TechnicianClientAccess.technician_id == user.id,
+        )))
     rows = (await db.execute(query)).all()
     return [SiteOut.model_validate(site).model_copy(update={
         "client_name": client_name, "equipment_count": equipment_count,
     }) for site, client_name, equipment_count in rows]
+
+
+@router.get("/{client_id}/technicians")
+async def list_service_technicians(client_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(require_roles(UserRole.admin, UserRole.dispatcher))):
+    client = await db.scalar(select(Client.id).where(Client.id == client_id, Client.organization_id == user.organization_id))
+    if not client: raise HTTPException(status.HTTP_404_NOT_FOUND, "Клиент не найден")
+    rows = (await db.execute(select(User, TechnicianClientAccess).join(OrganizationMembership, (OrganizationMembership.user_id == User.id) & (OrganizationMembership.organization_id == user.organization_id)).outerjoin(TechnicianClientAccess, (TechnicianClientAccess.technician_id == User.id) & (TechnicianClientAccess.client_id == client_id) & (TechnicianClientAccess.organization_id == user.organization_id)).where(OrganizationMembership.role == UserRole.technician, User.is_active.is_(True)).order_by(User.full_name))).all()
+    return [{"id": account.id, "full_name": account.full_name, "assigned": access is not None} for account, access in rows]
+
+
+@router.put("/{client_id}/technicians")
+async def replace_service_technicians(client_id: uuid.UUID, payload: TechnicianClientAccessUpdate, db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(require_roles(UserRole.admin, UserRole.dispatcher))):
+    client = await db.scalar(select(Client).where(Client.id == client_id, Client.organization_id == user.organization_id))
+    if not client: raise HTTPException(status.HTTP_404_NOT_FOUND, "Клиент не найден")
+    technician_ids = set(payload.technician_ids)
+    valid = set((await db.scalars(select(User.id).join(OrganizationMembership, (OrganizationMembership.user_id == User.id) & (OrganizationMembership.organization_id == user.organization_id)).where(User.id.in_(technician_ids), OrganizationMembership.role == UserRole.technician, User.is_active.is_(True)))).all()) if technician_ids else set()
+    if valid != technician_ids: raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Можно назначить только активных техников организации")
+    existing = (await db.scalars(select(TechnicianClientAccess).where(TechnicianClientAccess.organization_id == user.organization_id, TechnicianClientAccess.client_id == client_id))).all()
+    for item in existing:
+        if item.technician_id not in technician_ids: await db.delete(item)
+    existing_ids = {item.technician_id for item in existing}
+    for technician_id in technician_ids - existing_ids: db.add(TechnicianClientAccess(organization_id=user.organization_id, technician_id=technician_id, client_id=client_id, created_by_user_id=user.id))
+    await db.commit()
+    return {"client_id": str(client_id), "technician_ids": [str(item) for item in sorted(technician_ids, key=str)]}
 
 
 @sites_router.post("", response_model=SiteOut, status_code=status.HTTP_201_CREATED)

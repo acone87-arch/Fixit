@@ -92,3 +92,8 @@ class ClientAccessOut(BaseModel):
     site_id: uuid.UUID | None = None
     site_name: str | None = None
     is_active: bool
+
+
+class TechnicianClientAccessUpdate(BaseModel):
+    """Replacement set of technicians responsible for one service client."""
+    technician_ids: list[uuid.UUID] = Field(default_factory=list)

@@ -73,3 +73,18 @@ class ClientUserAccess(Base):
     site_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("sites.id", ondelete="CASCADE"), index=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
+class TechnicianClientAccess(Base):
+    __tablename__ = "technician_client_access"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "technician_id", "client_id", name="uq_technician_client_access"),
+        Index("ix_technician_client_access_technician", "organization_id", "technician_id"),
+        Index("ix_technician_client_access_client", "organization_id", "client_id"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id"), index=True)
+    technician_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    client_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("clients.id", ondelete="CASCADE"), index=True)
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())

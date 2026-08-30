@@ -29,9 +29,9 @@ def test_active_assignment_states_include_waiting_approval_for_read_access():
     assert ACTIVE_ASSIGNED_STATES == {"assigned", "on_the_way", "arrived", "in_progress", "waiting_parts", "waiting_approval"}
 
 
-def test_technician_can_read_only_equipment_with_active_assigned_request():
+def test_technician_can_read_equipment_for_an_explicitly_assigned_service_client():
     org, tech_id, equipment_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
-    equipment = SimpleNamespace(id=equipment_id, organization_id=org)
+    equipment = SimpleNamespace(id=equipment_id, organization_id=org, site_id=uuid.uuid4())
     result = run(ensure_equipment_access(equipment_id, technician(org, tech_id), Session([equipment, uuid.uuid4()])))
     assert result is equipment
     with pytest.raises(HTTPException) as denied:
@@ -49,3 +49,21 @@ def test_technician_cannot_read_another_technicians_service_request_or_cross_ten
     with pytest.raises(HTTPException) as cross_tenant:
         run(ensure_service_request_access(request, technician(org, own_id), Session([])))
     assert cross_tenant.value.status_code == 404
+
+
+def test_fleet_access_does_not_change_service_request_workflow_ownership():
+    org, technician_id = uuid.uuid4(), uuid.uuid4()
+    own_request = SimpleNamespace(
+        organization_id=org,
+        assigned_technician_id=technician_id,
+        equipment_id=uuid.uuid4(),
+    )
+    assert run(ensure_service_request_access(own_request, technician(org, technician_id), Session([]))) is own_request
+    unassigned_request = SimpleNamespace(
+        organization_id=org,
+        assigned_technician_id=None,
+        equipment_id=uuid.uuid4(),
+    )
+    with pytest.raises(HTTPException) as denied:
+        run(ensure_service_request_access(unassigned_request, technician(org, technician_id), Session([])))
+    assert denied.value.status_code == 404

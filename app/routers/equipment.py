@@ -13,7 +13,7 @@ from app.config import settings
 from app.core.deps import CurrentUser, get_current_user, require_roles
 from app.database import get_db
 from app.models.core import Equipment, EquipmentAttachment, EquipmentType, Task, Ticket, User, UserRole
-from app.models.customer import Client, Site
+from app.models.customer import Client, Site, TechnicianClientAccess
 from app.models.repair import Repair, RepairAttachment, RepairPart
 from app.models.service_request import ServiceRequest, ServiceRequestEvent
 from app.models.warehouse import Part
@@ -31,7 +31,7 @@ from app.schemas.equipment import (
     RepairHistoryEntry,
 )
 from app.services.client_portal import CLIENT_ROLES, client_scope, ensure_client_equipment
-from app.services.access_policy import ACTIVE_ASSIGNED_STATES, ensure_equipment_access
+from app.services.access_policy import ensure_equipment_access
 from app.services.media import image_response, normalize_image
 
 router = APIRouter(prefix="/api/equipment", tags=["equipment"])
@@ -73,7 +73,7 @@ async def create_equipment_type(
 
 
 @router.get("", response_model=list[EquipmentOut])
-async def list_equipment(db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+async def list_equipment(client_id: uuid.UUID | None = None, site_id: uuid.UUID | None = None, db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     statement = (select(Equipment, EquipmentType.name, EquipmentAttachment)
         .join(EquipmentType, Equipment.equipment_type_id == EquipmentType.id)
         .outerjoin(EquipmentAttachment, (EquipmentAttachment.equipment_id == Equipment.id) & (EquipmentAttachment.organization_id == user.organization_id))
@@ -91,11 +91,16 @@ async def list_equipment(db: AsyncSession = Depends(get_db), user: CurrentUser =
             .order_by(Equipment.updated_at.desc()))
         if site_ids is not None: statement = statement.where(Site.id.in_(site_ids))
     elif user.role == UserRole.technician:
-        statement = statement.where(Equipment.id.in_(select(ServiceRequest.equipment_id).where(
-            ServiceRequest.organization_id == user.organization_id,
-            ServiceRequest.assigned_technician_id == user.id,
-            ServiceRequest.status.in_(ACTIVE_ASSIGNED_STATES),
+        statement = statement.join(Site, Site.id == Equipment.site_id).where(Site.client_id.in_(select(TechnicianClientAccess.client_id).where(
+            TechnicianClientAccess.organization_id == user.organization_id,
+            TechnicianClientAccess.technician_id == user.id,
         )))
+    if client_id:
+        statement = statement.where(Equipment.site_id.in_(select(Site.id).where(
+            Site.client_id == client_id, Site.organization_id == user.organization_id
+        )))
+    if site_id:
+        statement = statement.where(Equipment.site_id == site_id)
     rows = (await db.execute(statement)).all()
     # Для старых записей сохраняем историческое поле name в БД, но наружу
     # всегда отдаём тип: все клиенты показывают единое обозначение техники.
@@ -231,7 +236,7 @@ async def get_equipment_by_qr(
     db: AsyncSession = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
 ):
-    """QR identifies equipment; it never elevates an unassigned technician to passport access."""
+    """QR identifies equipment; it never elevates a technician without fleet access."""
     equipment = await db.scalar(select(Equipment).where(
         Equipment.public_qr_token == qr_token, Equipment.organization_id == user.organization_id
     ))
