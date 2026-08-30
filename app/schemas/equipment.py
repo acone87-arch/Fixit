@@ -56,16 +56,24 @@ class EquipmentPhotoOut(BaseModel):
     download_url: str
 
 
-class RepairHistoryEntry(BaseModel):
-    repair_id: uuid.UUID
-    closed_at: datetime | None
-    technician_name: str
-    fault_type: str | None
-    description: str
-    labor_minutes: int = 0
-    client_signer_name: str | None = None
-    client_signed_at: datetime | None = None
-    parts_used: list[dict]
+class EquipmentServiceHistoryEntry(BaseModel):
+    """One compact passport record, normally owned by one ServiceRequest."""
+
+    id: str
+    service_request_id: uuid.UUID | None = None
+    service_request_number: int | None = None
+    status: str
+    occurred_at: datetime | None = None
+    completed_at: datetime | None = None
+    title: str
+    problem: str | None = None
+    work_summary: str | None = None
+    cancellation_reason: str | None = None
+    technician_name: str | None = None
+    parts: list[dict] = []
+    photos: list[dict] = []
+    has_service_act: bool = False
+    legacy: bool = False
 
 
 class EquipmentActiveRequest(BaseModel):
@@ -111,7 +119,9 @@ class EquipmentPassport(EquipmentOut):
     active_request: EquipmentActiveRequest | None = None
     timeline: list[EquipmentTimelineEntry] = []
     documents: list[EquipmentDocumentEntry] = []
-    history: list[RepairHistoryEntry] = []
+    # A request appears once here; ServiceRequestEvent remains available only
+    # on the request detail timeline.
+    history: list[EquipmentServiceHistoryEntry] = []
 
 
 class PublicEquipmentOut(BaseModel):

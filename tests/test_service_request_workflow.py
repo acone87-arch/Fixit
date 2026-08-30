@@ -57,12 +57,24 @@ def test_assigned_technician_must_follow_order_and_can_resume_parts_only():
     org, technician_id = uuid.uuid4(), uuid.uuid4()
     item, db = request("assigned", org, technician_id), Session()
     tech = actor(UserRole.technician, org, technician_id)
-    for target in ("on_the_way", "arrived", "in_progress", "waiting_parts", "in_progress"):
+    for target in ("on_the_way", "in_progress", "waiting_parts", "in_progress"):
         run(transition(db, item, tech, target))
     assert item.status == "in_progress"
-    assert [entry.event_type for entry in db.events] == ["technician.on_the_way", "technician.arrived", "work.started", "request.waiting_parts", "work.resumed"]
+    assert [entry.event_type for entry in db.events] == ["technician.on_the_way", "work.started", "request.waiting_parts", "work.resumed"]
     with pytest.raises(HTTPException):
         run(transition(db, item, actor(UserRole.technician, org), "waiting_parts"))
+
+
+def test_arrived_is_readable_legacy_state_but_new_flow_cannot_create_it():
+    org, technician_id = uuid.uuid4(), uuid.uuid4()
+    tech = actor(UserRole.technician, org, technician_id)
+    fresh, db = request("on_the_way", org, technician_id), Session()
+    with pytest.raises(HTTPException) as error:
+        run(transition(db, fresh, tech, "arrived"))
+    assert error.value.status_code == 409
+    legacy, db = request("arrived", org, technician_id), Session()
+    run(transition(db, legacy, tech, "in_progress"))
+    assert legacy.status == "in_progress"
 
 
 def test_approval_ownership_and_rejection_are_enforced():

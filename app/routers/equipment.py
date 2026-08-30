@@ -15,7 +15,7 @@ from app.database import get_db
 from app.models.core import Equipment, EquipmentAttachment, EquipmentType, Task, Ticket, User, UserRole
 from app.models.customer import Client, Site, TechnicianClientAccess
 from app.models.repair import Repair, RepairAttachment, RepairPart
-from app.models.service_request import ServiceRequest, ServiceRequestEvent
+from app.models.service_request import ServiceRequest, ServiceRequestAttachment, ServiceRequestEvent
 from app.models.warehouse import Part
 from app.schemas.equipment import (
     EquipmentActiveRequest,
@@ -28,7 +28,7 @@ from app.schemas.equipment import (
     EquipmentUpdate,
     EquipmentTypeCreate,
     EquipmentTypeOut,
-    RepairHistoryEntry,
+    EquipmentServiceHistoryEntry,
 )
 from app.services.client_portal import CLIENT_ROLES, client_scope, ensure_client_equipment
 from app.services.access_policy import ensure_equipment_access
@@ -366,12 +366,21 @@ async def get_passport(equipment_id: uuid.UUID, db: AsyncSession = Depends(get_d
         ServiceRequest.equipment_id == equipment_id,
     ).order_by(ServiceRequest.created_at.desc()))).all()
     request_ids = [item.id for item in requests]
-    request_events: list[ServiceRequestEvent] = []
+    cancellation_events: list[ServiceRequestEvent] = []
     if request_ids:
-        request_events = (await db.scalars(select(ServiceRequestEvent).where(
+        cancellation_events = (await db.scalars(select(ServiceRequestEvent).where(
             ServiceRequestEvent.organization_id == user.organization_id,
             ServiceRequestEvent.service_request_id.in_(request_ids),
-        ).order_by(ServiceRequestEvent.created_at))).all()
+            ServiceRequestEvent.event_type.in_({"request.cancelled", "approval.rejected"}),
+        ).order_by(ServiceRequestEvent.created_at.desc()))).all()
+    request_attachments_by_request: dict[uuid.UUID, list[ServiceRequestAttachment]] = {item.id: [] for item in requests}
+    if request_ids:
+        request_attachments = (await db.scalars(select(ServiceRequestAttachment).where(
+            ServiceRequestAttachment.organization_id == user.organization_id,
+            ServiceRequestAttachment.service_request_id.in_(request_ids),
+        ).order_by(ServiceRequestAttachment.created_at.desc()))).all()
+        for attachment in request_attachments:
+            request_attachments_by_request.setdefault(attachment.service_request_id, []).append(attachment)
     technician_ids = {item.assigned_technician_id for item in requests if item.assigned_technician_id}
     technician_ids.update(repair.technician_id for repair, _ in repair_rows if repair.technician_id)
     technicians = {}
@@ -380,84 +389,68 @@ async def get_passport(equipment_id: uuid.UUID, db: AsyncSession = Depends(get_d
             select(User).where(User.id.in_(technician_ids), User.is_active.is_(True))
         )).all()}
 
-    history: list[RepairHistoryEntry] = []
-    for repair, technician_name in repair_rows:
-        repair_parts = parts_by_repair.get(repair.id, [])
-        history.append(
-            RepairHistoryEntry(
-                repair_id=repair.id,
-                closed_at=repair.closed_at,
-                technician_name=technician_name or "Не указан",
-                fault_type=repair.fault_type,
-                description=repair.description,
-                labor_minutes=repair.labor_minutes,
-                client_signer_name=repair.client_signer_name,
-                client_signed_at=repair.client_signed_at,
-                parts_used=repair_parts,
-            )
-        )
-
-    timeline: list[EquipmentTimelineEntry] = [EquipmentTimelineEntry(
-        id=f"equipment:{equipment.id}", kind="equipment.created", occurred_at=equipment.created_at,
-        title="Оборудование добавлено", description=equipment_type_name,
-    )]
     request_by_id = {item.id: item for item in requests}
     request_by_task = {item.task_id: item for item in requests if item.task_id}
     request_by_ticket = {item.ticket_id: item for item in requests if item.ticket_id}
+    repair_by_request = {repair.service_request_id: (repair, technician_name) for repair, technician_name in repair_rows if repair.service_request_id}
+    cancellation_reason_by_request = {}
+    for item in cancellation_events:
+        cancellation_reason_by_request.setdefault(item.service_request_id, (item.details_json or {}).get("reason") or (item.details_json or {}).get("comment") or item.message)
+
+    def repair_photos(repair: Repair) -> list[dict]:
+        return [{"id": str(item.id), "kind": item.kind, "media_type": item.media_type,
+                 "download_url": f"/api/repairs/attachments/{item.id}"}
+                for item in attachments_by_repair.get(repair.id, [])
+                if item.kind in {"before", "after"} and (item.media_type or "").startswith("image/")]
+
+    def request_photos(item: ServiceRequest) -> list[dict]:
+        return [{"id": str(attachment.id), "kind": attachment.kind, "media_type": attachment.media_type,
+                 "download_url": f"/api/service-requests/attachments/{attachment.id}"}
+                for attachment in request_attachments_by_request.get(item.id, [])
+                if (attachment.media_type or "").startswith("image/")]
+
+    # Canonical entries are request-owned. Events contribute only a short
+    # cancellation reason and can never create another history position.
+    history: list[EquipmentServiceHistoryEntry] = []
     for item in requests:
-        timeline.append(EquipmentTimelineEntry(
-            id=f"request:{item.id}", kind="request.created", occurred_at=item.created_at,
-            title=f"Заявка SR-{item.number:05d}", description=item.title or item.description,
-            request_id=item.id, request_number=item.number,
-        ))
-    for item in request_events:
-        if item.event_type == "request.created":
-            continue
-        request = next((candidate for candidate in requests if candidate.id == item.service_request_id), None)
-        timeline.append(EquipmentTimelineEntry(
-            id=f"request-event:{item.id}", kind=item.event_type, occurred_at=item.created_at,
-            title=item.message, request_id=item.service_request_id,
-            request_number=request.number if request else None,
-        ))
-    for repair, technician_name in repair_rows:
-        request = (
-            request_by_id.get(repair.service_request_id)
-            or request_by_task.get(repair.task_id)
-            or request_by_ticket.get(repair.ticket_id)
-        )
-        repair_photos = [
-            {"id": str(attachment.id), "kind": attachment.kind, "media_type": attachment.media_type,
-             "download_url": f"/api/repairs/attachments/{attachment.id}"}
-            for attachment in attachments_by_repair.get(repair.id, [])
-            if attachment.kind in {"before", "after"} and (attachment.media_type or "").startswith("image/")
-        ]
-        timeline.append(EquipmentTimelineEntry(
-            id=f"repair:{repair.id}", kind="repair.completed", occurred_at=repair.closed_at or repair.created_at,
-            title="Ремонт и сервисный акт", description=repair.description,
-            request_id=request.id if request else None, request_number=request.number if request else None,
-            repair_id=repair.id, task_id=repair.task_id, parts_used=parts_by_repair.get(repair.id, []),
-            photos=repair_photos,
-            has_service_act=True,
+        repair_pair = repair_by_request.get(item.id)
+        repair, repair_technician = repair_pair if repair_pair else (None, None)
+        photos = (repair_photos(repair) if repair else []) + request_photos(item)
+        history.append(EquipmentServiceHistoryEntry(
+            id=f"request:{item.id}", service_request_id=item.id, service_request_number=item.number,
+            status=item.status, occurred_at=item.completed_at or (repair.closed_at if repair else None) or item.created_at,
+            completed_at=item.completed_at or (repair.closed_at if repair else None), title=item.title,
+            problem=item.description or item.title, work_summary=repair.description if repair else None,
+            cancellation_reason=cancellation_reason_by_request.get(item.id) if item.status == "cancelled" else None,
+            technician_name=technicians.get(item.assigned_technician_id) or repair_technician,
+            parts=parts_by_repair.get(repair.id, []) if repair else [], photos=photos[:3],
+            has_service_act=repair is not None,
         ))
     legacy_tasks = (await db.scalars(select(Task).where(
         Task.organization_id == user.organization_id, Task.equipment_id == equipment_id,
     ))).all()
     for task in legacy_tasks:
         if task.id not in request_by_task:
-            timeline.append(EquipmentTimelineEntry(
-                id=f"task:{task.id}", kind="task.created", occurred_at=task.created_at,
-                title=task.title, description=task.description, task_id=task.id,
-            ))
+            history.append(EquipmentServiceHistoryEntry(id=f"task:{task.id}", status="legacy",
+                occurred_at=task.created_at, title=task.title, problem=task.description, legacy=True))
     legacy_tickets = (await db.scalars(select(Ticket).where(
         Ticket.organization_id == user.organization_id, Ticket.equipment_id == equipment_id,
     ))).all()
     for ticket in legacy_tickets:
         if ticket.id not in request_by_ticket:
-            timeline.append(EquipmentTimelineEntry(
-                id=f"ticket:{ticket.id}", kind="ticket.created", occurred_at=ticket.created_at,
-                title="Обращение через QR", description=ticket.comment or ", ".join(ticket.symptom_tags or []),
-            ))
-    timeline.sort(key=lambda item: str(item.occurred_at or ""), reverse=True)
+            history.append(EquipmentServiceHistoryEntry(id=f"ticket:{ticket.id}", status="legacy",
+                occurred_at=ticket.created_at, title="Обращение через QR",
+                problem=ticket.comment or ", ".join(ticket.symptom_tags or []), legacy=True))
+    # A legacy repair is retained only if no canonical request claims it.
+    for repair, technician_name in repair_rows:
+        if repair.service_request_id or repair.task_id in request_by_task or repair.ticket_id in request_by_ticket:
+            continue
+        history.append(EquipmentServiceHistoryEntry(id=f"repair:{repair.id}", status="legacy",
+            occurred_at=repair.closed_at or repair.created_at, completed_at=repair.closed_at,
+            title=repair.fault_type or "Исторический ремонт", work_summary=repair.description,
+            technician_name=technician_name, parts=parts_by_repair.get(repair.id, []),
+            photos=repair_photos(repair)[:3], has_service_act=True, legacy=True))
+    history.sort(key=lambda item: str(item.occurred_at or ""), reverse=True)
 
     documents: list[EquipmentDocumentEntry] = []
     for repair, _ in repair_rows:
@@ -487,7 +480,7 @@ async def get_passport(equipment_id: uuid.UUID, db: AsyncSession = Depends(get_d
     data["primary_photo"] = _photo_out(primary_photo) if primary_photo else None
     return EquipmentPassport(
         **data, client_name=client.legal_name or client.name, site_name=site.name, site_address=site.address,
-        active_request=active_request, timeline=timeline, documents=documents, history=history,
+        active_request=active_request, timeline=[], documents=documents, history=history,
     )
 
 

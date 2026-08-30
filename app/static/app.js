@@ -647,7 +647,9 @@ async function openTechnicianRequestWorkspace(id, loadedRequest = null) {
   let draftCompleted = false;
   let attachmentPhotoUrls = [];
   const statusText = { assigned: 'Назначена', on_the_way: 'В пути', arrived: 'На объекте', in_progress: 'В работе', waiting_parts: 'Ждёт запчасти', waiting_approval: 'Ждёт согласование', completed: 'Выполнена' };
-  const statusAction = { assigned: ['on_the_way', 'Выехал'], on_the_way: ['arrived', 'Я на объекте'], arrived: ['in_progress', 'Начать работу'] };
+  // ``arrived`` is only a compatibility row from older deployments; new work
+  // starts directly after the technician confirms the trip.
+  const statusAction = { assigned: ['on_the_way', 'Выехал'], on_the_way: ['in_progress', 'Начать работу'], arrived: ['in_progress', 'Начать работу'] };
   const statusBadge = () => `<span class="badge badge-${request.status === 'completed' ? 'good' : request.status.startsWith('waiting') ? 'amber' : 'warn'}"><span class="badge-dot"></span>${esc(statusText[request.status] || request.status)}</span>`;
   const eventLabels = { 'request.created': 'Заявка создана', 'technician.assigned': 'Мастер назначен', 'technician.on_the_way': 'Мастер выехал', 'technician.arrived': 'Мастер прибыл на объект', 'work.started': 'Работа начата', 'parts.used': 'Использованы запчасти', 'photos.added': 'Добавлены фотографии', 'request.waiting_parts': 'Ожидание запчастей', 'request.waiting_approval': 'Ожидание согласования', 'repair.completed': 'Ремонт завершён', 'service_act.generated': 'Сервисный акт сформирован' };
   const workStatuses = new Set(['in_progress', 'waiting_parts', 'waiting_approval']);
@@ -1535,9 +1537,13 @@ async function openEquipmentPassport(id) {
     const equipmentTypeName = (state.equipmentTypes.find((type) => type.id === passport.equipment_type_id) || {}).name || passport.name;
     const clientName = readableClientName(passport.client_name, passport.site_name);
     const isStaff = state.me.role !== 'technician';
-    const statusLabels = { new: 'Новая', assigned: 'Назначена', on_the_way: 'В пути', in_progress: 'В работе', waiting_parts: 'Ждёт запчасти', waiting_approval: 'Ждёт согласование', completed: 'Выполнена', closed: 'Закрыта', cancelled: 'Отменена' };
+    const statusLabels = { new: 'Новая', assigned: 'Назначена', on_the_way: 'В пути', arrived: 'На объекте', in_progress: 'В работе', waiting_parts: 'Ждёт запчасти', waiting_approval: 'Ждёт согласования', completed: 'Выполнена', closed: 'Закрыта', cancelled: 'Отменена', legacy: 'Историческая запись' };
     const requestBadge = (request) => `<span class="badge badge-${['completed', 'closed'].includes(request.status) ? 'good' : request.status.startsWith('waiting') ? 'amber' : request.status === 'cancelled' ? 'idle' : 'warn'}"><span class="badge-dot"></span>${esc(statusLabels[request.status] || request.status)}</span>`;
-    const timeline = passport.timeline.map((entry) => `<article class="equipment-timeline-item"><span class="equipment-timeline-dot ${entry.kind.startsWith('repair') ? 'repair' : entry.kind.startsWith('request') ? 'request' : ''}"></span><div><div class="equipment-timeline-meta">${fmtDate(entry.occurred_at)} · ${entry.request_number ? `SR-${String(entry.request_number).padStart(5, '0')}` : entry.kind === 'repair.completed' ? 'Сервис' : 'Паспорт'}</div><strong>${esc(entry.title)}</strong>${entry.description ? `<p>${esc(entry.description)}</p>` : ''}${entry.parts_used?.length ? `<div class="equipment-parts">Запчасти: ${entry.parts_used.map((part) => `${esc(part.part_name)} ×${part.quantity}`).join(', ')}</div>` : ''}${entry.photos?.length ? `<div class="equipment-history-photos">${entry.photos.map((photo) => `<button type="button" data-history-photo="${photo.id}" data-history-photo-kind="${photo.kind}"><img alt="${photo.kind === 'before' ? 'До ремонта' : 'После ремонта'}"><span>${photo.kind === 'before' ? 'До' : 'После'}</span></button>`).join('')}</div>` : ''}${entry.request_id ? `<button class="btn btn-ghost btn-sm open-request-btn" data-request-id="${entry.request_id}">Открыть заявку</button>` : ''}${entry.has_service_act ? `<button class="btn btn-ghost btn-sm download-act-btn" data-repair-id="${entry.repair_id}">Сервисный акт PDF</button>` : ''}</div></article>`).join('') || '<div class="passport-empty">Событий пока нет</div>';
+    const history = passport.history.map((entry) => {
+      const meta = `${fmtDate(entry.completed_at || entry.occurred_at)}${entry.technician_name ? ` · ${esc(entry.technician_name)}` : ''}`;
+      const card = `<article class="equipment-history-card${entry.service_request_id ? ' is-clickable' : ''}" ${entry.service_request_id ? `data-history-request="${entry.service_request_id}" tabindex="0" role="link"` : ''}><header><div><small>${meta}</small>${requestBadge(entry)} </div><strong>${entry.service_request_number ? `SR-${String(entry.service_request_number).padStart(5, '0')}` : 'История' }${entry.service_request_id ? ' ›' : ''}</strong></header><h3>${esc(entry.title || entry.problem || 'Без описания')}</h3>${entry.problem ? `<dl><dt>Проблема</dt><dd>${esc(entry.problem)}</dd></dl>` : ''}${entry.work_summary ? `<dl><dt>Работы</dt><dd>${esc(entry.work_summary)}</dd></dl>` : ''}${entry.cancellation_reason ? `<dl><dt>Причина отмены</dt><dd>${esc(entry.cancellation_reason)}</dd></dl>` : ''}${entry.parts?.length ? `<dl><dt>Запчасти</dt><dd>${entry.parts.map((part) => `${esc(part.part_name)} ×${part.quantity}`).join(', ')}</dd></dl>` : ''}${entry.photos?.length ? `<div class="equipment-history-photos">${entry.photos.map((photo) => `<button type="button" data-history-photo-url="${photo.download_url}" data-history-photo-kind="${photo.kind}"><img alt="Фото работ"><span>Фото</span></button>`).join('')}</div>` : ''}</article>`;
+      return card;
+    }).join('') || '<div class="passport-empty"><strong>История обслуживания</strong><br>Ремонтов ещё не было.</div>';
     const documents = passport.documents.map((document) => `<button class="passport-document" data-document-kind="${esc(document.kind)}" data-repair-id="${document.repair_id || ''}" data-attachment-id="${document.attachment_id || ''}"><span class="passport-document-icon">${document.kind === 'service_act' ? 'PDF' : document.kind === 'before' || document.kind === 'after' ? 'Фото' : 'Файл'}</span><span><strong>${esc(document.title)}</strong><small>${fmtDate(document.created_at)}${document.media_type ? ` · ${esc(document.media_type)}` : ''}</small></span><b>↓</b></button>`).join('') || '<div class="passport-empty">Фотографии и сервисные акты появятся здесь после выполнения работ.</div>';
     const qrFilename = `QR — ${String(passport.model || equipmentTypeName).replace(/[<>:"/\\|?*\x00-\x1F]/g, '_')}.svg`;
     const primaryAction = passport.active_request
@@ -1545,19 +1551,19 @@ async function openEquipmentPassport(id) {
       : isStaff ? '<button class="btn btn-primary" id="passport-create-request">Создать заявку</button>' : '';
     const photoControl = `<section class="passport-photo"><div class="passport-photo-frame">${passport.primary_photo ? '<img id="passport-primary-photo" alt="Фото оборудования">' : '<span>FIXIT<br>оборудование</span>'}</div><div><span>Фото оборудования</span><p>${passport.primary_photo ? 'Основное фото паспорта' : 'Добавьте фото, чтобы быстрее узнать машину на объекте.'}</p><label class="btn btn-ghost btn-sm">${passport.primary_photo ? 'Заменить фото' : 'Добавить фото'}<input id="passport-photo-upload" type="file" accept="image/*" hidden></label>${passport.primary_photo && isStaff ? '<button class="btn btn-ghost btn-sm" id="passport-photo-delete">Удалить</button>' : ''}</div></section>`;
     const backdrop = openModal('', `<section class="equipment-passport">
-      <header class="passport-hero"><div><span class="passport-eyebrow">${esc(equipmentTypeName)}</span><h2>${esc([passport.manufacturer, passport.model].filter(Boolean).join(' ') || passport.name)}</h2><div class="passport-status-row">${badge(EQUIPMENT_STATUS, passport.status)}<span class="mono">S/N ${esc(passport.serial_number)}</span></div></div><button type="button" class="passport-more" id="passport-more" aria-label="Дополнительные действия" aria-expanded="false">•••</button><div class="passport-more-menu hidden" id="passport-more-menu" role="menu"><button type="button" role="menuitem" id="passport-download-qr">Скачать QR</button>${isStaff ? '<button type="button" role="menuitem" id="passport-manage">Редактировать и переместить</button><button type="button" role="menuitem" class="passport-menu-danger" id="passport-archive">Архивировать</button>' : ''}</div></header>
+      <header class="passport-hero"><div class="passport-hero-main">${passport.primary_photo ? '<img class="passport-hero-photo" data-passport-hero-photo data-object-url alt="Фото оборудования">' : '<div class="passport-hero-photo passport-hero-photo-placeholder">FIXIT</div>'}<div><span class="passport-eyebrow">${esc(equipmentTypeName)}</span><h2>${esc([passport.manufacturer, passport.model].filter(Boolean).join(' ') || passport.name)}</h2><div class="passport-status-row">${badge(EQUIPMENT_STATUS, passport.status)}<span class="mono">S/N ${esc(passport.serial_number)}</span></div></div></div><button type="button" class="passport-more" id="passport-more" aria-label="Дополнительные действия" aria-expanded="false">•••</button><div class="passport-more-menu hidden" id="passport-more-menu" role="menu"><button type="button" role="menuitem" id="passport-download-qr">Скачать QR</button>${isStaff ? '<button type="button" role="menuitem" id="passport-manage">Редактировать и переместить</button><button type="button" role="menuitem" class="passport-menu-danger" id="passport-archive">Архивировать</button>' : ''}</div></header>
       <div class="passport-context"><div><small>Клиент</small><strong>${esc(clientName)}</strong></div><div><small>Объект</small><strong>${esc(passport.site_name || 'Не указан')}</strong>${passport.site_address ? `<span>${esc(passport.site_address)}</span>` : ''}</div></div>${photoControl}
       <nav class="passport-tabs" aria-label="Разделы паспорта"><button class="active" data-passport-tab="overview">Обзор</button><button data-passport-tab="history">История</button><button data-passport-tab="documents">Документы <span>${passport.documents.length}</span></button></nav>
       <section data-passport-panel="overview"><div class="passport-overview-grid"><div class="passport-data"><span>Серийный номер</span><strong class="mono">${esc(passport.serial_number)}</strong></div>${passport.inventory_number ? `<div class="passport-data"><span>Инвентарный номер</span><strong>${esc(passport.inventory_number)}</strong></div>` : ''}<div class="passport-data"><span>Текущий статус</span>${badge(EQUIPMENT_STATUS, passport.status)}</div></div>${passport.active_request ? `<div class="passport-active-request"><div><span>Активная заявка SR-${String(passport.active_request.number).padStart(5, '0')}</span><strong>${esc(passport.active_request.title)}</strong><small>${esc(passport.active_request.assigned_technician_name || 'Мастер ещё не назначен')}</small></div>${requestBadge(passport.active_request)}</div>` : '<div class="passport-no-request">Активных заявок нет — оборудование готово к работе.</div>'}<div class="passport-qr"><img src="${qrObjectUrl}" data-object-url alt="QR-код оборудования"><div><span>QR оборудования</span><p>Используйте для быстрого открытия паспорта и обращения в сервис.</p><button class="btn btn-ghost btn-sm" id="passport-qr-download-inline">Скачать QR</button></div></div></section>
-      <section class="hidden" data-passport-panel="history"><div class="equipment-timeline">${timeline}</div></section>
+      <section class="hidden" data-passport-panel="history"><div class="equipment-history"><h3>История обслуживания</h3>${history}</div></section>
       <section class="hidden" data-passport-panel="documents"><div class="passport-documents">${documents}</div></section>
     </section>`, `<span class="passport-footer-action">${primaryAction}</span><button class="btn btn-secondary" id="passport-close">Закрыть</button>`);
     backdrop.querySelector('#passport-close').addEventListener('click', closeModal);
     if (passport.primary_photo) {
       apiBlob(`/equipment/${passport.id}/photo`).then((blob) => {
-        const image = backdrop.querySelector('#passport-primary-photo');
-        if (!image) return;
-        image.src = URL.createObjectURL(blob); image.setAttribute('data-object-url', '');
+        const images = backdrop.querySelectorAll('#passport-primary-photo, [data-passport-hero-photo]');
+        if (!images.length) return;
+        images.forEach((image) => { image.src = URL.createObjectURL(blob); image.setAttribute('data-object-url', ''); });
       }).catch(() => toast('Фото оборудования временно недоступно', 'error'));
     }
     backdrop.querySelector('#passport-photo-upload').addEventListener('change', async (event) => {
@@ -1582,7 +1588,11 @@ async function openEquipmentPassport(id) {
       backdrop.querySelectorAll('[data-passport-tab]').forEach((item) => item.classList.toggle('active', item === tab));
       backdrop.querySelectorAll('[data-passport-panel]').forEach((panel) => panel.classList.toggle('hidden', panel.dataset.passportPanel !== tab.dataset.passportTab));
     }));
-    backdrop.querySelectorAll('.open-request-btn').forEach((button) => button.addEventListener('click', () => navigateToServiceRequest(button.dataset.requestId)));
+    backdrop.querySelectorAll('[data-history-request]').forEach((card) => {
+      const open = () => navigateToServiceRequest(card.dataset.historyRequest);
+      card.addEventListener('click', (event) => { if (!event.target.closest('[data-history-photo-url]')) open(); });
+      card.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open(); } });
+    });
     backdrop.querySelector('#passport-primary-request')?.addEventListener('click', () => navigateToServiceRequest(passport.active_request.id));
     backdrop.querySelector('#passport-create-request')?.addEventListener('click', () => openCreateServiceRequestForEquipment(passport));
     backdrop.querySelector('#passport-manage')?.addEventListener('click', () => openEquipmentManageModal(passport));
@@ -1594,13 +1604,13 @@ async function openEquipmentPassport(id) {
       try { downloadBlob(await apiBlob(`/repairs/${repairId}/act.pdf`), `service-act-${repairId.slice(0, 8)}.pdf`); } catch (e) { toast(e.message, 'error'); }
     };
     backdrop.querySelectorAll('.download-act-btn').forEach((button) => button.addEventListener('click', () => downloadAct(button.dataset.repairId)));
-    backdrop.querySelectorAll('[data-history-photo]').forEach((button) => {
-      const attachmentId = button.dataset.historyPhoto;
-      apiBlob(`/repairs/attachments/${attachmentId}`).then((blob) => {
+    backdrop.querySelectorAll('[data-history-photo-url]').forEach((button) => {
+      const photoUrl = button.dataset.historyPhotoUrl;
+      apiBlob(photoUrl).then((blob) => {
         const image = button.querySelector('img'); if (!image) return;
         const url = URL.createObjectURL(blob); image.src = url; image.setAttribute('data-object-url', '');
       }).catch(() => button.classList.add('is-unavailable'));
-      button.addEventListener('click', () => openProtectedImage(`/repairs/attachments/${attachmentId}`, button.dataset.historyPhotoKind === 'before' ? 'До ремонта' : 'После ремонта'));
+      button.addEventListener('click', (event) => { event.stopPropagation(); openProtectedImage(photoUrl, 'Фото работ'); });
     });
     backdrop.querySelectorAll('.passport-document').forEach((button) => button.addEventListener('click', async () => {
       try {

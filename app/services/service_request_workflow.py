@@ -28,7 +28,9 @@ LEGACY = {"closed"}
 TRANSITIONS = {
     "new": {"assigned", "cancelled"},
     "assigned": {"on_the_way", "cancelled"},
-    "on_the_way": {"arrived", "cancelled"},
+    # New work skips the old arrival checkpoint. ``arrived`` is retained as a
+    # readable compatibility state for rows already in production.
+    "on_the_way": {"in_progress", "cancelled"},
     "arrived": {"in_progress", "cancelled"},
     "in_progress": {"waiting_parts", "waiting_approval", "completed"},
     "waiting_parts": {"in_progress", "cancelled"},
@@ -90,7 +92,7 @@ async def transition(
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Укажите техника")
         technician = await _validate_technician(db, technician_id, actor.organization_id)
         request.assigned_technician_id = technician.id
-    elif target in {"on_the_way", "arrived", "in_progress", "waiting_parts", "waiting_approval"}:
+    elif target in {"on_the_way", "in_progress", "waiting_parts", "waiting_approval"}:
         if role != UserRole.technician or request.assigned_technician_id != actor.id:
             _forbidden("Это действие доступно только назначенному технику")
         if target == "in_progress" and source == "waiting_approval":

@@ -23,7 +23,7 @@ const noPendingPhotos = { photos: [] };
 const synced = { fullySynced: true };
 const pendingPhotos = { fullySynced: false };
 assert.match(renderAction('assigned', false, synced), /data-status="on_the_way"[^>]*>Выехал/);
-assert.match(renderAction('on_the_way', false, synced), /data-status="arrived"[^>]*>Я на объекте/);
+assert.match(renderAction('on_the_way', false, synced), /data-status="in_progress"[^>]*>Начать работу/);
 assert.match(renderAction('arrived', false, synced), /data-status="in_progress"[^>]*>Начать работу/);
 assert.match(renderAction('in_progress', false, synced), /Завершить работу/);
 assert.match(renderAction('in_progress', true, pendingPhotos), /Повторить синхронизацию/);
@@ -36,7 +36,7 @@ assert.match(source, /const draft = \{ diagnostic: '', work: '', comment: '', us
 assert.match(source, /URL\.createObjectURL\(file\)/);
 assert.match(source, /URL\.revokeObjectURL\(photo\.url\)/);
 assert.match(source, /completionLocalUuid \|\|= window\.FixitOffline\?\.uuid\?\.\(\) \|\| createUuid\(\)/);
-assert.match(source, /\['on_the_way', 'arrived', 'in_progress'\]/);
+assert.doesNotMatch(source, /on_the_way: \['arrived'/);
 assert.match(source, /Ожидается согласование/);
 assert.match(source, /approval: \{ diagnostic: draft\.diagnostic/);
 assert.match(source, /\/approval`, \{ method: 'PATCH'/);
