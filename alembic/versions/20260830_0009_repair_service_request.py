@@ -37,6 +37,20 @@ def upgrade():
           AND request.task_id = repair.task_id
           AND request.organization_id = repair.organization_id
           AND request.equipment_id = repair.equipment_id
+          -- Do not collapse multiple historical repairs into one canonical
+          -- request merely because they share a Task.  Leave all ambiguous
+          -- repairs NULL for later review/migration.
+          AND NOT EXISTS (
+              SELECT 1
+              FROM repairs AS other
+              WHERE other.id <> repair.id
+                AND other.organization_id = repair.organization_id
+                AND other.equipment_id = repair.equipment_id
+                AND (
+                    other.task_id = repair.task_id
+                    OR other.service_request_id = request.id
+                )
+          )
     """)
 
     # Ticket is the fallback when no explicit Task relationship exists.  The
@@ -50,6 +64,19 @@ def upgrade():
           AND request.ticket_id = repair.ticket_id
           AND request.organization_id = repair.organization_id
           AND request.equipment_id = repair.equipment_id
+          -- A Task-linked repair may already have claimed this request during
+          -- the first pass; multiple Ticket repairs are equally ambiguous.
+          AND NOT EXISTS (
+              SELECT 1
+              FROM repairs AS other
+              WHERE other.id <> repair.id
+                AND other.organization_id = repair.organization_id
+                AND other.equipment_id = repair.equipment_id
+                AND (
+                    other.ticket_id = repair.ticket_id
+                    OR other.service_request_id = request.id
+                )
+          )
     """)
 
     # PostgreSQL partial uniqueness gives the canonical workflow one repair per

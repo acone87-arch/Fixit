@@ -87,6 +87,7 @@ def test_migration_backfill_uses_only_explicit_task_or_ticket_links_not_recency_
     assert "request.ticket_id = repair.ticket_id" in source
     assert "request.organization_id = repair.organization_id" in source
     assert "request.equipment_id = repair.equipment_id" in source
+    assert source.count("AND NOT EXISTS") == 2
     assert "created_at" not in source
     assert "closed_at" not in source
 
