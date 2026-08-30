@@ -270,6 +270,16 @@ async def update_status(request_id: uuid.UUID, payload: ServiceRequestStatusUpda
         raise HTTPException(409, "Этот переход недоступен на текущем этапе заявки")
     if user.role != UserRole.technician and previous == "waiting_approval" and payload.status in {"in_progress", "cancelled"}:
         raise HTTPException(409, "Используйте действие согласования для этой заявки")
+    # Canonical completion is performed by offline sync, which creates the
+    # Repair and service act in the same transaction.  A bare status update
+    # must not make a request look repaired without durable ownership.
+    if payload.status == "completed":
+        linked_repair = await db.scalar(select(Repair.id).where(
+            Repair.organization_id == user.organization_id,
+            Repair.service_request_id == request.id,
+        ))
+        if not linked_repair:
+            raise HTTPException(409, "Сначала оформите ремонт и сервисный акт")
     request.status = payload.status
     if payload.status == "waiting_approval":
         target = (payload.details or {}).get("approval_target", "internal")
