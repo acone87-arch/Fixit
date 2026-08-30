@@ -9,14 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import require_roles
 from app.database import get_db
-from app.models.core import Equipment, EquipmentAttachment, EquipmentStatus, EquipmentType, Task, TaskPriority, TaskStatus, Ticket, User, UserRole
-from app.models.organization import OrganizationMembership
+from app.models.core import Equipment, EquipmentAttachment, EquipmentStatus, EquipmentType, Ticket, User, UserRole
 from app.models.customer import Site
 from app.schemas.equipment import PublicEquipmentOut
-from app.schemas.ticket import GuestTicketCreate, TicketAssign, TicketCreateResult, TicketOut
+from app.schemas.ticket import GuestTicketCreate, TicketCreateResult, TicketOut
 from app.models.service_request import ServiceRequest, ServiceRequestAttachment
 from app.services.service_requests import event, next_number
-from app.services.service_request_workflow import transition
 from app.services.media import image_response, normalize_image
 
 public_router = APIRouter(prefix="/api/public/equipment", tags=["guest"])
@@ -130,7 +128,7 @@ async def upload_guest_problem_photo(qr_token: uuid.UUID, request_id: uuid.UUID,
     return {"id": str(attachment_id)}
 
 
-@admin_router.get("", response_model=list[TicketOut])
+@admin_router.get("", response_model=list[TicketOut], deprecated=True)
 async def list_tickets(
     db: AsyncSession = Depends(get_db),
     user=Depends(require_roles(UserRole.admin, UserRole.dispatcher)),
@@ -141,66 +139,6 @@ async def list_tickets(
     return rows
 
 
-@admin_router.patch("/{ticket_id}/assign", response_model=TicketOut)
-async def assign_ticket(
-    ticket_id: uuid.UUID,
-    payload: TicketAssign,
-    db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_roles(UserRole.admin, UserRole.dispatcher)),
-):
-    from app.models.core import TicketSeverity, TicketStatus
-
-    ticket = await db.scalar(select(Ticket).where(
-        Ticket.id == ticket_id, Ticket.organization_id == user.organization_id
-    ))
-    technician = await db.scalar(select(User).join(
-        OrganizationMembership, OrganizationMembership.user_id == User.id
-    ).where(
-        User.id == payload.technician_id,
-        OrganizationMembership.organization_id == user.organization_id,
-        OrganizationMembership.role == UserRole.technician,
-        OrganizationMembership.is_active.is_(True),
-    ))
-    if not ticket or not technician:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Заявка или техник не найдены")
-    if not technician.is_active:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Нельзя назначить неактивного техника")
-
-    problem = (ticket.comment or '').strip() or ", ".join(ticket.symptom_tags) or "Не указано"
-    task_description = ticket.comment or problem
-    task = await db.scalar(select(Task).where(Task.ticket_id == ticket.id))
-    request = await db.scalar(select(ServiceRequest).where(ServiceRequest.ticket_id == ticket.id).with_for_update())
-    if task:
-        task.assigned_to = technician.id
-        task.status = TaskStatus.assigned
-        # У уже созданного наряда также обновляем текст гостевой проблемы,
-        # чтобы техник всегда видел актуальное описание при переназначении.
-        task.title = f"Гостевая заявка: {problem}"
-        task.description = task_description
-    else:
-        task = Task(
-            organization_id=user.organization_id,
-            ticket_id=ticket.id,
-            equipment_id=ticket.equipment_id,
-            assigned_to=technician.id,
-            priority=(TaskPriority.urgent if ticket.severity == TicketSeverity.not_working else TaskPriority.planned),
-            status=TaskStatus.assigned,
-            title=f"Гостевая заявка: {problem}",
-            description=task_description,
-            created_by=user.id,
-        )
-        db.add(task)
-        await db.flush()
-
-    ticket.assigned_technician_id = technician.id
-    ticket.status = TicketStatus.assigned
-    if request:
-        request.task_id = task.id
-        request.priority = task.priority.value
-        await transition(db, request, user, "assigned", technician_id=technician.id)
-    await db.commit()
-    await db.refresh(ticket)
-    return ticket
 UPLOAD_ROOT = Path("uploads")
 MAX_GUEST_PHOTO_BYTES = 6 * 1024 * 1024
 _guest_attempts: dict[str, deque[float]] = defaultdict(deque)

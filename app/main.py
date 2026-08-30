@@ -80,10 +80,8 @@ async def guest_redirect():
 # Base.metadata.create_all в lifespan — это единственный источник правды о схеме
 # и для локальной разработки, и для прода.
 
-# Legacy technician assets are retained temporarily for rollback/migration only.
-# The routes above redirect users to Fixit Pulse; keep the mount until the
-# separate retirement task removes the old static files.
-app.mount("/tech", StaticFiles(directory="app/static-tech", html=True), name="tech-frontend")
+# /tech routes are redirects only. app/static-tech remains in the repository
+# for rollback for now, but is deliberately not mounted or runnable in prod.
 
 # Гостевая страница заявки — без авторизации, открывается по QR (см. /e/{qr_token} выше).
 app.mount("/guest", StaticFiles(directory="app/static-guest", html=True), name="guest-frontend")

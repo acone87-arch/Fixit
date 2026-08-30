@@ -1,6 +1,6 @@
-// Shared durable repair queue for Fixit Pulse and the legacy /tech shell.
-// It deliberately uses the existing fixit-tech-db stores: there is one queue
-// for repairs and their Blob attachments, not a competing offline format.
+// Durable repair queue for Fixit Pulse. It deliberately preserves the existing
+// IndexedDB database/stores so pending entries from retired /tech clients can
+// still be synchronized rather than lost.
 (function (root) {
   const DB_NAME = 'fixit-tech-db';
   const DB_VERSION = 2;

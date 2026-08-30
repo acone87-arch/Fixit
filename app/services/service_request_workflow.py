@@ -15,7 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import CurrentUser
-from app.models.core import Task, TaskStatus, User, UserRole
+from app.models.core import User, UserRole
 from app.models.organization import OrganizationMembership
 from app.models.service_request import ServiceRequest
 from app.services.service_requests import event
@@ -116,11 +116,6 @@ async def transition(
     request.status = target
     if target == "cancelled":
         request.completed_at = datetime.now(timezone.utc)
-    if target == "in_progress" and request.task_id:
-        task = await db.scalar(select(Task).where(Task.id == request.task_id, Task.organization_id == actor.organization_id))
-        if task:
-            task.status = TaskStatus.in_progress
-
     details = {"from": source, "to": target, "transitioned_at": datetime.now(timezone.utc).isoformat()}
     if technician_id:
         details["technician_id"] = str(technician_id)
@@ -159,10 +154,6 @@ async def decide_approval(db: AsyncSession, request: ServiceRequest, actor: Curr
     request.status = target
     if not approved:
         request.completed_at = datetime.now(timezone.utc)
-    if approved and request.task_id:
-        task = await db.scalar(select(Task).where(Task.id == request.task_id, Task.organization_id == actor.organization_id))
-        if task:
-            task.status = TaskStatus.in_progress
     now = datetime.now(timezone.utc)
     details = {"approved_by": str(actor.id), "approved_at": now.isoformat(), "comment": comment, "target": request.approval_target,
                "from": "waiting_approval", "to": target}

@@ -12,7 +12,6 @@ const state = {
   route: location.hash.replace('#', '') || 'pulse',
 };
 
-let ticketsRefreshTimer = null;
 let adminScanStream = null;
 let activeTechnicianWorkspaceCleanup = null;
 let activeServiceRequestDetailCleanup = null;
@@ -264,26 +263,6 @@ const EQUIPMENT_STATUS = {
   mothballed: { label: 'На консервации', cls: 'idle' },
   decommissioned: { label: 'Списано', cls: 'idle' },
 };
-const TASK_STATUS = {
-  new: { label: 'Новая', cls: 'idle' },
-  assigned: { label: 'Назначена', cls: 'amber' },
-  in_progress: { label: 'В работе', cls: 'amber' },
-  closed: { label: 'Закрыта', cls: 'good' },
-  cancelled: { label: 'Отменена', cls: 'idle' },
-};
-const TASK_PRIORITY = {
-  urgent: { label: 'Срочно', cls: 'warn' },
-  planned: { label: 'Плановая', cls: 'idle' },
-};
-const TICKET_STATUS = {
-  new: { label: 'Новая', cls: 'warn' },
-  assigned: { label: 'Назначена', cls: 'amber' },
-  resolved: { label: 'Решена', cls: 'good' },
-};
-const TICKET_SEVERITY = {
-  not_working: 'Не работает',
-  partially_working: 'Работает с перебоями',
-};
 const ROLE_LABEL = { owner: 'Владелец', admin: 'Администратор', dispatcher: 'Диспетчер', technician: 'Техник', client_admin: 'Представитель клиента', client_site_user: 'Представитель объекта' };
 
 function badge(map, key) {
@@ -437,20 +416,15 @@ async function router() {
   const defaultRoute = 'pulse';
   const hashRoute = location.hash.replace('#', '') || defaultRoute;
   const [route, routeId, routeTab, routeChildId] = hashRoute.split('/');
-  state.route = route === 'tasks' ? 'requests' : route;
+  state.route = route;
   state.requestId = route === 'requests' && routeId ? routeId : null;
   state.clientId = route === 'clients' && routeId ? routeId : null;
   state.clientTab = state.clientId ? (routeTab || 'overview') : null;
   state.clientSiteId = state.clientTab === 'sites' && routeChildId ? routeChildId : null;
-  if (route === 'tasks') history.replaceState(null, '', '#requests');
   const allowedRoutes = (NAV[state.me?.role] || []).map(([key]) => key);
   if (!allowedRoutes.includes(state.route)) {
     state.route = defaultRoute;
     history.replaceState(null, '', `#${defaultRoute}`);
-  }
-  if (state.route !== 'tickets' && ticketsRefreshTimer) {
-    clearTimeout(ticketsRefreshTimer);
-    ticketsRefreshTimer = null;
   }
   renderNav();
   const content = document.getElementById('content');
@@ -474,8 +448,6 @@ async function router() {
     else if (state.me.role.startsWith('client_') && state.route === 'equipment') await renderClientEquipment(content);
     else if (state.route === 'equipment') await renderEquipment(content);
     else if (state.me.role.startsWith('client_') && state.route === 'documents') await renderClientDocuments(content);
-    else if (state.route === 'tasks') await renderServiceRequests(content);
-    else if (state.route === 'tickets') await renderServiceRequests(content);
     else if (state.route === 'warehouse') await renderWarehouse(content);
     else if (state.route === 'users') await renderUsers(content);
     else content.innerHTML = '<div class="section-loading">Раздел не найден</div>';
@@ -783,7 +755,7 @@ async function openTechnicianRequestWorkspace(id, loadedRequest = null) {
       completionLocalUuid ||= window.FixitOffline?.uuid?.() || createUuid();
       await persistDraft();
       if (!window.FixitOffline) throw new Error('Офлайн-движок недоступен; обновите приложение');
-      const payload = { local_uuid: completionLocalUuid, equipment_id: request.equipment_id, service_request_id: request.id, task_id: request.task_id, ticket_id: request.ticket_id, fault_type: draft.diagnostic.trim() || null, description: [draft.diagnostic.trim() && `Диагностика: ${draft.diagnostic.trim()}`, `Работы: ${draft.work.trim()}`, draft.comment.trim() && `Комментарий: ${draft.comment.trim()}`].filter(Boolean).join('\n'), labor_minutes: 0, client_signer_name: null, client_signed_at: null, started_at: started, closed_at: new Date().toISOString(), device_updated_at: new Date().toISOString(), base_equipment_version: request.equipment_version || 1, parts_used };
+      const payload = { local_uuid: completionLocalUuid, equipment_id: request.equipment_id, service_request_id: request.id, fault_type: draft.diagnostic.trim() || null, description: [draft.diagnostic.trim() && `Диагностика: ${draft.diagnostic.trim()}`, `Работы: ${draft.work.trim()}`, draft.comment.trim() && `Комментарий: ${draft.comment.trim()}`].filter(Boolean).join('\n'), labor_minutes: 0, client_signer_name: null, client_signed_at: null, started_at: started, closed_at: new Date().toISOString(), device_updated_at: new Date().toISOString(), base_equipment_version: request.equipment_version || 1, parts_used };
       if (!completionQueued) {
         await window.FixitOffline.enqueueRepair(payload, draft.photos.map((photo) => ({ file: photo.file, kind: 'after' })));
         completionQueued = true;
@@ -1535,7 +1507,7 @@ async function openEquipmentManageModal(passport) {
   });
 }
 
-async function openCreateTaskForEquipment(passport) {
+async function openCreateServiceRequestForEquipment(passport) {
   try {
     const technicians = (await api('/users')).filter((item) => item.role === 'technician' && item.is_active);
     const backdrop = openModal('Создать заявку', `
@@ -1612,7 +1584,7 @@ async function openEquipmentPassport(id) {
     }));
     backdrop.querySelectorAll('.open-request-btn').forEach((button) => button.addEventListener('click', () => navigateToServiceRequest(button.dataset.requestId)));
     backdrop.querySelector('#passport-primary-request')?.addEventListener('click', () => navigateToServiceRequest(passport.active_request.id));
-    backdrop.querySelector('#passport-create-request')?.addEventListener('click', () => openCreateTaskForEquipment(passport));
+    backdrop.querySelector('#passport-create-request')?.addEventListener('click', () => openCreateServiceRequestForEquipment(passport));
     backdrop.querySelector('#passport-manage')?.addEventListener('click', () => openEquipmentManageModal(passport));
     backdrop.querySelector('#passport-archive')?.addEventListener('click', async () => {
       if (!confirm('Архивировать оборудование? Его можно вернуть через редактирование статуса.')) return;
@@ -1637,288 +1609,6 @@ async function openEquipmentPassport(id) {
       } catch (e) { toast(e.message, 'error'); }
     }));
   } catch (e) { toast(e.message, 'error'); }
-}
-
-// ============================================================
-// Раздел: Наряды
-// ============================================================
-
-async function renderTasks(content) {
-  const isStaff = state.me.role !== 'technician';
-  // GET /api/equipment не ограничен по роли — тянем список всегда, иначе
-  // у техника в таблице вместо названия оборудования был виден сырой UUID.
-  const [tasks, equipmentList, technicians] = await Promise.all([
-    api('/tasks'),
-    api('/equipment'),
-    isStaff ? api('/users').then((u) => u.filter((x) => x.role === 'technician' && x.is_active)) : Promise.resolve([]),
-    ensureEquipmentTypes(),
-  ]);
-  const orderedTasks = [...tasks].sort((a, b) => {
-    const aClosed = a.status === 'closed' || a.status === 'cancelled';
-    const bClosed = b.status === 'closed' || b.status === 'cancelled';
-    if (aClosed !== bClosed) return Number(aClosed) - Number(bClosed);
-    return String(b.created_at || '').localeCompare(String(a.created_at || ''));
-  });
-  const eqOf = (id) => equipmentList.find((x) => x.id === id);
-  const typeName = (id) => (state.equipmentTypes.find((type) => type.id === id) || {}).name || '—';
-  const eqName = (id) => { const e = eqOf(id); return e ? `${typeName(e.equipment_type_id)} · ${e.serial_number}` : id; };
-
-  content.innerHTML = `
-    <div class="page-header">
-      <div><h1>${isStaff ? 'Наряды' : 'Мои наряды'}</h1><div class="page-subtitle">${isStaff ? 'Внутренние заявки на обслуживание оборудования' : 'Назначенные вам заявки — можно закрыть здесь или оформить акт ремонта в приложении техника'}</div></div>
-      ${isStaff ? '<button class="btn btn-primary" id="add-task-btn">+ Новый наряд</button>' : '<a class="btn btn-secondary" href="/tech/" target="_blank" rel="noopener">Открыть приложение техника →</a>'}
-    </div>
-    <div class="card" style="padding:0">
-      <table class="fixed-table">
-        <colgroup>
-          <col style="width:26%"><col style="width:22%"><col style="width:12%"><col style="width:12%"><col style="width:13%">${isStaff ? '<col style="width:15%">' : '<col style="width:15%">'}
-        </colgroup>
-        <thead><tr><th>Заявка</th><th>Оборудование</th><th>Приоритет</th><th>Статус</th><th>Срок</th>${isStaff ? '<th>Техник / действия</th>' : '<th>Действие</th>'}</tr></thead>
-        <tbody id="task-rows"></tbody>
-      </table>
-    </div>`;
-
-  const rows = document.getElementById('task-rows');
-  rows.innerHTML = orderedTasks.length ? orderedTasks.map((t) => `
-    <tr class="${!isStaff ? 'clickable ' : ''}${t.status === 'closed' || t.status === 'cancelled' ? 'task-row-closed' : 'task-row-active'}" data-eq="${t.equipment_id}">
-      <td><strong>${esc(t.title)}</strong>${t.description ? `<div class="text-soft" style="font-size:12px">${esc(t.description)}</div>` : ''}</td>
-      <td class="text-soft">${esc(eqName(t.equipment_id))}${eqOf(t.equipment_id)?.location ? `<div style="font-size:12px">${esc(eqOf(t.equipment_id).location)}</div>` : ''}</td>
-      <td>${badge(TASK_PRIORITY, t.priority)}</td>
-      <td>${badge(TASK_STATUS, t.status)}</td>
-      <td class="text-soft">${fmtDate(t.due_at)}</td>
-      ${isStaff ? `<td style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-          ${t.assigned_to ? '<span class="badge badge-good"><span class="badge-dot"></span>Назначен</span>' : `<select class="assign-select" data-task="${t.id}"><option value="">— назначить —</option>${technicians.map((tech) => `<option value="${tech.id}">${esc(tech.full_name)}</option>`).join('')}</select>`}
-          <button class="btn btn-ghost btn-sm edit-task-btn" data-id="${t.id}">Изменить</button>
-          ${t.status === 'new' && !t.assigned_to ? `<button class="btn btn-ghost btn-sm delete-task-btn" data-id="${t.id}" style="color:#b42318">Удалить</button>` : ''}
-        </td>` : `<td>${t.status === 'assigned' || t.status === 'in_progress' ? `<button class="btn btn-primary btn-sm close-task-btn" data-id="${t.id}">Закрыть</button>` : '—'}</td>`}
-    </tr>`).join('') : `<tr class="empty-row"><td colspan="6">Нарядов пока нет</td></tr>`;
-
-  rows.querySelectorAll('.assign-select').forEach((sel) => {
-    sel.addEventListener('change', async (e) => {
-      e.stopPropagation();
-      if (!sel.value) return;
-      try {
-        await api(`/tasks/${sel.dataset.task}/assign?technician_id=${sel.value}`, { method: 'PATCH' });
-        toast('Техник назначен');
-        router();
-      } catch (err) { toast(err.message, 'error'); }
-    });
-    sel.addEventListener('click', (e) => e.stopPropagation());
-  });
-
-  rows.querySelectorAll('.edit-task-btn').forEach((btn) => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const task = tasks.find((t) => t.id === btn.dataset.id);
-      openEditTaskModal(task, technicians);
-    });
-  });
-
-  rows.querySelectorAll('.delete-task-btn').forEach((btn) => {
-    btn.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      const task = tasks.find((t) => t.id === btn.dataset.id);
-      if (!task || !confirm(`Удалить наряд «${task.title}»? Это действие нельзя отменить.`)) return;
-      try {
-        await api(`/tasks/${task.id}`, { method: 'DELETE' });
-        toast('Наряд удалён');
-        router();
-      } catch (err) { toast(err.message, 'error'); }
-    });
-  });
-
-  rows.querySelectorAll('.close-task-btn').forEach((btn) => {
-    btn.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      const task = tasks.find((t) => t.id === btn.dataset.id);
-      if (!task || !confirm(`Закрыть наряд «${task.title}»?`)) return;
-      try {
-        await api(`/tasks/${task.id}/close`, { method: 'POST' });
-        toast('Наряд закрыт');
-        router();
-      } catch (err) { toast(err.message, 'error'); }
-    });
-  });
-
-  if (!isStaff) {
-    rows.querySelectorAll('tr[data-eq]').forEach((tr) => {
-      tr.addEventListener('click', () => openEquipmentPassport(tr.dataset.eq));
-    });
-  }
-
-  if (isStaff) {
-    document.getElementById('add-task-btn').addEventListener('click', () => openCreateTaskModal(equipmentList, technicians));
-  }
-}
-
-function openEditTaskModal(task, technicians) {
-  const backdrop = openModal('Изменить наряд', `
-    <div class="field"><label>Заголовок</label><input id="f-title" value="${esc(task.title)}" required></div>
-    <div class="field"><label>Описание</label><textarea id="f-desc" rows="3">${esc(task.description || '')}</textarea></div>
-    <div class="field-row">
-      <div class="field"><label>Приоритет</label>
-        <select id="f-priority"><option value="planned" ${task.priority === 'planned' ? 'selected' : ''}>Плановая</option><option value="urgent" ${task.priority === 'urgent' ? 'selected' : ''}>Срочно</option></select>
-      </div>
-      <div class="field"><label>Статус</label>
-        <select id="f-status">${Object.keys(TASK_STATUS).map((k) => `<option value="${k}" ${task.status === k ? 'selected' : ''}>${TASK_STATUS[k].label}</option>`).join('')}</select>
-      </div>
-    </div>
-    <div class="field"><label>Техник</label>
-      <select id="f-tech"><option value="">— не назначен —</option>${technicians.map((t) => `<option value="${t.id}" ${task.assigned_to === t.id ? 'selected' : ''}>${esc(t.full_name)}</option>`).join('')}</select>
-    </div>`,
-    `${task.status === 'closed' || task.status === 'cancelled' || (task.status === 'new' && !task.assigned_to) ? '<button class="btn btn-ghost" id="modal-delete" style="color:#b42318;margin-right:auto">Удалить</button>' : '<span style="margin-right:auto"></span>'}
-     <button class="btn btn-secondary" id="modal-cancel">Отмена</button>
-     <button class="btn btn-primary" id="modal-save">Сохранить</button>`);
-
-  backdrop.querySelector('#modal-cancel').addEventListener('click', closeModal);
-  backdrop.querySelector('#modal-delete')?.addEventListener('click', async () => {
-    if (!confirm(`Удалить наряд «${task.title}»? Сам наряд исчезнет из списка, но оформленные акты ремонта сохранятся в истории.`)) return;
-    try {
-      await api(`/tasks/${task.id}`, { method: 'DELETE' });
-      closeModal();
-      toast('Наряд удалён');
-      router();
-    } catch (e) { toast(e.message, 'error'); }
-  });
-  backdrop.querySelector('#modal-save').addEventListener('click', async () => {
-    const title = backdrop.querySelector('#f-title').value.trim();
-    if (!title) return toast('Укажите заголовок', 'error');
-    try {
-      await api(`/tasks/${task.id}`, {
-        method: 'PATCH',
-        body: JSON.stringify({
-          title,
-          description: backdrop.querySelector('#f-desc').value.trim() || null,
-          priority: backdrop.querySelector('#f-priority').value,
-          status: backdrop.querySelector('#f-status').value,
-          assigned_to: backdrop.querySelector('#f-tech').value || null,
-        }),
-      });
-      closeModal();
-      toast('Наряд обновлён');
-      router();
-    } catch (e) { toast(e.message, 'error'); }
-  });
-}
-
-function openCreateTaskModal(equipmentList, technicians) {
-  const locations = [...new Set(equipmentList.map((e) => (e.location || '').trim() || 'Не указано'))]
-    .sort((a, b) => a.localeCompare(b, 'ru'));
-  const backdrop = openModal('Новый наряд', `
-    <div class="field"><label>Расположение</label>
-      <select id="f-location"><option value="">— выберите объект —</option>${locations.map((location) => `<option value="${esc(location)}">${esc(location)}</option>`).join('')}</select>
-    </div>
-    <div class="field"><label>Оборудование на объекте</label>
-      <select id="f-eq" disabled><option value="">Сначала выберите расположение</option></select>
-    </div>
-    <div class="field"><label>Заголовок</label><input id="f-title" required placeholder="Например: течёт бак"></div>
-    <div class="field"><label>Описание</label><textarea id="f-desc" rows="3"></textarea></div>
-    <div class="field-row">
-      <div class="field"><label>Приоритет</label>
-        <select id="f-priority"><option value="planned">Плановая</option><option value="urgent">Срочно</option></select>
-      </div>
-      <div class="field"><label>Техник (можно позже)</label>
-        <select id="f-tech"><option value="">— не назначен —</option>${technicians.map((t) => `<option value="${t.id}">${esc(t.full_name)}</option>`).join('')}</select>
-      </div>
-    </div>`,
-    `<button class="btn btn-secondary" id="modal-cancel">Отмена</button>
-     <button class="btn btn-primary" id="modal-save">Создать</button>`);
-
-  const locationSelect = backdrop.querySelector('#f-location');
-  const equipmentSelect = backdrop.querySelector('#f-eq');
-  locationSelect.addEventListener('change', () => {
-    const location = locationSelect.value;
-    const matchingEquipment = equipmentList.filter((e) => ((e.location || '').trim() || 'Не указано') === location);
-    equipmentSelect.disabled = !location || !matchingEquipment.length;
-    equipmentSelect.innerHTML = matchingEquipment.length
-      ? `<option value="">— выберите технику —</option>${matchingEquipment.map((e) => `<option value="${e.id}">${esc((state.equipmentTypes.find((type) => type.id === e.equipment_type_id) || {}).name || e.name)} · ${esc(e.serial_number)}</option>`).join('')}`
-      : '<option value="">На этом объекте техники нет</option>';
-  });
-  backdrop.querySelector('#modal-cancel').addEventListener('click', closeModal);
-  backdrop.querySelector('#modal-save').addEventListener('click', async () => {
-    const title = backdrop.querySelector('#f-title').value.trim();
-    if (!title) return toast('Укажите заголовок', 'error');
-    if (!equipmentSelect.value) return toast('Выберите расположение и технику', 'error');
-    try {
-      await api('/tasks', {
-        method: 'POST',
-        body: JSON.stringify({
-          equipment_id: backdrop.querySelector('#f-eq').value,
-          title,
-          description: backdrop.querySelector('#f-desc').value.trim() || null,
-          priority: backdrop.querySelector('#f-priority').value,
-          assigned_to: backdrop.querySelector('#f-tech').value || null,
-        }),
-      });
-      closeModal();
-      toast('Наряд создан');
-      router();
-    } catch (e) { toast(e.message, 'error'); }
-  });
-}
-
-// ============================================================
-// Раздел: Гостевые заявки
-// ============================================================
-
-async function renderTickets(content) {
-  const [tickets, technicians, equipmentList] = await Promise.all([
-    api('/tickets'),
-    api('/users').then((u) => u.filter((x) => x.role === 'technician' && x.is_active)),
-    api('/equipment'),
-    ensureEquipmentTypes(),
-  ]);
-  const equipmentOf = (id) => equipmentList.find((equipment) => equipment.id === id);
-  const typeName = (id) => (state.equipmentTypes.find((type) => type.id === id) || {}).name || '—';
-
-  content.innerHTML = `
-    <div class="page-header">
-      <div><h1>Заявки от гостей</h1><div class="page-subtitle">Обращения, оставленные через QR на оборудовании, без входа в систему</div></div>
-    </div>
-    <div class="card mobile-table" style="padding:0">
-      <table>
-        <thead><tr><th>Что сообщили</th><th>Серьёзность</th><th>Оборудование</th><th>Расположение</th><th>Статус</th><th>Когда</th><th>Назначить</th></tr></thead>
-        <tbody id="ticket-rows"></tbody>
-      </table>
-    </div><div class="mobile-card-list" id="ticket-cards"></div>`;
-
-  const rows = document.getElementById('ticket-rows');
-  const cards = document.getElementById('ticket-cards');
-  rows.innerHTML = tickets.length ? tickets.map((t) => {
-    const equipment = equipmentOf(t.equipment_id);
-    return `
-    <tr>
-      <td>${t.comment ? esc(t.comment) : '<span class="text-soft">без комментария</span>'}${t.symptom_tags.length ? `<div class="text-soft" style="font-size:12px">${t.symptom_tags.map(esc).join(', ')}</div>` : ''}</td>
-      <td>${esc(TICKET_SEVERITY[t.severity] || t.severity)}</td>
-      <td class="text-soft">${equipment ? `${esc(typeName(equipment.equipment_type_id))}<div style="font-size:12px">${esc(equipment.serial_number)}</div>` : '—'}</td>
-      <td>${esc(equipment?.location || 'Не указано')}</td>
-      <td>${badge(TICKET_STATUS, t.status)}</td>
-      <td>${fmtDate(t.created_at)}</td>
-      <td>${t.status === 'resolved' ? '—' : `<select class="ticket-assign" data-id="${t.id}"><option value="">— выбрать —</option>${technicians.map((tech) => `<option value="${tech.id}" ${t.assigned_technician_id === tech.id ? 'selected' : ''}>${esc(tech.full_name)}</option>`).join('')}</select>`}</td>
-    </tr>`;
-  }).join('') : '<tr class="empty-row"><td colspan="7">Гостевых заявок пока нет</td></tr>';
-  cards.innerHTML = tickets.length ? tickets.map((t) => {
-    const equipment = equipmentOf(t.equipment_id);
-    return `<article class="mobile-info-card ticket-card"><div class="mobile-card-top">${badge(TICKET_STATUS, t.status)}<time>${fmtDate(t.created_at)}</time></div><strong>${esc(t.comment || t.symptom_tags.join(', ') || 'Без описания')}</strong><span class="text-soft">${esc(TICKET_SEVERITY[t.severity] || t.severity)} · ${esc(typeName(equipment?.equipment_type_id))} ${esc(equipment?.serial_number || '')}</span><div class="ticket-assignment"><label>Назначить мастера</label>${t.status === 'resolved' ? '<span class="assigned-master">Заявка решена</span>' : `<select class="ticket-assign" data-id="${t.id}"><option value="">Выберите мастера</option>${technicians.map((tech) => `<option value="${tech.id}" ${t.assigned_technician_id === tech.id ? 'selected' : ''}>${esc(tech.full_name)}</option>`).join('')}</select>`}</div></article>`;
-  }).join('') : '<div class="mobile-empty">Гостевых заявок пока нет</div>';
-
-  document.querySelectorAll('.ticket-assign').forEach((sel) => {
-    sel.addEventListener('change', async () => {
-      if (!sel.value) return;
-      try {
-        await api(`/tickets/${sel.dataset.id}/assign`, { method: 'PATCH', body: JSON.stringify({ technician_id: sel.value }) });
-        toast('Заявка назначена технику');
-        router();
-      } catch (e) { toast(e.message, 'error'); }
-    });
-  });
-
-  // Новые QR-обращения приходят без действий диспетчера. Обновляем только
-  // открытый экран заявок и одним таймером, чтобы не плодить запросы.
-  if (ticketsRefreshTimer) clearTimeout(ticketsRefreshTimer);
-  ticketsRefreshTimer = window.setTimeout(() => {
-    if (state.route === 'tickets') router();
-  }, 15000);
 }
 
 // ============================================================

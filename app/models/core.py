@@ -148,11 +148,12 @@ class Task(Base):
 
 
 class Ticket(Base):
-    """Заявка от гостя (клиента на объекте), созданная через публичную QR-страницу
-    оборудования — без входа в систему. Отдельно от Task: Task — это внутренний
-    наряд, который диспетчер создаёт и назначает сам; Ticket — сырое обращение
-    "снаружи", которое диспетчер разбирает и, при необходимости, назначает технику
-    напрямую (см. assigned_technician_id) либо оформляет в полноценный Task."""
+    """Immutable guest QR intake provenance.
+
+    A Ticket preserves the idempotency key and original reporter payload. Its
+    linked ServiceRequest is the sole operational record; Ticket status and
+    assignee are historical compatibility fields only.
+    """
 
     __tablename__ = "tickets"
     __table_args__ = (

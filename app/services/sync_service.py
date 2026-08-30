@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_technician_mobile_warehouse_id
-from app.models.core import Equipment, EquipmentStatus, Task, TaskStatus, Ticket, TicketStatus
+from app.models.core import Equipment, EquipmentStatus, Task
 from app.models.repair import Repair, RepairPart, SyncOperation, SyncStatus
 from app.schemas.repair import RepairCreate, SyncItemResult
 from app.services.stock_service import InsufficientStockError, decrement_stock
@@ -177,14 +177,6 @@ async def sync_one_repair(db: AsyncSession, technician_id: uuid.UUID, organizati
                 if payload.parts_used:
                     db.add(event(organization_id, service_request.id, technician_id, "parts.used", "Использованы запчасти", {"repair_id": str(repair.id), "parts": [{"part_id": str(item.part_id), "quantity": item.quantity} for item in payload.parts_used]}))
                 db.add(event(organization_id, service_request.id, technician_id, "service_act.generated", "Сервисный акт сформирован", {"repair_id": str(repair.id)}))
-
-            if task:
-                task.status = TaskStatus.closed
-
-            if ticket_id and not conflict:
-                ticket = await db.get(Ticket, ticket_id, with_for_update=True)
-                if ticket and ticket.status != TicketStatus.resolved:
-                    ticket.status = TicketStatus.resolved
 
             # Новая гостевая заявка, пришедшая уже после того, как техник начал
             # офлайн-ремонт, "побеждает": статус остаётся requires_repair, и

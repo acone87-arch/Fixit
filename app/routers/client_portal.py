@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import CurrentUser, get_current_user, require_roles
 from app.database import get_db
-from app.models.core import Equipment, EquipmentAttachment, EquipmentType, Task, TaskStatus, User, UserRole
+from app.models.core import Equipment, EquipmentAttachment, EquipmentType, User, UserRole
 from app.models.customer import Client, ClientUserAccess, Site
 from app.models.repair import Repair
 from app.models.service_request import ServiceRequest

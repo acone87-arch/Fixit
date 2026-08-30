@@ -115,16 +115,20 @@ Workflow `.github/workflows/deploy.yml` запускается после каж
 ## Веб-панель администратора
 
 `app/static/` — небольшой vanilla-JS SPA (без сборки), который FastAPI отдаёт
-напрямую на `/`. Разделы: Оборудование (паспорт + лента истории + QR),
-Наряды, Заявки от гостей, Склад и запчасти (остатки/приёмка/перемещение),
-Пользователи. Видимость разделов зависит от роли — у техника только «Мои
-наряды» и «Мой склад» (это read-only просмотр для проверки API; полный
-рабочий процесс техника — в PWA ниже).
+напрямую на `/`. ServiceRequest («Заявка») — единая рабочая сущность для
+диспетчера, клиента, QR-обращения и техника; ремонт и сервисный акт привязаны
+к ней напрямую. Техники работают в Fixit Pulse, в том числе с офлайн-очередью.
 
-## PWA техника (офлайн-first)
+`Task` сохранён только для чтения исторических записей. `Ticket` сохраняет
+оригинальное QR-обращение, его идемпотентный ключ и данные заявителя, но не
+управляет назначением или жизненным циклом работы.
 
-`app/static-tech/` — отдельное приложение на `/tech/`, реализует п. 3.2 ТЗ.
-Устанавливается на телефон как приложение (manifest.json + service worker).
+## Офлайн-работа техника
+
+Fixit Pulse использует общую durable IndexedDB-очередь для сервисных актов.
+`/tech` перенаправляет в Pulse; его старые статические файлы не монтируются в
+production и сохранены только для rollback/совместимости уже сохранённых
+офлайн-данных.
 
 - **Офлайн-хранилище** — `db.js`, обёртка над IndexedDB: кэш назначенных
   заявок, паспортов оборудования (включая ленту истории) и остатков на
@@ -164,11 +168,12 @@ Workflow `.github/workflows/deploy.yml` запускается после каж
 | | `PATCH /api/equipment/{id}` | admin/dispatcher |
 | | `GET /api/equipment/{id}/passport` | любой (лента истории для карточки) |
 | | `GET /api/equipment/{id}/qr` | любой (SVG для печати/показа) |
-| Наряды | `GET/POST /api/tasks` | список — свои для техника, все для admin/dispatcher; создание — admin/dispatcher |
-| | `PATCH /api/tasks/{id}/assign` | admin/dispatcher |
+| Заявки | `GET/POST /api/service-requests` | текущая работа; создание — admin/dispatcher |
+| | `PATCH /api/service-requests/{id}/assign`, `/status`, `/approval` | canonical assignment/workflow |
+| Исторические Task | `GET /api/tasks` | deprecated, только чтение; новая работа не создаёт Task |
 | Гостевые заявки | `GET /api/public/equipment/{qr_token}` | публично, без авторизации |
 | | `POST /api/public/equipment/{qr_token}/tickets` | публично, идемпотентно |
-| | `GET /api/tickets`, `PATCH /api/tickets/{id}/assign` | admin/dispatcher |
+| | `GET /api/tickets` | deprecated, только чтение provenance QR-обращений |
 | Склад | `GET /api/warehouses`, `GET /api/warehouses/{id}/stock` | техник — только свой мобильный склад |
 | | `POST /api/warehouses/movements/receive` | admin/dispatcher |
 | | `POST /api/warehouses/movements/transfer` | admin/dispatcher |

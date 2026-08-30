@@ -1,25 +1,24 @@
-# Task deprecation plan
+# Task retirement status
 
-Fixit 2.0 exposes only **ServiceRequest / Заявка** to users. `Task` remains an
-internal compatibility record and must not be dropped with a database migration
-yet. The current physical dependencies are:
+Issue #4 completed Phase A of Task retirement.
 
-- `ServiceRequest.task_id` binds legacy staff work to the user-facing request;
-- QR Ticket assignment creates or updates a Task and binds it to the resulting
-  ServiceRequest;
-- `Repair.task_id` preserves historical repair and service-act links;
-- `/api/v1/sync/repairs` accepts `task_id` for existing technician devices and
-  idempotent offline payloads;
-- Task status updates still mirror selected ServiceRequest transitions.
+- `ServiceRequest` is the only active work unit for dispatcher, client, guest,
+  and technician flows.
+- `/api/tasks` is a deprecated, read-only historical compatibility endpoint.
+  It has no create, assignment, completion, cancellation, update, or delete
+  handler.
+- `ServiceRequest.task_id`, `Repair.task_id`, and `Repair.ticket_id` remain
+  nullable historical links. They preserve unambiguous legacy repair, passport,
+  and service-act history; no new Pulse payload emits them.
+- Ticket remains a QR intake-provenance record for idempotency and the original
+  reporter payload. Its linked `ServiceRequest` alone owns assignment and
+  lifecycle. The admin Ticket API is read-only compatibility only.
+- `/tech` redirects to Fixit Pulse. The unmounted `app/static-tech` assets and
+  their IndexedDB schema stay only for rollback and for understanding old
+  pending queues. The Pulse queue preserves that IndexedDB database and the
+  server still accepts old payloads without allowing them to alter a canonical
+  request through Task.
 
-## Future migration
-
-1. Make ServiceRequest the source of assignment, status and completion for all
-   new Ticket and dispatcher flows.
-2. Make Repair reference ServiceRequest directly (backfill from `task_id`).
-3. Continue accepting `task_id` in sync payloads as a deprecated compatibility
-   field while clients move to `service_request_id`.
-4. Remove Task write endpoints, then backfill/retire the legacy links in a
-   separately reviewed migration after repair and service-act retention checks.
-
-No Task data is deleted by the present UI consolidation.
+Future Phase B, only after data-retention review: archive/migrate old rows and
+consider dropping legacy columns and tables. No historical data is deleted in
+this phase.

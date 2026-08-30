@@ -34,13 +34,13 @@ class Repair(Base):
     # Сгенерирован на устройстве техника в offline-режиме. Ключ идемпотентности при синхронизации.
     local_uuid: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), unique=True)
     equipment_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("equipment.id"))
-    # Canonical ownership for Fixit 2.0.  task_id/ticket_id remain below solely
-    # for compatibility with the legacy technician workflow.
+    # Canonical ownership for Fixit 2.0. task_id/ticket_id remain below solely
+    # for historical records and pending payloads emitted by retired clients.
     service_request_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("service_requests.id"), nullable=True, index=True
     )
     task_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("tasks.id"))
-    # Заполнено, если ремонт закрывает гостевую заявку напрямую, минуя оформление в Task.
+    # Historical guest-intake provenance; new repairs use service_request_id.
     ticket_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("tickets.id"))
     technician_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
     fault_type: Mapped[str | None] = mapped_column(String(100))
