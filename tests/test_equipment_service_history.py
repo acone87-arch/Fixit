@@ -56,3 +56,30 @@ def test_history_cards_are_whole_request_navigation_targets_with_thumbnail_urls(
     assert "data-history-photo-url" in source
     assert "open-request-btn" not in source[source.index("async function openEquipmentPassport"):]
     assert "Ремонтов ещё не было." in source
+
+
+def test_passport_has_one_compact_primary_photo_and_never_a_hero_photo():
+    source = (ROOT / "static" / "app.js").read_text(encoding="utf8")
+    passport = source[source.index("async function openEquipmentPassport"):]
+    assert 'id="passport-primary-photo"' in passport
+    assert "passport-hero-photo" not in passport
+    assert "data-passport-hero-photo" not in passport
+    assert "querySelectorAll('#passport-primary-photo" not in passport
+    assert "const image = backdrop.querySelector('#passport-primary-photo');" in passport
+
+
+def test_history_card_keeps_technician_out_of_header_and_omits_identical_problem():
+    source = (ROOT / "static" / "app.js").read_text(encoding="utf8")
+    assert "normalizeHistoryText(entry.problem) !== normalizeHistoryText(title)" in source
+    assert 'class="equipment-history-card-head"' in source
+    assert "equipment-history-technician" in source
+    assert "compactTechnicianName(entry.technician_name)" in source
+    assert "entry.photos.slice(0, 3)" in source
+    assert "event.stopPropagation(); openProtectedImage(photoUrl" in source
+    assert "!event.target.closest('[data-history-photo-url]')" in source
+
+
+def test_passport_asset_versions_change_together_for_browser_cache_busting():
+    index = (ROOT / "static" / "index.html").read_text(encoding="utf8")
+    assert "/static/styles.css?v=20260831-1" in index
+    assert "/static/app.js?v=20260831-1" in index

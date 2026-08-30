@@ -62,6 +62,13 @@ assert.match(source, /FixitOffline\?\.configure\?\.\(\{ token: state\.token \}\)
 assert.match(source, /FixitOffline\?\.db\?\.kvDelete\?\.\('token'\)/);
 assert.match(source, /Фото оборудования/);
 assert.match(source, /equipment-history-photos/);
+const passportSource = source.slice(source.indexOf('async function openEquipmentPassport'));
+assert.doesNotMatch(passportSource, /passport-hero-photo/);
+assert.match(passportSource, /normalizeHistoryText\(entry\.problem\) !== normalizeHistoryText\(title\)/);
+assert.match(passportSource, /class="equipment-history-card-head"/);
+assert.match(passportSource, /equipment-history-technician/);
+assert.match(passportSource, /event\.stopPropagation\(\); openProtectedImage\(photoUrl/);
+assert.match(passportSource, /!event\.target\.closest\('\[data-history-photo-url\]'\)/);
 const techSource = fs.readFileSync('app/static-tech/app.js', 'utf8');
 const workerSource = fs.readFileSync('app/static-tech/sw.js', 'utf8');
 assert.doesNotMatch(techSource, /if \(!pending\.length\) return resultsById/);
