@@ -24,6 +24,15 @@ router = APIRouter(prefix="/api/client-portal", tags=["client portal"])
 ACCESS_MANAGERS = (UserRole.owner, UserRole.admin, UserRole.dispatcher)
 
 
+def repair_for_service_request_query(organization_id: uuid.UUID, request_id: uuid.UUID):
+    """Canonical document ownership query; deliberately has no equipment
+    fallback because equipment can have many completed requests."""
+    return select(Repair).where(
+        Repair.organization_id == organization_id,
+        Repair.service_request_id == request_id,
+    )
+
+
 async def _access_member_and_client(db, organization_id, user_id, client_id):
     member = await db.scalar(select(OrganizationMembership).where(
         OrganizationMembership.organization_id == organization_id, OrganizationMembership.user_id == user_id,
@@ -242,6 +251,8 @@ async def documents(db: AsyncSession = Depends(get_db), user: CurrentUser = Depe
     rows = (await db.execute(query.where(ServiceRequest.status.in_({"completed", "closed"})))).all()
     result = []
     for request, equipment, _, site, _ in rows:
-        repair = await db.scalar(select(Repair).where(Repair.organization_id == user.organization_id, Repair.equipment_id == equipment.id).order_by(Repair.closed_at.desc()))
+        # A document belongs to its request, never to whichever repair for the
+        # same equipment happened to finish most recently.
+        repair = await db.scalar(repair_for_service_request_query(user.organization_id, request.id))
         if repair: result.append({"repair_id": repair.id, "number": request.number, "equipment_name": equipment.name, "site_name": site.name, "closed_at": repair.closed_at})
     return result

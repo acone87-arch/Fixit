@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Enum, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Enum, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -18,12 +18,27 @@ class SyncStatus(str, enum.Enum):
 
 class Repair(Base):
     __tablename__ = "repairs"
+    __table_args__ = (
+        # A canonical request has one completion/act.  The partial predicate keeps
+        # historical Task/Ticket repairs (which intentionally remain NULL) valid.
+        Index(
+            "uq_repair_service_request",
+            "service_request_id",
+            unique=True,
+            postgresql_where=text("service_request_id IS NOT NULL"),
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id"), index=True)
     # Сгенерирован на устройстве техника в offline-режиме. Ключ идемпотентности при синхронизации.
     local_uuid: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), unique=True)
     equipment_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("equipment.id"))
+    # Canonical ownership for Fixit 2.0.  task_id/ticket_id remain below solely
+    # for compatibility with the legacy technician workflow.
+    service_request_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("service_requests.id"), nullable=True, index=True
+    )
     task_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("tasks.id"))
     # Заполнено, если ремонт закрывает гостевую заявку напрямую, минуя оформление в Task.
     ticket_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("tickets.id"))
@@ -43,6 +58,9 @@ class Repair(Base):
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
     equipment: Mapped["Equipment"] = relationship(back_populates="repairs")  # noqa: F821
+    service_request: Mapped["ServiceRequest | None"] = relationship(  # noqa: F821
+        back_populates="repairs", foreign_keys=[service_request_id]
+    )
     parts_used: Mapped[list["RepairPart"]] = relationship(back_populates="repair", cascade="all, delete-orphan")
     attachments: Mapped[list["RepairAttachment"]] = relationship(
         back_populates="repair", cascade="all, delete-orphan"

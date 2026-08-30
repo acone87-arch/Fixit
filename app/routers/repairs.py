@@ -92,15 +92,17 @@ async def upload_attachment(
         client_id=client_id,
     )
     db.add(attachment)
-    request_query = select(ServiceRequest).where(
-        ServiceRequest.organization_id == user.organization_id,
-        ServiceRequest.equipment_id == repair.equipment_id,
-    )
-    if repair.task_id:
+    request_query = select(ServiceRequest).where(ServiceRequest.organization_id == user.organization_id)
+    if repair.service_request_id:
+        request_query = request_query.where(ServiceRequest.id == repair.service_request_id)
+    elif repair.task_id:
         request_query = request_query.where(ServiceRequest.task_id == repair.task_id)
     elif repair.ticket_id:
         request_query = request_query.where(ServiceRequest.ticket_id == repair.ticket_id)
-    service_request = await db.scalar(request_query.order_by(ServiceRequest.created_at.desc()))
+    else:
+        service_request = None
+    if repair.service_request_id or repair.task_id or repair.ticket_id:
+        service_request = await db.scalar(request_query.order_by(ServiceRequest.created_at.desc()))
     if service_request:
         db.add(event(user.organization_id, service_request.id, user.id, "photos.added" if kind in IMAGE_KINDS else "document.added", "Добавлены фотографии работ" if kind in IMAGE_KINDS else "Добавлен документ", {"attachment_id": str(attachment.id), "kind": kind}))
     await db.commit()

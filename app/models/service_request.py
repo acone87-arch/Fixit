@@ -3,7 +3,7 @@ from datetime import datetime
 
 from sqlalchemy import ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
 from app.database import Base
@@ -28,6 +28,10 @@ class ServiceRequest(Base):
     approval_target: Mapped[str] = mapped_column(String(20), default="internal")
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     completed_at: Mapped[datetime | None]
+
+    repairs: Mapped[list["Repair"]] = relationship(  # noqa: F821
+        back_populates="service_request", foreign_keys="Repair.service_request_id"
+    )
 
 
 class ServiceRequestEvent(Base):

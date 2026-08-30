@@ -393,6 +393,7 @@ async def get_passport(equipment_id: uuid.UUID, db: AsyncSession = Depends(get_d
         id=f"equipment:{equipment.id}", kind="equipment.created", occurred_at=equipment.created_at,
         title="Оборудование добавлено", description=equipment_type_name,
     )]
+    request_by_id = {item.id: item for item in requests}
     request_by_task = {item.task_id: item for item in requests if item.task_id}
     request_by_ticket = {item.ticket_id: item for item in requests if item.ticket_id}
     for item in requests:
@@ -411,7 +412,11 @@ async def get_passport(equipment_id: uuid.UUID, db: AsyncSession = Depends(get_d
             request_number=request.number if request else None,
         ))
     for repair, technician_name in repair_rows:
-        request = request_by_task.get(repair.task_id) or request_by_ticket.get(repair.ticket_id)
+        request = (
+            request_by_id.get(repair.service_request_id)
+            or request_by_task.get(repair.task_id)
+            or request_by_ticket.get(repair.ticket_id)
+        )
         repair_photos = [
             {"id": str(attachment.id), "kind": attachment.kind, "media_type": attachment.media_type,
              "download_url": f"/api/repairs/attachments/{attachment.id}"}

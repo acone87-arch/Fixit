@@ -13,6 +13,11 @@ from app.models.service_request import ServiceRequest
 from app.services.service_requests import event
 
 
+# Completion from the current Pulse ServiceRequest workspace is emitted only
+# after work has started.  Legacy Task/Ticket sync remains compatible below.
+CANONICAL_COMPLETION_STATUSES = {"in_progress"}
+
+
 class _SyncFailure(Exception):
     """Internal signal to abort the current item's savepoint and report a clean
     per-item failure, instead of either raising a 500 or silently returning
@@ -20,6 +25,29 @@ class _SyncFailure(Exception):
 
     def __init__(self, message: str):
         self.message = message
+
+
+def validate_canonical_completion(
+    request: ServiceRequest | None,
+    *,
+    organization_id: uuid.UUID,
+    technician_id: uuid.UUID,
+    equipment_id: uuid.UUID,
+) -> ServiceRequest:
+    """Validate the minimum server-side integrity contract for a canonical
+    ServiceRequest completion.  Kept separate from the database query so this
+    policy has direct regression coverage independent of the frontend."""
+    if not request or request.organization_id != organization_id:
+        raise _SyncFailure("Заявка не найдена")
+    if request.equipment_id != equipment_id:
+        raise _SyncFailure("Заявка относится к другому оборудованию")
+    if not request.assigned_technician_id:
+        raise _SyncFailure("Заявка не назначена мастеру")
+    if request.assigned_technician_id != technician_id:
+        raise _SyncFailure("Заявка назначена другому мастеру")
+    if request.status not in CANONICAL_COMPLETION_STATUSES:
+        raise _SyncFailure("Заявку нельзя завершить на текущем этапе")
+    return request
 
 
 async def sync_one_repair(db: AsyncSession, technician_id: uuid.UUID, organization_id: uuid.UUID,
@@ -46,6 +74,48 @@ async def sync_one_repair(db: AsyncSession, technician_id: uuid.UUID, organizati
         # savepoint (включая уже применённые внутри неё частичные списания),
         # не трогая остальные уже обработанные записи того же пакета.
         async with db.begin_nested():
+            equipment = await db.scalar(
+                select(Equipment).where(Equipment.id == payload.equipment_id,
+                                        Equipment.organization_id == organization_id).with_for_update()
+            )
+            if not equipment:
+                raise _SyncFailure("Оборудование не найдено")
+
+            task = None
+            ticket_id = payload.ticket_id
+            service_request_id = payload.service_request_id
+            linked_request = None
+            if service_request_id:
+                linked_request = await db.scalar(select(ServiceRequest).where(
+                    ServiceRequest.id == service_request_id,
+                    ServiceRequest.organization_id == organization_id,
+                ).with_for_update())
+                linked_request = validate_canonical_completion(
+                    linked_request,
+                    organization_id=organization_id,
+                    technician_id=technician_id,
+                    equipment_id=equipment.id,
+                )
+                existing_repair = await db.scalar(select(Repair.id).where(
+                    Repair.organization_id == organization_id,
+                    Repair.service_request_id == linked_request.id,
+                ))
+                if existing_repair:
+                    raise _SyncFailure("Для заявки уже оформлен сервисный акт")
+
+            if payload.task_id:
+                task = await db.scalar(
+                    select(Task)
+                    .where(Task.id == payload.task_id, Task.assigned_to == technician_id,
+                           Task.organization_id == organization_id)
+                    .with_for_update()
+                )
+                if not task:
+                    raise _SyncFailure("Наряд не найден или не назначен вам")
+                if task.equipment_id != equipment.id:
+                    raise _SyncFailure("Наряд относится к другому оборудованию")
+                ticket_id = task.ticket_id or ticket_id
+
             # Для акта без запчастей склад вообще не нужен. Раньше именно это
             # лишнее требование не давало технику закрыть выполненный ремонт.
             if payload.parts_used:
@@ -67,38 +137,6 @@ async def sync_one_repair(db: AsyncSession, technician_id: uuid.UUID, organizati
                             f"требуется {exc.requested}"
                         ) from exc
 
-            equipment = await db.scalar(
-                select(Equipment).where(Equipment.id == payload.equipment_id,
-                                        Equipment.organization_id == organization_id).with_for_update()
-            )
-            if not equipment:
-                raise _SyncFailure("Оборудование не найдено")
-
-            task = None
-            ticket_id = payload.ticket_id
-            service_request_id = payload.service_request_id
-            if service_request_id:
-                linked_request = await db.scalar(select(ServiceRequest).where(
-                    ServiceRequest.id == service_request_id,
-                    ServiceRequest.organization_id == organization_id,
-                ).with_for_update())
-                if not linked_request or linked_request.equipment_id != equipment.id:
-                    raise _SyncFailure("Заявка не найдена или относится к другому оборудованию")
-                if linked_request.assigned_technician_id and linked_request.assigned_technician_id != technician_id:
-                    raise _SyncFailure("Заявка назначена другому мастеру")
-            if payload.task_id:
-                task = await db.scalar(
-                    select(Task)
-                    .where(Task.id == payload.task_id, Task.assigned_to == technician_id,
-                           Task.organization_id == organization_id)
-                    .with_for_update()
-                )
-                if not task:
-                    raise _SyncFailure("Наряд не найден или не назначен вам")
-                if task.equipment_id != equipment.id:
-                    raise _SyncFailure("Наряд относится к другому оборудованию")
-                ticket_id = task.ticket_id or ticket_id
-
             conflict = equipment.version != payload.base_equipment_version
 
             repair = Repair(
@@ -106,6 +144,7 @@ async def sync_one_repair(db: AsyncSession, technician_id: uuid.UUID, organizati
                 id=uuid.uuid4(),
                 local_uuid=payload.local_uuid,
                 equipment_id=equipment.id,
+                service_request_id=linked_request.id if linked_request else None,
                 task_id=payload.task_id,
                 ticket_id=ticket_id,
                 technician_id=technician_id,
@@ -125,16 +164,20 @@ async def sync_one_repair(db: AsyncSession, technician_id: uuid.UUID, organizati
             for item in payload.parts_used:
                 db.add(RepairPart(repair_id=repair.id, part_id=item.part_id, quantity=item.quantity))
 
-            request_query = select(ServiceRequest).where(ServiceRequest.organization_id == organization_id)
-            if service_request_id:
-                request_query = request_query.where(ServiceRequest.id == service_request_id)
-            elif payload.task_id:
+            # Canonical ownership has already been validated and is persisted on
+            # Repair.  The remaining branches deliberately preserve the legacy
+            # Task/Ticket behavior until that workflow is retired.
+            service_request = linked_request
+            if not service_request and payload.task_id:
+                request_query = select(ServiceRequest).where(ServiceRequest.organization_id == organization_id)
                 request_query = request_query.where(ServiceRequest.task_id == payload.task_id)
-            elif ticket_id:
-                request_query = request_query.where(ServiceRequest.ticket_id == ticket_id)
-            else:
-                request_query = request_query.where(ServiceRequest.equipment_id == equipment.id).order_by(ServiceRequest.created_at.desc())
-            service_request = await db.scalar(request_query)
+                service_request = await db.scalar(request_query)
+            elif not service_request and ticket_id:
+                request_query = select(ServiceRequest).where(
+                    ServiceRequest.organization_id == organization_id,
+                    ServiceRequest.ticket_id == ticket_id,
+                )
+                service_request = await db.scalar(request_query)
             if service_request:
                 service_request.status = "completed"
                 service_request.completed_at = datetime.now(timezone.utc)

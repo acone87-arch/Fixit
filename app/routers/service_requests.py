@@ -67,12 +67,25 @@ async def serialize(db, request, org):
         EquipmentAttachment.equipment_id == equipment.id,
         EquipmentAttachment.organization_id == org,
     ))
-    repair_query = select(Repair).where(Repair.organization_id == org, Repair.equipment_id == request.equipment_id)
-    if request.task_id:
-        repair_query = repair_query.where(Repair.task_id == request.task_id)
-    elif request.ticket_id:
-        repair_query = repair_query.where(Repair.ticket_id == request.ticket_id)
-    repair = await db.scalar(repair_query.order_by(Repair.closed_at.desc(), Repair.created_at.desc()))
+    # Never infer canonical ownership from equipment or recency.  Only legacy
+    # Task/Ticket requests may use their explicit old linkage while migration is
+    # in progress, and only for repairs not already owned by a ServiceRequest.
+    repair = await db.scalar(select(Repair).where(
+        Repair.organization_id == org,
+        Repair.service_request_id == request.id,
+    ))
+    if not repair and request.task_id:
+        repair = await db.scalar(select(Repair).where(
+            Repair.organization_id == org,
+            Repair.service_request_id.is_(None),
+            Repair.task_id == request.task_id,
+        ).order_by(Repair.closed_at.desc(), Repair.created_at.desc()))
+    elif not repair and request.ticket_id:
+        repair = await db.scalar(select(Repair).where(
+            Repair.organization_id == org,
+            Repair.service_request_id.is_(None),
+            Repair.ticket_id == request.ticket_id,
+        ).order_by(Repair.closed_at.desc(), Repair.created_at.desc()))
     parts = []
     if repair:
         parts = [{"part_name": name, "article": article, "quantity": qty} for name, article, qty in (await db.execute(select(Part.name, Part.article, RepairPart.quantity).join(RepairPart, RepairPart.part_id == Part.id).where(RepairPart.repair_id == repair.id))).all()]

@@ -42,6 +42,7 @@ class RepairOut(BaseModel):
     id: uuid.UUID
     local_uuid: uuid.UUID
     equipment_id: uuid.UUID
+    service_request_id: uuid.UUID | None
     technician_id: uuid.UUID
     fault_type: str | None
     description: str
