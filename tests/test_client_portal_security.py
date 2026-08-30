@@ -19,8 +19,8 @@ def test_client_scope_is_used_for_equipment_requests_and_protected_media():
     equipment = Path("app/routers/equipment.py").read_text(encoding="utf8")
     assert "ensure_client_equipment" in service
     assert "elif user.role in CLIENT_ROLES" in requests
-    assert "await ensure_client_equipment(repair.equipment_id, user, db)" in repairs
-    assert "return await ensure_client_equipment(equipment_id, user, db)" in equipment
+    assert "ensure_repair_access" in repairs
+    assert "ensure_equipment_access" in equipment
 
 
 def test_guest_qr_surface_stays_opaque_and_never_returns_internal_history():

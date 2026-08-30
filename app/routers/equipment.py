@@ -31,6 +31,8 @@ from app.schemas.equipment import (
     RepairHistoryEntry,
 )
 from app.services.client_portal import CLIENT_ROLES, client_scope, ensure_client_equipment
+from app.services.access_policy import ACTIVE_ASSIGNED_STATES, ensure_equipment_access
+from app.services.media import image_response, normalize_image
 
 router = APIRouter(prefix="/api/equipment", tags=["equipment"])
 types_router = APIRouter(prefix="/api/equipment-types", tags=["equipment"])
@@ -47,14 +49,7 @@ def _photo_out(item: EquipmentAttachment) -> EquipmentPhotoOut:
 
 
 async def _equipment_for_user(equipment_id: uuid.UUID, db: AsyncSession, user: CurrentUser) -> Equipment:
-    if user.role in CLIENT_ROLES:
-        return await ensure_client_equipment(equipment_id, user, db)
-    equipment = await db.scalar(select(Equipment).where(
-        Equipment.id == equipment_id, Equipment.organization_id == user.organization_id,
-    ))
-    if not equipment:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Оборудование не найдено")
-    return equipment
+    return await ensure_equipment_access(equipment_id, user, db)
 
 
 @types_router.get("", response_model=list[EquipmentTypeOut])
@@ -95,6 +90,12 @@ async def list_equipment(db: AsyncSession = Depends(get_db), user: CurrentUser =
             .where(Equipment.organization_id == user.organization_id, Site.client_id == client_id)
             .order_by(Equipment.updated_at.desc()))
         if site_ids is not None: statement = statement.where(Site.id.in_(site_ids))
+    elif user.role == UserRole.technician:
+        statement = statement.where(Equipment.id.in_(select(ServiceRequest.equipment_id).where(
+            ServiceRequest.organization_id == user.organization_id,
+            ServiceRequest.assigned_technician_id == user.id,
+            ServiceRequest.status.in_(ACTIVE_ASSIGNED_STATES),
+        )))
     rows = (await db.execute(statement)).all()
     # Для старых записей сохраняем историческое поле name в БД, но наружу
     # всегда отдаём тип: все клиенты показывают единое обозначение техники.
@@ -108,7 +109,7 @@ async def list_equipment(db: AsyncSession = Depends(get_db), user: CurrentUser =
 async def create_equipment(
     payload: EquipmentCreate,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_roles(UserRole.admin, UserRole.dispatcher, UserRole.technician)),
+    user=Depends(require_roles(UserRole.admin, UserRole.dispatcher)),
 ):
     equipment_type = await db.scalar(select(EquipmentType).where(
         EquipmentType.id == payload.equipment_type_id,
@@ -150,14 +151,9 @@ async def upload_equipment_photo(
 ):
     equipment = await _equipment_for_user(equipment_id, db, user)
     content = await file.read(MAX_PHOTO_BYTES + 1)
-    media_type = file.content_type or ""
     if not content or len(content) > MAX_PHOTO_BYTES:
         raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Фото должно быть не больше 8 МБ")
-    if not media_type.startswith("image/"):
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Можно загрузить только изображение")
-    suffix = Path(file.filename or "photo").suffix.lower()
-    if len(suffix) > 10 or not suffix.replace(".", "").isalnum():
-        suffix = ""
+    content, media_type, suffix = normalize_image(content)
     attachment = await db.scalar(select(EquipmentAttachment).where(
         EquipmentAttachment.equipment_id == equipment.id,
         EquipmentAttachment.organization_id == user.organization_id,
@@ -205,14 +201,14 @@ async def download_equipment_photo(
     path = UPLOAD_ROOT / attachment.file_url
     if not path.is_file():
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Файл фотографии не найден")
-    return Response(await run_in_threadpool(path.read_bytes), media_type=attachment.media_type or "image/jpeg")
+    return image_response(await run_in_threadpool(path.read_bytes), attachment.media_type)
 
 
 @router.delete("/{equipment_id}/photo", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_equipment_photo(
     equipment_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_roles(UserRole.admin, UserRole.dispatcher, UserRole.technician)),
+    user=Depends(require_roles(UserRole.admin, UserRole.dispatcher)),
 ):
     await _equipment_for_user(equipment_id, db, user)
     attachment = await db.scalar(select(EquipmentAttachment).where(
@@ -229,21 +225,29 @@ async def delete_equipment_photo(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.get("/by-qr/{qr_token}", response_model=EquipmentPassport)
+@router.get("/by-qr/{qr_token}")
 async def get_equipment_by_qr(
     qr_token: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     user: CurrentUser = Depends(get_current_user),
 ):
-    """Для мобильного приложения техника — в отличие от /api/public/equipment/{qr_token}
-    (гостевой, без авторизации, отдаёт минимум полей), тут нужен именно внутренний id,
-    чтобы дальше открыть полный паспорт и создать акт ремонта."""
+    """QR identifies equipment; it never elevates an unassigned technician to passport access."""
     equipment = await db.scalar(select(Equipment).where(
         Equipment.public_qr_token == qr_token, Equipment.organization_id == user.organization_id
     ))
     if not equipment:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Оборудование не найдено")
-    return await get_passport(equipment.id, db, user)
+    if user.role != UserRole.technician:
+        return await get_passport(equipment.id, db, user)
+    try:
+        await ensure_equipment_access(equipment.id, user, db)
+    except HTTPException as exc:
+        if exc.status_code != status.HTTP_403_FORBIDDEN:
+            raise
+        return {"id": equipment.id, "name": equipment.name, "manufacturer": equipment.manufacturer,
+                "model": equipment.model, "serial_number": equipment.serial_number,
+                "status": equipment.status.value, "passport_allowed": False}
+    return {"id": equipment.id, "passport_allowed": True}
 
 
 @router.patch("/{equipment_id}", response_model=EquipmentOut)
@@ -309,8 +313,7 @@ async def delete_equipment(
 @router.get("/{equipment_id}/passport", response_model=EquipmentPassport)
 async def get_passport(equipment_id: uuid.UUID, db: AsyncSession = Depends(get_db),
                        user: CurrentUser = Depends(get_current_user)):
-    if user.role in CLIENT_ROLES:
-        await ensure_client_equipment(equipment_id, user, db)
+    await _equipment_for_user(equipment_id, db, user)
     equipment_row = (await db.execute(
         select(Equipment, EquipmentType.name, Site, Client, EquipmentAttachment)
         .join(EquipmentType, EquipmentType.id == Equipment.equipment_type_id)

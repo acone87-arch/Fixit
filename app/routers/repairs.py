@@ -18,6 +18,8 @@ from app.models.service_request import ServiceRequest
 from app.schemas.repair import RepairAttachmentOut
 from app.services.service_requests import event
 from app.services.client_portal import CLIENT_ROLES, ensure_client_equipment
+from app.services.access_policy import ensure_repair_access
+from app.services.media import image_response, normalize_image
 from app.services.service_act_pdf import build_service_act
 
 router = APIRouter(prefix="/api/repairs", tags=["repairs"])
@@ -34,11 +36,7 @@ async def _repair_for_user(repair_id: uuid.UUID, db: AsyncSession, user: Current
     ))
     if not repair:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Акт ремонта не найден")
-    if user.role in CLIENT_ROLES:
-        await ensure_client_equipment(repair.equipment_id, user, db)
-    if user.role == UserRole.technician and repair.technician_id != user.id:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Можно работать только со своими актами")
-    return repair
+    return await ensure_repair_access(repair, user, db)
 
 
 def _attachment_out(item: RepairAttachment) -> RepairAttachmentOut:
@@ -73,14 +71,14 @@ async def upload_attachment(
     content = await file.read(MAX_UPLOAD_BYTES + 1)
     if not content or len(content) > MAX_UPLOAD_BYTES:
         raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Файл должен быть не больше 8 МБ")
-    media_type = file.content_type or "application/octet-stream"
-    if kind in IMAGE_KINDS and not media_type.startswith("image/"):
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Для фото и подписи нужен файл изображения")
+    if kind in IMAGE_KINDS:
+        content, media_type, suffix = normalize_image(content)
+    else:
+        if not content.startswith(b"%PDF-"):
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Документ должен быть PDF")
+        media_type, suffix = "application/pdf", ".pdf"
 
     attachment_id = uuid.uuid4()
-    suffix = Path(file.filename or "upload").suffix.lower()
-    if len(suffix) > 10 or not suffix.replace(".", "").isalnum():
-        suffix = ""
     relative_path = Path(str(user.organization_id)) / str(repair.id) / f"{attachment_id}{suffix}"
     destination = UPLOAD_ROOT / relative_path
     await run_in_threadpool(destination.parent.mkdir, parents=True, exist_ok=True)
@@ -126,7 +124,12 @@ async def download_attachment(
     if not path.is_file():
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Файл вложения не найден")
     content = await run_in_threadpool(path.read_bytes)
-    return Response(content, media_type=item.media_type or "application/octet-stream")
+    if item.kind in IMAGE_KINDS:
+        return image_response(content, item.media_type)
+    return Response(content, media_type="application/pdf", headers={
+        "Content-Disposition": f'attachment; filename="attachment-{str(item.id)[:8]}.pdf"',
+        "X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store",
+    })
 
 
 @router.get("/{repair_id}/act.pdf")
@@ -175,5 +178,6 @@ async def download_service_act(
     filename = f"service-act-{str(repair.id)[:8]}.pdf"
     return StreamingResponse(stream, media_type="application/pdf", headers={
         "Content-Disposition": f'attachment; filename="{filename}"',
+        "X-Content-Type-Options": "nosniff",
         "Cache-Control": "private, no-store",
     })

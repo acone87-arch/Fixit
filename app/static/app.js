@@ -383,6 +383,10 @@ function openQrQuickAction() {
     try {
       const equipment = await api(`/equipment/by-qr/${encodeURIComponent(token)}`);
       closeModal();
+      if (equipment.passport_allowed === false) {
+        toast(`Оборудование: ${equipment.serial_number || equipment.id}. Полный паспорт доступен после назначения заявки.`, 'info');
+        return;
+      }
       await openEquipmentPassport(equipment.id);
     } catch (error) { toast(error.message || 'Оборудование по QR не найдено', 'error'); }
   };

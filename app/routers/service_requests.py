@@ -17,6 +17,8 @@ from app.schemas.service_request import REQUEST_STATUSES, ServiceRequestApproval
 from app.services.service_requests import event, next_number
 from app.services.client_portal import CLIENT_ROLES, client_scope, ensure_client_equipment
 from app.services.service_request_workflow import decide_approval as workflow_decide_approval, locked_request, transition
+from app.services.access_policy import ensure_service_request_access
+from app.services.media import image_response, normalize_image
 
 router = APIRouter(prefix="/api/service-requests", tags=["service requests"])
 UPLOAD_ROOT = Path("uploads")
@@ -41,11 +43,9 @@ async def request_for_user(request_id: uuid.UUID, db: AsyncSession, user: Curren
         ServiceRequest.id == request_id,
         ServiceRequest.organization_id == user.organization_id,
     ))
-    if not request or (user.role == UserRole.technician and request.assigned_technician_id != user.id):
+    if not request:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Заявка не найдена")
-    if user.role in CLIENT_ROLES:
-        await ensure_client_equipment(request.equipment_id, user, db)
-    return request
+    return await ensure_service_request_access(request, user, db)
 
 
 async def serialize(db, request, org):
@@ -155,15 +155,10 @@ async def upload_request_attachment(
     if kind not in REQUEST_ATTACHMENT_KINDS:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Неизвестный тип вложения")
     content = await file.read(MAX_ATTACHMENT_BYTES + 1)
-    media_type = file.content_type or ""
     if not content or len(content) > MAX_ATTACHMENT_BYTES:
         raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Файл должен быть не больше 8 МБ")
-    if not media_type.startswith("image/"):
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Для заявки можно загрузить только изображение")
+    content, media_type, suffix = normalize_image(content)
     attachment_id = uuid.uuid4()
-    suffix = Path(file.filename or "attachment").suffix.lower()
-    if len(suffix) > 10 or not suffix.replace(".", "").isalnum():
-        suffix = ""
     relative_path = Path(str(user.organization_id)) / "service-requests" / str(request.id) / f"{attachment_id}{suffix}"
     destination = UPLOAD_ROOT / relative_path
     await run_in_threadpool(destination.parent.mkdir, parents=True, exist_ok=True)
@@ -201,7 +196,7 @@ async def download_request_attachment(attachment_id: uuid.UUID, db: AsyncSession
     path = UPLOAD_ROOT / attachment.file_url
     if not path.is_file():
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Файл вложения не найден")
-    return Response(await run_in_threadpool(path.read_bytes), media_type=attachment.media_type or "image/jpeg")
+    return image_response(await run_in_threadpool(path.read_bytes), attachment.media_type)
 
 @router.get("", response_model=list[ServiceRequestListItem])
 async def list_requests(db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(get_current_user)):

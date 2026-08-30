@@ -17,6 +17,7 @@ from app.schemas.ticket import GuestTicketCreate, TicketAssign, TicketCreateResu
 from app.models.service_request import ServiceRequest, ServiceRequestAttachment
 from app.services.service_requests import event, next_number
 from app.services.service_request_workflow import transition
+from app.services.media import image_response, normalize_image
 
 public_router = APIRouter(prefix="/api/public/equipment", tags=["guest"])
 admin_router = APIRouter(prefix="/api/tickets", tags=["tickets"])
@@ -54,8 +55,7 @@ async def get_public_equipment_photo(qr_token: uuid.UUID, db: AsyncSession = Dep
     if not row: raise HTTPException(status.HTTP_404_NOT_FOUND, "Фото не добавлено")
     path = UPLOAD_ROOT / row.file_url
     if not path.is_file(): raise HTTPException(status.HTTP_404_NOT_FOUND, "Фото не найдено")
-    from fastapi import Response
-    return Response(await run_in_threadpool(path.read_bytes), media_type=row.media_type or "image/jpeg", headers={"Cache-Control": "private, max-age=300"})
+    return image_response(await run_in_threadpool(path.read_bytes), row.media_type)
 
 
 @public_router.post("/{qr_token}/tickets", response_model=TicketCreateResult, status_code=status.HTTP_201_CREATED)
@@ -118,11 +118,11 @@ async def upload_guest_problem_photo(qr_token: uuid.UUID, request_id: uuid.UUID,
     if not service_request: raise HTTPException(status.HTTP_404_NOT_FOUND, "Заявка не найдена")
     count = await db.scalar(select(func.count(ServiceRequestAttachment.id)).where(ServiceRequestAttachment.service_request_id == request_id))
     if count >= 3: raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Можно добавить не более трёх фотографий")
-    content = await file.read(MAX_GUEST_PHOTO_BYTES + 1); media_type = file.content_type or ""
-    if not content or len(content) > MAX_GUEST_PHOTO_BYTES or not media_type.startswith("image/"):
+    content = await file.read(MAX_GUEST_PHOTO_BYTES + 1)
+    if not content or len(content) > MAX_GUEST_PHOTO_BYTES:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Нужна фотография до 6 МБ")
-    attachment_id = uuid.uuid4(); suffix = Path(file.filename or "photo.jpg").suffix.lower()
-    if len(suffix) > 10 or not suffix.replace('.', '').isalnum(): suffix = ".jpg"
+    content, media_type, suffix = normalize_image(content)
+    attachment_id = uuid.uuid4()
     relative = Path(str(service_request.organization_id)) / "service-requests" / str(request_id) / f"{attachment_id}{suffix}"
     destination = UPLOAD_ROOT / relative; await run_in_threadpool(destination.parent.mkdir, parents=True, exist_ok=True); await run_in_threadpool(destination.write_bytes, content)
     db.add(ServiceRequestAttachment(id=attachment_id, organization_id=service_request.organization_id, service_request_id=request_id, uploaded_by_user_id=None, kind="problem", file_url=str(relative).replace('\\', '/'), original_name=(file.filename or "Фото проблемы")[:255], media_type=media_type[:100], byte_size=len(content)))
