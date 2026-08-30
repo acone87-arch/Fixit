@@ -11,7 +11,7 @@ from app.models.repair import Repair, RepairAttachment, SyncLog, SyncOperation
 from app.models.service_request import ServiceRequest, ServiceRequestAttachment, ServiceRequestEvent
 from app.models.warehouse import Part, StockMovement, Warehouse
 from app.schemas.service_request import REQUEST_STATUSES, ServiceRequestListItem
-from app.routers.service_requests import TECHNICIAN_TRANSITIONS
+from app.services.service_request_workflow import TRANSITIONS
 
 
 def test_access_token_is_bound_to_organization():
@@ -72,8 +72,8 @@ def test_service_request_workflow_supports_arrival_stage():
 
 
 def test_approval_wait_requires_dispatcher_decision():
-    assert "in_progress" not in TECHNICIAN_TRANSITIONS["waiting_approval"]
-    assert TECHNICIAN_TRANSITIONS["waiting_parts"] == {"in_progress"}
+    assert TRANSITIONS["waiting_approval"] == {"in_progress", "cancelled"}
+    assert TRANSITIONS["waiting_parts"] == {"in_progress", "cancelled"}
 
 
 def test_service_request_opening_uses_one_safe_modal_transition():

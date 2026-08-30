@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import CurrentUser, get_current_user, require_roles
 from app.database import get_db
-from app.models.core import Equipment, EquipmentAttachment, EquipmentType, Task, TaskStatus, User, UserRole
+from app.models.core import Equipment, EquipmentAttachment, EquipmentType, User, UserRole
 from app.models.customer import Client, Site
 from app.models.organization import OrganizationMembership
 from app.models.repair import Repair, RepairAttachment, RepairPart
@@ -16,17 +16,12 @@ from app.models.warehouse import Part
 from app.schemas.service_request import REQUEST_STATUSES, ServiceRequestApproval, ServiceRequestAttachmentOut, ServiceRequestCreate, ServiceRequestDetail, ServiceRequestListItem, ServiceRequestOut, ServiceRequestStatusUpdate
 from app.services.service_requests import event, next_number
 from app.services.client_portal import CLIENT_ROLES, client_scope, ensure_client_equipment
+from app.services.service_request_workflow import decide_approval as workflow_decide_approval, locked_request, transition
 
 router = APIRouter(prefix="/api/service-requests", tags=["service requests"])
 UPLOAD_ROOT = Path("uploads")
 MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024
 REQUEST_ATTACHMENT_KINDS = {"problem", "diagnostic", "approval", "work", "other"}
-
-TECHNICIAN_TRANSITIONS = {
-    "assigned": {"on_the_way"}, "on_the_way": {"arrived"}, "arrived": {"in_progress"},
-    "in_progress": {"waiting_parts", "waiting_approval", "completed"},
-    "waiting_parts": {"in_progress"}, "waiting_approval": set(),
-}
 
 def client_label(client: Client, site: Site) -> str:
     name = (client.legal_name or client.name or "").strip()
@@ -133,24 +128,16 @@ async def create_service_request(
     if not equipment:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Оборудование не найдено в организации")
     technician_id = payload.assigned_technician_id
-    if technician_id:
-        technician = await db.scalar(select(User).join(
-            OrganizationMembership,
-            (OrganizationMembership.user_id == User.id) & (OrganizationMembership.organization_id == user.organization_id),
-        ).where(User.id == technician_id, OrganizationMembership.role == UserRole.technician, User.is_active.is_(True)))
-        if not technician:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Можно назначить только активного техника")
     request = ServiceRequest(
         organization_id=user.organization_id, number=await next_number(db, user.organization_id),
         equipment_id=equipment.id, title=payload.title, description=payload.description,
-        priority=payload.priority, assigned_technician_id=technician_id,
-        status="assigned" if technician_id else "new",
+        priority=payload.priority, status="new",
     )
     db.add(request)
     await db.flush()
     db.add(event(user.organization_id, request.id, user.id, "request.created", "Заявка создана", {}))
     if technician_id:
-        db.add(event(user.organization_id, request.id, user.id, "technician.assigned", "Назначен мастер", {"technician_id": str(technician_id)}))
+        await transition(db, request, user, "assigned", technician_id=technician_id)
     await db.commit()
     await db.refresh(request)
     return await serialize(db, request, user.organization_id)
@@ -261,67 +248,28 @@ async def get_request(request_id: uuid.UUID, db: AsyncSession = Depends(get_db),
     return await serialize(db, request, user.organization_id)
 
 @router.patch("/{request_id}/status", response_model=ServiceRequestOut)
-async def update_status(request_id: uuid.UUID, payload: ServiceRequestStatusUpdate, db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(require_roles(UserRole.dispatcher, UserRole.technician))):
+async def update_status(request_id: uuid.UUID, payload: ServiceRequestStatusUpdate, db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    """Compatibility transition endpoint; arbitrary status writes are forbidden."""
     if payload.status not in REQUEST_STATUSES: raise HTTPException(422, "Неизвестный статус заявки")
-    request = await db.scalar(select(ServiceRequest).where(ServiceRequest.id == request_id, ServiceRequest.organization_id == user.organization_id).with_for_update())
-    if not request or (user.role == UserRole.technician and request.assigned_technician_id != user.id): raise HTTPException(404, "Заявка не найдена")
-    previous = request.status
-    if user.role == UserRole.technician and payload.status not in TECHNICIAN_TRANSITIONS.get(previous, set()):
-        raise HTTPException(409, "Этот переход недоступен на текущем этапе заявки")
-    if user.role != UserRole.technician and previous == "waiting_approval" and payload.status in {"in_progress", "cancelled"}:
-        raise HTTPException(409, "Используйте действие согласования для этой заявки")
-    # Canonical completion is performed by offline sync, which creates the
-    # Repair and service act in the same transaction.  A bare status update
-    # must not make a request look repaired without durable ownership.
-    if payload.status == "completed":
-        linked_repair = await db.scalar(select(Repair.id).where(
-            Repair.organization_id == user.organization_id,
-            Repair.service_request_id == request.id,
-        ))
-        if not linked_repair:
-            raise HTTPException(409, "Сначала оформите ремонт и сервисный акт")
-    request.status = payload.status
-    if payload.status == "waiting_approval":
-        target = (payload.details or {}).get("approval_target", "internal")
-        if target not in {"internal", "client"}:
-            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Неизвестный получатель согласования")
-        request.approval_target = target
-    if payload.status in {"completed", "closed", "cancelled"}: request.completed_at = datetime.now(timezone.utc)
-    if request.task_id and payload.status == "in_progress":
-        task = await db.scalar(select(Task).where(Task.id == request.task_id, Task.organization_id == user.organization_id))
-        if task: task.status = TaskStatus.in_progress
-    event_messages = {"on_the_way": "Мастер выехал", "arrived": "Мастер прибыл на объект", "in_progress": "Работа начата", "waiting_parts": "Ожидание запчастей", "waiting_approval": "Ожидание согласования", "completed": "Работы завершены"}
-    event_types = {"on_the_way": "technician.on_the_way", "arrived": "technician.arrived", "in_progress": "work.started", "waiting_parts": "request.waiting_parts", "waiting_approval": "request.waiting_approval", "completed": "repair.completed"}
-    details = {"from": previous, "to": payload.status, "transitioned_at": datetime.now(timezone.utc).isoformat()}
-    if payload.details:
-        details.update(payload.details)
-    if payload.status == "waiting_approval":
-        details["approval_target"] = request.approval_target
-    db.add(event(user.organization_id, request.id, user.id, event_types.get(payload.status, "status.changed"), payload.note or event_messages.get(payload.status, f"Статус: {previous} → {payload.status}"), details))
+    request = await locked_request(db, request_id, user.organization_id)
+    details = payload.details or {}
+    await transition(db, request, user, payload.status, approval_target=details.get("approval_target"),
+                     reason=details.get("reason"), note=payload.note)
+    await db.commit(); await db.refresh(request)
+    return await serialize(db, request, user.organization_id)
+
+
+@router.patch("/{request_id}/assign", response_model=ServiceRequestOut)
+async def assign_request(request_id: uuid.UUID, technician_id: uuid.UUID, db: AsyncSession = Depends(get_db),
+                         user: CurrentUser = Depends(require_roles(UserRole.admin, UserRole.dispatcher))):
+    request = await locked_request(db, request_id, user.organization_id)
+    await transition(db, request, user, "assigned", technician_id=technician_id)
     await db.commit(); await db.refresh(request)
     return await serialize(db, request, user.organization_id)
 
 @router.patch("/{request_id}/approval", response_model=ServiceRequestOut)
 async def decide_approval(request_id: uuid.UUID, payload: ServiceRequestApproval, db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(require_roles(UserRole.admin, UserRole.dispatcher))):
-    request = await db.scalar(select(ServiceRequest).where(ServiceRequest.id == request_id, ServiceRequest.organization_id == user.organization_id).with_for_update())
-    if not request:
-        raise HTTPException(404, "Заявка не найдена")
-    if request.status != "waiting_approval":
-        raise HTTPException(409, "Заявка не ожидает согласования")
-    approved_at = datetime.now(timezone.utc)
-    details = {"approved_by": str(user.id), "approved_at": approved_at.isoformat(), "comment": payload.comment}
-    if payload.action == "approved":
-        request.status = "in_progress"
-        if request.task_id:
-            task = await db.scalar(select(Task).where(Task.id == request.task_id, Task.organization_id == user.organization_id))
-            if task: task.status = TaskStatus.in_progress
-        db.add(event(user.organization_id, request.id, user.id, "approval.approved", "Работы согласованы, заявка возвращена мастеру", details))
-    else:
-        request.status = "cancelled"
-        request.completed_at = approved_at
-        if request.task_id:
-            task = await db.scalar(select(Task).where(Task.id == request.task_id, Task.organization_id == user.organization_id))
-            if task: task.status = TaskStatus.cancelled
-        db.add(event(user.organization_id, request.id, user.id, "approval.rejected", payload.comment or "Согласование отклонено", details))
+    request = await locked_request(db, request_id, user.organization_id)
+    await workflow_decide_approval(db, request, user, payload.action == "approved", payload.comment)
     await db.commit(); await db.refresh(request)
     return await serialize(db, request, user.organization_id)

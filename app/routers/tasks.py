@@ -12,6 +12,7 @@ from app.models.repair import Repair
 from app.schemas.equipment import TaskCreate, TaskOut, TaskUpdate
 from app.models.service_request import ServiceRequest
 from app.services.service_requests import event, next_number
+from app.services.service_request_workflow import transition
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
@@ -46,10 +47,12 @@ async def create_task(
     task = Task(**payload.model_dump(), created_by=user.id, organization_id=user.organization_id)
     db.add(task)
     await db.flush()
-    request = ServiceRequest(organization_id=user.organization_id, number=await next_number(db, user.organization_id), task_id=task.id, equipment_id=task.equipment_id, status="assigned" if task.assigned_to else "new", priority=task.priority.value, assigned_technician_id=task.assigned_to, title=task.title, description=task.description)
+    if task.assigned_to:
+        task.status = TaskStatus.assigned
+    request = ServiceRequest(organization_id=user.organization_id, number=await next_number(db, user.organization_id), task_id=task.id, equipment_id=task.equipment_id, status="new", priority=task.priority.value, title=task.title, description=task.description)
     db.add(request); await db.flush(); db.add(event(user.organization_id, request.id, user.id, "request.created", "Заявка создана диспетчером", {"task_id": str(task.id)}))
     if task.assigned_to:
-        db.add(event(user.organization_id, request.id, user.id, "technician.assigned", "Назначен мастер", {"technician_id": str(task.assigned_to)}))
+        await transition(db, request, user, "assigned", technician_id=task.assigned_to)
     await db.commit()
     await db.refresh(task)
     return task
@@ -81,11 +84,11 @@ async def update_task(
         changes['status'] = TaskStatus.assigned
     for field, value in changes.items():
         setattr(task, field, value)
-    request = await db.scalar(select(ServiceRequest).where(ServiceRequest.task_id == task.id))
+    request = await db.scalar(select(ServiceRequest).where(ServiceRequest.task_id == task.id).with_for_update())
     if request:
-        request.title, request.description, request.priority, request.assigned_technician_id = task.title, task.description, task.priority.value, task.assigned_to
-        if task.status == TaskStatus.closed: request.status = "closed"
-        elif task.status == TaskStatus.cancelled: request.status = "cancelled"
+        if ("assigned_to" in changes and changes["assigned_to"] != request.assigned_technician_id) or changes.get("status") in {TaskStatus.closed, TaskStatus.cancelled}:
+            raise HTTPException(status.HTTP_409_CONFLICT, "Связанную заявку изменяйте через её workflow; наряд не может обойти ServiceRequest")
+        request.title, request.description, request.priority = task.title, task.description, task.priority.value
     await db.commit()
     await db.refresh(task)
     return task
@@ -142,12 +145,11 @@ async def assign_task(
     ))
     if not technician:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Можно назначить только активного техника")
+    request = await db.scalar(select(ServiceRequest).where(ServiceRequest.task_id == task.id).with_for_update())
+    if request:
+        await transition(db, request, user, "assigned", technician_id=technician_id)
     task.assigned_to = technician_id
     task.status = TaskStatus.assigned
-    request = await db.scalar(select(ServiceRequest).where(ServiceRequest.task_id == task.id))
-    if request:
-        request.assigned_technician_id = technician_id; request.status = "assigned"
-        db.add(event(user.organization_id, request.id, user.id, "technician.assigned", "Назначен мастер", {"technician_id": str(technician_id)}))
     await db.commit()
     await db.refresh(task)
     return task
@@ -172,11 +174,10 @@ async def close_own_task(
     if task.status in (TaskStatus.new, TaskStatus.cancelled):
         raise HTTPException(status.HTTP_409_CONFLICT, "Этот наряд нельзя закрыть")
 
-    task.status = TaskStatus.closed
     request = await db.scalar(select(ServiceRequest).where(ServiceRequest.task_id == task.id))
     if request:
-        request.status = "closed"
-        db.add(event(user.organization_id, request.id, user.id, "request.closed", "Наряд закрыт"))
+        raise HTTPException(status.HTTP_409_CONFLICT, "Связанную заявку завершайте только через сервисный акт")
+    task.status = TaskStatus.closed
     if task.ticket_id:
         ticket = await db.get(Ticket, task.ticket_id, with_for_update=True)
         if ticket and ticket.status != TicketStatus.resolved:

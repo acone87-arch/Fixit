@@ -16,6 +16,7 @@ from app.schemas.equipment import PublicEquipmentOut
 from app.schemas.ticket import GuestTicketCreate, TicketAssign, TicketCreateResult, TicketOut
 from app.models.service_request import ServiceRequest, ServiceRequestAttachment
 from app.services.service_requests import event, next_number
+from app.services.service_request_workflow import transition
 
 public_router = APIRouter(prefix="/api/public/equipment", tags=["guest"])
 admin_router = APIRouter(prefix="/api/tickets", tags=["tickets"])
@@ -168,7 +169,7 @@ async def assign_ticket(
     problem = (ticket.comment or '').strip() or ", ".join(ticket.symptom_tags) or "Не указано"
     task_description = ticket.comment or problem
     task = await db.scalar(select(Task).where(Task.ticket_id == ticket.id))
-    request = await db.scalar(select(ServiceRequest).where(ServiceRequest.ticket_id == ticket.id))
+    request = await db.scalar(select(ServiceRequest).where(ServiceRequest.ticket_id == ticket.id).with_for_update())
     if task:
         task.assigned_to = technician.id
         task.status = TaskStatus.assigned
@@ -189,15 +190,14 @@ async def assign_ticket(
             created_by=user.id,
         )
         db.add(task)
+        await db.flush()
 
     ticket.assigned_technician_id = technician.id
     ticket.status = TicketStatus.assigned
     if request:
         request.task_id = task.id
-        request.assigned_technician_id = technician.id
-        request.status = "assigned"
         request.priority = task.priority.value
-        db.add(event(user.organization_id, request.id, user.id, "technician.assigned", f"Назначен мастер: {technician.full_name}", {"technician_id": str(technician.id)}))
+        await transition(db, request, user, "assigned", technician_id=technician.id)
     await db.commit()
     await db.refresh(ticket)
     return ticket

@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +12,8 @@ from app.schemas.repair import RepairCreate, SyncItemResult
 from app.services.stock_service import InsufficientStockError, decrement_stock
 from app.models.service_request import ServiceRequest
 from app.services.service_requests import event
+from app.services.service_request_workflow import transition
+from app.models.core import UserRole
 
 
 # Completion from the current Pulse ServiceRequest workspace is emitted only
@@ -164,24 +167,13 @@ async def sync_one_repair(db: AsyncSession, technician_id: uuid.UUID, organizati
             for item in payload.parts_used:
                 db.add(RepairPart(repair_id=repair.id, part_id=item.part_id, quantity=item.quantity))
 
-            # Canonical ownership has already been validated and is persisted on
-            # Repair.  The remaining branches deliberately preserve the legacy
-            # Task/Ticket behavior until that workflow is retired.
+            # Only a canonical ServiceRequest payload may change its lifecycle.
+            # Task/Ticket-only repairs remain readable historical records, but
+            # can no longer silently complete a linked canonical request.
             service_request = linked_request
-            if not service_request and payload.task_id:
-                request_query = select(ServiceRequest).where(ServiceRequest.organization_id == organization_id)
-                request_query = request_query.where(ServiceRequest.task_id == payload.task_id)
-                service_request = await db.scalar(request_query)
-            elif not service_request and ticket_id:
-                request_query = select(ServiceRequest).where(
-                    ServiceRequest.organization_id == organization_id,
-                    ServiceRequest.ticket_id == ticket_id,
-                )
-                service_request = await db.scalar(request_query)
             if service_request:
-                service_request.status = "completed"
-                service_request.completed_at = datetime.now(timezone.utc)
-                db.add(event(organization_id, service_request.id, technician_id, "repair.completed", "Ремонт выполнен, сервисный акт оформлен", {"repair_id": str(repair.id)}))
+                sync_actor = SimpleNamespace(id=technician_id, organization_id=organization_id, role=UserRole.technician)
+                await transition(db, service_request, sync_actor, "completed", completion_repair_id=repair.id)
                 if payload.parts_used:
                     db.add(event(organization_id, service_request.id, technician_id, "parts.used", "Использованы запчасти", {"repair_id": str(repair.id), "parts": [{"part_id": str(item.part_id), "quantity": item.quantity} for item in payload.parts_used]}))
                 db.add(event(organization_id, service_request.id, technician_id, "service_act.generated", "Сервисный акт сформирован", {"repair_id": str(repair.id)}))

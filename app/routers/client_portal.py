@@ -17,6 +17,7 @@ from app.schemas.customer import ClientAccessCreate, ClientAccessOut, ClientAcce
 from app.schemas.service_request import ServiceRequestApproval, ServiceRequestCreate, ServiceRequestDetail, ServiceRequestListItem
 from app.services.client_portal import client_scope, ensure_client_equipment
 from app.services.service_requests import event, next_number
+from app.services.service_request_workflow import decide_approval as workflow_decide_approval
 
 router = APIRouter(prefix="/api/client-portal", tags=["client portal"])
 
@@ -224,23 +225,7 @@ async def approve_request(request_id: uuid.UUID, payload: ServiceRequestApproval
     row = (await db.execute(query.where(ServiceRequest.id == request_id).with_for_update())).first()
     if not row: raise HTTPException(status.HTTP_404_NOT_FOUND, "Заявка не найдена")
     request = row[0]
-    if request.status != "waiting_approval" or request.approval_target != "client":
-        raise HTTPException(status.HTTP_409_CONFLICT, "Заявка не ожидает согласования клиента")
-    now = datetime.now(timezone.utc)
-    details = {"approved_by": str(user.id), "approved_at": now.isoformat(), "comment": payload.comment, "target": "client"}
-    if payload.action == "approved":
-        request.status = "in_progress"
-        if request.task_id:
-            task = await db.scalar(select(Task).where(Task.id == request.task_id, Task.organization_id == user.organization_id))
-            if task: task.status = TaskStatus.in_progress
-        db.add(event(user.organization_id, request.id, user.id, "approval.approved", "Работы согласованы клиентом", details))
-    else:
-        if not payload.comment: raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Укажите причину отказа")
-        request.status = "cancelled"; request.completed_at = now
-        if request.task_id:
-            task = await db.scalar(select(Task).where(Task.id == request.task_id, Task.organization_id == user.organization_id))
-            if task: task.status = TaskStatus.cancelled
-        db.add(event(user.organization_id, request.id, user.id, "approval.rejected", "Согласование отклонено клиентом", details))
+    await workflow_decide_approval(db, request, user, payload.action == "approved", payload.comment)
     await db.commit(); await db.refresh(request)
     return await serialize(db, request, user.organization_id)
 

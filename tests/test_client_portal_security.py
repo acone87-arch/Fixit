@@ -35,5 +35,8 @@ def test_guest_qr_surface_stays_opaque_and_never_returns_internal_history():
 def test_client_approval_is_targeted_not_a_replacement_for_internal_approval():
     assert "approval_target" in ServiceRequest.__table__.columns
     router = Path("app/routers/client_portal.py").read_text(encoding="utf8")
-    assert 'request.approval_target != "client"' in router
-    assert '"approval.approved"' in router and '"approval.rejected"' in router
+    workflow = Path("app/services/service_request_workflow.py").read_text(encoding="utf8")
+    assert "workflow_decide_approval" in router
+    assert 'request.approval_target == "internal"' in workflow
+    assert 'request.approval_target == "client"' in workflow
+    assert '"approval.approved"' in workflow and '"approval.rejected"' in workflow

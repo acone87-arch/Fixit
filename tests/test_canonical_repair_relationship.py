@@ -182,6 +182,7 @@ def test_client_document_query_resolves_only_the_repair_linked_to_that_request()
 def test_status_endpoint_cannot_mark_canonical_request_completed_without_linked_repair():
     source = open("app/routers/service_requests.py", encoding="utf8").read()
     status_handler = source.split("async def update_status", 1)[1].split("async def decide_approval", 1)[0]
-    assert 'if payload.status == "completed"' in status_handler
-    assert "Repair.service_request_id == request.id" in status_handler
-    assert "Сначала оформите ремонт и сервисный акт" in status_handler
+    assert "await transition(db, request, user, payload.status" in status_handler
+    workflow = open("app/services/service_request_workflow.py", encoding="utf8").read()
+    assert "completion_repair_id is None" in workflow
+    assert "Завершение возможно только при синхронизации сервисного акта" in workflow
