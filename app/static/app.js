@@ -46,7 +46,10 @@ async function api(path, options = {}) {
 
 async function apiBlob(path) {
   const headers = state.token ? { Authorization: `Bearer ${state.token}` } : {};
-  const res = await fetch('/api' + path, { headers });
+  // API DTOs expose protected media as /api/... URLs, while older callers
+  // pass relative API paths. Accept both without producing /api/api/...
+  const url = path.startsWith('/api/') ? path : '/api' + path;
+  const res = await fetch(url, { headers });
   if (res.status === 401) {
     logout();
     throw new Error('Сессия истекла, войдите заново');

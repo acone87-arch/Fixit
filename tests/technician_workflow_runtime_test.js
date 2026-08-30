@@ -3,6 +3,8 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 
 const source = fs.readFileSync('app/static/app.js', 'utf8');
+assert.match(source, /const url = path\.startsWith\('\/api\/'\) \? path : '\/api' \+ path;/);
+assert.match(source, /const res = await fetch\(url, \{ headers \}\);/);
 
 const utilitySource = source.slice(0, source.indexOf('function toast('));
 const context = { window: { crypto: undefined }, localStorage: { getItem: () => null }, location: { hash: '' }, Uint8Array, Math, Blob, File, URL };
