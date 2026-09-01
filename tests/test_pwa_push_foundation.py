@@ -10,7 +10,7 @@ ROOT = Path(__file__).parents[1]
 
 def test_push_subscription_is_tenant_scoped_and_endpoint_is_unique():
     columns = PushSubscription.__table__.columns
-    assert {"organization_id", "user_id", "endpoint", "p256dh", "auth", "is_active"} <= set(columns)
+    assert {"organization_id", "user_id", "endpoint", "p256dh", "auth", "is_active"} <= set(columns.keys())
     assert "uq_push_subscription_endpoint" in {item.name for item in PushSubscription.__table__.constraints}
     assert "ix_push_subscription_user_org_active" in {item.name for item in PushSubscription.__table__.indexes}
 
