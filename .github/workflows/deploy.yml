@@ -24,8 +24,11 @@ jobs:
           VPS_USER: ${{ secrets.VPS_USER }}
           VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
           VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+          VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+          VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}
         run: |
-          for name in VPS_HOST VPS_USER VPS_SSH_KEY VPS_KNOWN_HOSTS; do
+          for name in VPS_HOST VPS_USER VPS_SSH_KEY VPS_KNOWN_HOSTS VAPID_PUBLIC_KEY VAPID_PRIVATE_KEY VAPID_SUBJECT; do
             if [ -z "${!name}" ]; then
               echo "Required GitHub Actions secret is missing: $name" >&2
               exit 1
@@ -46,16 +49,30 @@ jobs:
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
+          VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+          VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}
         run: |
-          ssh -o BatchMode=yes -o ConnectTimeout=15 "$VPS_USER@$VPS_HOST" 'bash -se' <<'REMOTE'
+          ssh -o BatchMode=yes -o ConnectTimeout=15 "$VPS_USER@$VPS_HOST" 'bash -se' <<REMOTE
           set -euo pipefail
           cd /opt/fixit
+          upsert_env() {
+            local key="\$1" value="\$2"
+            if grep -q "^\${key}=" .env; then
+              sed -i "s|^\${key}=.*|\${key}=\${value}|" .env
+            else
+              printf '\n%s=%s\n' "\$key" "\$value" >> .env
+            fi
+          }
+          upsert_env VAPID_PUBLIC_KEY "$VAPID_PUBLIC_KEY"
+          upsert_env VAPID_PRIVATE_KEY "$VAPID_PRIVATE_KEY"
+          upsert_env VAPID_SUBJECT "$VAPID_SUBJECT"
           git pull --ff-only origin main
           docker compose -f docker-compose.prod.yml build api
           docker compose -f docker-compose.prod.yml run --rm -T api alembic upgrade head </dev/null
           docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate api
 
-          for attempt in $(seq 1 20); do
+          for attempt in \$(seq 1 20); do
             if curl -fsS http://127.0.0.1:8000/health; then
               exit 0
             fi
