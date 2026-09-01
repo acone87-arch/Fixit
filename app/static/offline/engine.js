@@ -130,7 +130,7 @@
   async function registerBackgroundSync() {
     if (typeof navigator === 'undefined' || !navigator.serviceWorker) return;
     try {
-      const registration = await navigator.serviceWorker.register('/static/offline/sw.js?v=20260829-2');
+      const registration = await navigator.serviceWorker.register('/sw.js?v=20260902-1', { scope: '/' });
       if ('sync' in registration) await registration.sync.register('fixit-sync-repairs');
     } catch (_) { /* online retry remains available */ }
   }

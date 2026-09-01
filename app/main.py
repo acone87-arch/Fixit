@@ -1,9 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.routers import auth, client_portal, customers, equipment, organizations, repairs, service_requests, sync, tasks, tickets, users, warehouses
+from app.routers import auth, client_portal, customers, equipment, organizations, push, repairs, service_requests, sync, tasks, tickets, users, warehouses
 
 app = FastAPI(title="Service & Warehouse Management API", version="0.1.0")
 
@@ -31,11 +31,18 @@ app.include_router(sync.router)
 app.include_router(repairs.router)
 app.include_router(service_requests.router)
 app.include_router(client_portal.router)
+app.include_router(push.router)
 
 
 @app.get("/health", tags=["meta"])
 async def health():
     return {"status": "ok"}
+
+
+@app.get("/sw.js", include_in_schema=False)
+async def service_worker():
+    """A root URL is required for a worker that controls the whole Pulse SPA."""
+    return FileResponse("app/static/sw.js", media_type="application/javascript", headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/e/{qr_token}", tags=["meta"])

@@ -17,6 +17,74 @@ let activeTechnicianWorkspaceCleanup = null;
 let activeServiceRequestDetailCleanup = null;
 let activeImageLightbox = null;
 let activeClientPhotoUrls = [];
+let deferredInstallPrompt = null;
+
+const isStandalone = () => window.matchMedia?.('(display-mode: standalone)').matches || window.navigator.standalone === true;
+const isIos = () => /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.MSStream;
+const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+
+window.addEventListener?.('beforeinstallprompt', (event) => {
+  event.preventDefault();
+  deferredInstallPrompt = event;
+  if (state.me) renderNav();
+});
+window.addEventListener?.('appinstalled', () => {
+  deferredInstallPrompt = null;
+  localStorage.removeItem('fixit-install-dismissed');
+  renderNav();
+});
+
+function urlBase64ToUint8Array(value) {
+  const base64 = value.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = base64 + '='.repeat((4 - base64.length % 4) % 4);
+  return Uint8Array.from(atob(padded), (char) => char.charCodeAt(0));
+}
+
+async function registerPulseWorker() {
+  if (!('serviceWorker' in navigator)) return null;
+  const registrations = await navigator.serviceWorker.getRegistrations();
+  await Promise.all(registrations.filter((item) => new URL(item.active?.scriptURL || item.waiting?.scriptURL || item.installing?.scriptURL || '', location.origin).pathname === '/static/offline/sw.js').map((item) => item.unregister()));
+  return navigator.serviceWorker.register('/sw.js?v=20260902-1', { scope: '/' });
+}
+
+async function enablePush() {
+  if (!pushSupported()) return toast('В этом браузере уведомления не поддерживаются', 'error');
+  if (Notification.permission === 'denied') return toast('Уведомления запрещены браузером. Разрешите их в настройках сайта.', 'error');
+  try {
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') { renderNav(); return; }
+    const key = await api('/push/public-key');
+    const registration = await registerPulseWorker();
+    const subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(key.public_key) });
+    await api('/push/subscribe', { method: 'POST', body: JSON.stringify(subscription.toJSON()) });
+    toast('Уведомления включены'); renderNav();
+  } catch (error) { toast(error.message || 'Не удалось включить уведомления', 'error'); }
+}
+
+async function removePushSubscription(token) {
+  if (!pushSupported()) return;
+  try {
+    const registration = await navigator.serviceWorker.getRegistration('/');
+    const subscription = await registration?.pushManager.getSubscription();
+    if (subscription && token) {
+      await fetch('/api/push/unsubscribe', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ endpoint: subscription.endpoint }) });
+    }
+    await subscription?.unsubscribe();
+  } catch (_) { /* logout must remain usable offline */ }
+}
+
+function pwaControls() {
+  if (isStandalone()) return '';
+  const dismissed = localStorage.getItem('fixit-install-dismissed') === '1';
+  const install = deferredInstallPrompt && !dismissed
+    ? '<section class="pwa-card"><strong>Установите Fixit</strong><p>Получайте заявки и уведомления сразу на телефон.</p><button class="btn btn-primary pwa-install-btn">Установить приложение</button><button class="pwa-dismiss-btn">Не сейчас</button></section>'
+    : isIos() && !dismissed
+      ? '<section class="pwa-card"><strong>Установите Fixit</strong><p>Чтобы установить Fixit: <b>Поделиться → На экран «Домой»</b>.</p><button class="pwa-dismiss-btn">Понятно</button></section>' : '';
+  const notifications = pushSupported()
+    ? `<section class="pwa-card pwa-notifications"><strong>${Notification.permission === 'granted' ? 'Уведомления включены' : Notification.permission === 'denied' ? 'Уведомления запрещены браузером' : 'Включить уведомления'}</strong><p>${Notification.permission === 'granted' ? 'Fixit будет сообщать о новых заявках и важных изменениях.' : Notification.permission === 'denied' ? 'Разрешите уведомления в настройках сайта, чтобы получать обновления.' : 'Fixit сообщит о новых заявках и важных изменениях.'}</p>${Notification.permission === 'default' ? '<button class="btn btn-secondary pwa-push-btn">Включить уведомления</button>' : ''}</section>`
+    : '<section class="pwa-card pwa-notifications"><strong>Уведомления недоступны</strong><p>Этот браузер или устройство не поддерживает Web Push.</p></section>';
+  return install + notifications;
+}
 
 // ---------- API-клиент ----------
 
@@ -328,7 +396,7 @@ function renderMobileNav(items) {
     <button class="mobile-nav-item ${state.route === route ? 'active' : ''}" data-mobile-route="${route}">
       <span class="mobile-nav-icon icon-${icon}"></span><span>${label}</span>
     </button>`).join('');
-  moreMenu.innerHTML = `<div class="more-menu-head"><span>Разделы</span><button id="more-close-btn">Закрыть</button></div>${items
+  moreMenu.innerHTML = `<div class="more-menu-head"><span>Разделы</span><button id="more-close-btn">Закрыть</button></div>${pwaControls()}${items
     .filter(([route]) => !['pulse', 'requests', 'equipment'].includes(route))
     .map(([route, label]) => `<button data-more-route="${route}">${esc(label)}<span>→</span></button>`).join('')}
     <button id="more-logout-btn" class="more-logout">Выйти<span>↗</span></button>`;
@@ -344,6 +412,15 @@ function renderMobileNav(items) {
   }));
   moreMenu.querySelector('#more-close-btn').addEventListener('click', () => moreMenu.classList.add('hidden'));
   moreMenu.querySelector('#more-logout-btn').addEventListener('click', logout);
+  moreMenu.querySelector('.pwa-install-btn')?.addEventListener('click', async () => {
+    if (!deferredInstallPrompt) return;
+    deferredInstallPrompt.prompt();
+    const result = await deferredInstallPrompt.userChoice;
+    if (result.outcome !== 'accepted') localStorage.setItem('fixit-install-dismissed', '1');
+    deferredInstallPrompt = null; renderNav();
+  });
+  moreMenu.querySelector('.pwa-dismiss-btn')?.addEventListener('click', () => { localStorage.setItem('fixit-install-dismissed', '1'); renderNav(); });
+  moreMenu.querySelector('.pwa-push-btn')?.addEventListener('click', enablePush);
   document.getElementById('mobile-profile-btn').onclick = () => moreMenu.classList.toggle('hidden');
 }
 
@@ -1852,6 +1929,7 @@ function openCreateUserModal() {
 // ============================================================
 
 function logout() {
+  void removePushSubscription(state.token);
   state.token = null;
   state.me = null;
   localStorage.removeItem('token');
@@ -1867,6 +1945,7 @@ async function boot() {
   }
   try {
     state.me = await api('/users/me');
+    await registerPulseWorker();
     window.FixitOffline?.configure?.({ token: state.token });
     window.FixitOffline?.sync?.({ token: state.token, deviceId: 'fixit-pulse' });
     document.getElementById('login-screen').classList.add('hidden');

@@ -3,4 +3,5 @@ from app.models.customer import Client, Site, ClientUserAccess, TechnicianClient
 from app.models.organization import AuditEvent, Organization, OrganizationMembership  # noqa: F401
 from app.models.repair import Repair, RepairAttachment, RepairPart, SyncLog, SyncOperation  # noqa: F401
 from app.models.service_request import ServiceRequest, ServiceRequestAttachment, ServiceRequestEvent  # noqa: F401
+from app.models.push import PushSubscription  # noqa: F401
 from app.models.warehouse import Part, StockMovement, Warehouse, WarehouseStock  # noqa: F401

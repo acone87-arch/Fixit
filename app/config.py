@@ -7,6 +7,9 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 480
     algorithm: str = "HS256"
     public_app_url: str = "http://localhost:8000"  # базовый URL для ссылок в QR-кодах
+    vapid_public_key: str | None = None
+    vapid_private_key: str | None = None
+    vapid_subject: str | None = None
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

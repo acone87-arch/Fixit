@@ -19,6 +19,7 @@ from app.services.client_portal import CLIENT_ROLES, client_scope, ensure_client
 from app.services.service_request_workflow import decide_approval as workflow_decide_approval, locked_request, transition
 from app.services.access_policy import ensure_service_request_access
 from app.services.media import image_response, normalize_image
+from app.services.push_service import notify_dispatchers, notify_request_assigned
 
 router = APIRouter(prefix="/api/service-requests", tags=["service requests"])
 UPLOAD_ROOT = Path("uploads")
@@ -140,7 +141,10 @@ async def create_service_request(
         await transition(db, request, user, "assigned", technician_id=technician_id)
     await db.commit()
     await db.refresh(request)
-    return await serialize(db, request, user.organization_id)
+    result = await serialize(db, request, user.organization_id)
+    if technician_id:
+        await notify_request_assigned(db, request, result.equipment_name, result.client_name)
+    return result
 
 
 @router.post("/{request_id}/attachments", response_model=ServiceRequestAttachmentOut, status_code=status.HTTP_201_CREATED)
@@ -251,7 +255,10 @@ async def update_status(request_id: uuid.UUID, payload: ServiceRequestStatusUpda
     await transition(db, request, user, payload.status, approval_target=details.get("approval_target"),
                      reason=details.get("reason"), note=payload.note)
     await db.commit(); await db.refresh(request)
-    return await serialize(db, request, user.organization_id)
+    result = await serialize(db, request, user.organization_id)
+    if request.status == "waiting_approval" and request.approval_target == "internal":
+        await notify_dispatchers(db, request, f"SR-{request.number:05d} ожидает внутреннего согласования")
+    return result
 
 
 @router.patch("/{request_id}/assign", response_model=ServiceRequestOut)
@@ -260,7 +267,9 @@ async def assign_request(request_id: uuid.UUID, technician_id: uuid.UUID, db: As
     request = await locked_request(db, request_id, user.organization_id)
     await transition(db, request, user, "assigned", technician_id=technician_id)
     await db.commit(); await db.refresh(request)
-    return await serialize(db, request, user.organization_id)
+    result = await serialize(db, request, user.organization_id)
+    await notify_request_assigned(db, request, result.equipment_name, result.client_name)
+    return result
 
 @router.patch("/{request_id}/approval", response_model=ServiceRequestOut)
 async def decide_approval(request_id: uuid.UUID, payload: ServiceRequestApproval, db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(require_roles(UserRole.admin, UserRole.dispatcher))):
