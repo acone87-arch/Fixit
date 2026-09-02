@@ -118,6 +118,7 @@ tr:last-child td { border-bottom: none; } tr.clickable { transition: .15s ease; 
 .modal-backdrop { position: fixed; inset: 0; background: rgba(6,20,15,.62); backdrop-filter: blur(4px); display: flex; align-items: center; justify-content: center; z-index: 100; }
 .modal { background: var(--surface); border-radius: 16px; padding: 25px; width: 440px; max-width: 92vw; max-height: 88vh; overflow-y: auto; box-shadow: 0 28px 70px rgba(0,0,0,.24); }
 .modal h2 { font-size: 18px; margin-bottom: 17px; }.modal-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 19px; }
+.onboarding-intro { margin:-4px 0 15px; color:#a8c4b6; font-size:12px; line-height:1.5; }.onboarding-step { display:grid; gap:7px; margin:11px 0; padding:14px; border:1px solid #315c4b; border-radius:13px; background:linear-gradient(135deg,rgba(53,230,156,.1),#0d211b); }.onboarding-step > span { color:#7df0b7; font:800 9px 'IBM Plex Mono',monospace; letter-spacing:.12em; }.onboarding-step h3 { margin:0; color:#edf9f2; font-size:15px; }.onboarding-step p { margin:0; color:#bdd3c7; font-size:12px; line-height:1.45; }.onboarding-step .btn { justify-self:start; margin-top:3px; }.onboarding-note { color:#ffd585 !important; }
 
 .login-screen { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: radial-gradient(circle at 70% 20%, #183d2e 0, #0c1914 38%, #07100d 100%); }
 .login-card { background: rgba(255,255,255,.97); border-radius: 20px; padding: 38px; width: 390px; box-shadow: 0 30px 80px rgba(0,0,0,.28); }

@@ -47,3 +47,26 @@ def test_pwa_uses_one_root_scoped_worker_without_losing_offline_sync():
     assert "fixit-sync-repairs" in worker and "FixitOffline.sync" in worker
     assert "fixit-tech-db" in engine and "pendingRepairs" in engine and "pendingAttachments" in engine
     assert "beforeinstallprompt" in app and "Notification.requestPermission()" in app
+
+
+def test_first_device_session_has_nonblocking_pwa_push_onboarding_and_profile_fallback():
+    source = (ROOT / "app/static/app.js").read_text(encoding="utf-8")
+    assert "Fixit готов к работе" in source
+    assert "Установите Fixit на iPhone" in source
+    assert "Поделиться → На экран «Домой»" in source
+    assert "Установка недоступна" in source
+    assert "Установить Fixit" in source and "Включить уведомления" in source
+    assert "onboarding-continue" in source and "fixit-onboarding-dismissed:" in source
+    assert "setTimeout(() => { maybeStartPwaOnboarding()" in source
+    assert "pwaControls()" in source
+
+
+def test_onboarding_skips_completed_device_steps_using_browser_and_backend_state():
+    source = (ROOT / "app/static/app.js").read_text(encoding="utf-8")
+    push_router = (ROOT / "app/routers/push.py").read_text(encoding="utf-8")
+    assert "if (!needsInstallationStep && !needsNotificationStep)" in source
+    assert "Notification.permission === 'denied'" in source
+    assert "registration?.pushManager.getSubscription()" in source
+    assert "/push/state?endpoint=${encodeURIComponent(subscription.endpoint)}" in source
+    assert "endpoint: str | None = Query" in push_router
+    assert "PushSubscription.endpoint == endpoint" in push_router

@@ -18,6 +18,7 @@ let activeServiceRequestDetailCleanup = null;
 let activeImageLightbox = null;
 let activeClientPhotoUrls = [];
 let deferredInstallPrompt = null;
+let installationCompletedThisSession = false;
 
 const isStandalone = () => window.matchMedia?.('(display-mode: standalone)').matches || window.navigator.standalone === true;
 const isIos = () => /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.MSStream;
@@ -30,6 +31,7 @@ window.addEventListener?.('beforeinstallprompt', (event) => {
 });
 window.addEventListener?.('appinstalled', () => {
   deferredInstallPrompt = null;
+  installationCompletedThisSession = true;
   localStorage.removeItem('fixit-install-dismissed');
   renderNav();
 });
@@ -48,17 +50,17 @@ async function registerPulseWorker() {
 }
 
 async function enablePush() {
-  if (!pushSupported()) return toast('В этом браузере уведомления не поддерживаются', 'error');
-  if (Notification.permission === 'denied') return toast('Уведомления запрещены браузером. Разрешите их в настройках сайта.', 'error');
+  if (!pushSupported()) { toast('В этом браузере уведомления не поддерживаются', 'error'); return 'unsupported'; }
+  if (Notification.permission === 'denied') { toast('Уведомления запрещены браузером. Разрешите их в настройках сайта.', 'error'); return 'denied'; }
   try {
     const permission = await Notification.requestPermission();
-    if (permission !== 'granted') { renderNav(); return; }
+    if (permission !== 'granted') { renderNav(); return permission === 'denied' ? 'denied' : 'dismissed'; }
     const key = await api('/push/public-key');
     const registration = await registerPulseWorker();
     const subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(key.public_key) });
     await api('/push/subscribe', { method: 'POST', body: JSON.stringify(subscription.toJSON()) });
-    toast('Уведомления включены'); renderNav();
-  } catch (error) { toast(error.message || 'Не удалось включить уведомления', 'error'); }
+    toast('Уведомления включены'); renderNav(); return 'enabled';
+  } catch (error) { toast(error.message || 'Не удалось включить уведомления', 'error'); return 'error'; }
 }
 
 async function removePushSubscription(token) {
@@ -74,16 +76,78 @@ async function removePushSubscription(token) {
 }
 
 function pwaControls() {
-  if (isStandalone()) return '';
   const dismissed = localStorage.getItem('fixit-install-dismissed') === '1';
-  const install = deferredInstallPrompt && !dismissed
+  const install = isStandalone() ? '' : deferredInstallPrompt && !dismissed
     ? '<section class="pwa-card"><strong>Установите Fixit</strong><p>Получайте заявки и уведомления сразу на телефон.</p><button class="btn btn-primary pwa-install-btn">Установить приложение</button><button class="pwa-dismiss-btn">Не сейчас</button></section>'
     : isIos() && !dismissed
-      ? '<section class="pwa-card"><strong>Установите Fixit</strong><p>Чтобы установить Fixit: <b>Поделиться → На экран «Домой»</b>.</p><button class="pwa-dismiss-btn">Понятно</button></section>' : '';
+      ? '<section class="pwa-card"><strong>Установите Fixit</strong><p>Чтобы установить Fixit: <b>Поделиться → На экран «Домой»</b>.</p><button class="pwa-dismiss-btn">Понятно</button></section>'
+      : !dismissed ? '<section class="pwa-card"><strong>Установка недоступна</strong><p>Откройте Fixit в актуальном Chrome или Edge по HTTPS, чтобы установить приложение.</p></section>' : '';
   const notifications = pushSupported()
     ? `<section class="pwa-card pwa-notifications"><strong>${Notification.permission === 'granted' ? 'Уведомления включены' : Notification.permission === 'denied' ? 'Уведомления запрещены браузером' : 'Включить уведомления'}</strong><p>${Notification.permission === 'granted' ? 'Fixit будет сообщать о новых заявках и важных изменениях.' : Notification.permission === 'denied' ? 'Разрешите уведомления в настройках сайта, чтобы получать обновления.' : 'Fixit сообщит о новых заявках и важных изменениях.'}</p>${Notification.permission === 'default' ? '<button class="btn btn-secondary pwa-push-btn">Включить уведомления</button>' : ''}</section>`
     : '<section class="pwa-card pwa-notifications"><strong>Уведомления недоступны</strong><p>Этот браузер или устройство не поддерживает Web Push.</p></section>';
   return install + notifications;
+}
+
+function onboardingKey() {
+  return `fixit-onboarding-dismissed:${state.me?.organization_id || 'org'}:${state.me?.id || 'user'}`;
+}
+
+async function currentPushState() {
+  if (!pushSupported()) return { state: 'unsupported' };
+  if (Notification.permission === 'denied') return { state: 'denied' };
+  if (Notification.permission !== 'granted') return { state: 'available' };
+  try {
+    const registration = await registerPulseWorker();
+    const subscription = await registration?.pushManager.getSubscription();
+    if (!subscription) return { state: 'available' };
+    const remote = await api(`/push/state?endpoint=${encodeURIComponent(subscription.endpoint)}`);
+    return remote.configured && remote.subscribed ? { state: 'enabled' } : { state: 'available' };
+  } catch (_) { return { state: 'available' }; }
+}
+
+async function requestPwaInstall() {
+  if (!deferredInstallPrompt) return 'unsupported';
+  deferredInstallPrompt.prompt();
+  const result = await deferredInstallPrompt.userChoice;
+  deferredInstallPrompt = null;
+  if (result.outcome === 'accepted') installationCompletedThisSession = true;
+  return result.outcome === 'accepted' ? 'accepted' : 'dismissed';
+}
+
+async function openPwaOnboarding() {
+  const push = await currentPushState();
+  const needsInstallationStep = !isStandalone() && !installationCompletedThisSession;
+  const needsNotificationStep = push.state !== 'enabled';
+  if (!needsInstallationStep && !needsNotificationStep) {
+    localStorage.setItem(onboardingKey(), '1');
+    return;
+  }
+  const installBody = !needsInstallationStep ? '' : isIos()
+    ? '<section class="onboarding-step"><span>ШАГ 1</span><h3>Установите Fixit на iPhone</h3><p>Нажмите <b>Поделиться → На экран «Домой»</b>.</p></section>'
+    : deferredInstallPrompt
+      ? '<section class="onboarding-step"><span>ШАГ 1</span><h3>Установите приложение</h3><p>Получайте новые заявки и важные уведомления сразу на телефон.</p><button class="btn btn-primary" id="onboarding-install">Установить Fixit</button></section>'
+      : '<section class="onboarding-step"><span>ШАГ 1</span><h3>Установка недоступна</h3><p>Откройте Fixit в актуальном Chrome или Edge по HTTPS, чтобы установить приложение.</p></section>';
+  const notificationBody = !needsNotificationStep ? '' : `<section class="onboarding-step"><span>ШАГ ${needsInstallationStep ? 2 : 1}</span><h3>Включите уведомления</h3><p>Fixit сообщит о новых заявках, согласованиях и важных изменениях.</p>${push.state === 'unsupported' ? '<p class="onboarding-note">Этот браузер не поддерживает уведомления.</p>' : push.state === 'denied' ? '<p class="onboarding-note">Уведомления запрещены браузером. Их можно разрешить позже в настройках сайта.</p>' : '<button class="btn btn-secondary" id="onboarding-push">Включить уведомления</button>'}</section>`;
+  const backdrop = openModal('Fixit готов к работе', `<div class="onboarding-intro">Настройте приложение сейчас или продолжите — это всегда можно сделать позже в профиле.</div>${installBody}${notificationBody}`, '<button class="btn btn-primary" id="onboarding-continue">Продолжить в Fixit</button>');
+  const refresh = async () => { closeModal(); await openPwaOnboarding(); };
+  backdrop.querySelector('#onboarding-install')?.addEventListener('click', async () => {
+    const outcome = await requestPwaInstall();
+    if (outcome === 'dismissed') toast('Установка отменена — Fixit продолжит работать в браузере.');
+    await refresh();
+  });
+  backdrop.querySelector('#onboarding-push')?.addEventListener('click', async () => {
+    const outcome = await enablePush();
+    if (outcome === 'error') return;
+    await refresh();
+  });
+  backdrop.querySelector('#onboarding-continue').addEventListener('click', () => {
+    localStorage.setItem(onboardingKey(), '1'); closeModal();
+  });
+}
+
+async function maybeStartPwaOnboarding() {
+  if (!state.me || localStorage.getItem(onboardingKey()) === '1') return;
+  await openPwaOnboarding();
 }
 
 // ---------- API-клиент ----------
@@ -413,11 +477,9 @@ function renderMobileNav(items) {
   moreMenu.querySelector('#more-close-btn').addEventListener('click', () => moreMenu.classList.add('hidden'));
   moreMenu.querySelector('#more-logout-btn').addEventListener('click', logout);
   moreMenu.querySelector('.pwa-install-btn')?.addEventListener('click', async () => {
-    if (!deferredInstallPrompt) return;
-    deferredInstallPrompt.prompt();
-    const result = await deferredInstallPrompt.userChoice;
-    if (result.outcome !== 'accepted') localStorage.setItem('fixit-install-dismissed', '1');
-    deferredInstallPrompt = null; renderNav();
+    const result = await requestPwaInstall();
+    if (result !== 'accepted') localStorage.setItem('fixit-install-dismissed', '1');
+    renderNav();
   });
   moreMenu.querySelector('.pwa-dismiss-btn')?.addEventListener('click', () => { localStorage.setItem('fixit-install-dismissed', '1'); renderNav(); });
   moreMenu.querySelector('.pwa-push-btn')?.addEventListener('click', enablePush);
@@ -1951,6 +2013,7 @@ async function boot() {
     document.getElementById('login-screen').classList.add('hidden');
     document.getElementById('app').classList.remove('hidden');
     router();
+    setTimeout(() => { maybeStartPwaOnboarding().catch(() => null); }, 0);
   } catch (e) {
     logout();
   }

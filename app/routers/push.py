@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,9 +29,13 @@ async def public_key(user: CurrentUser = Depends(get_current_user)):
 
 
 @router.get("/state", response_model=PushStateOut)
-async def subscription_state(db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
-    subscribed = await db.scalar(select(PushSubscription.id).where(PushSubscription.user_id == user.id,
-        PushSubscription.organization_id == user.organization_id, PushSubscription.is_active.is_(True)))
+async def subscription_state(endpoint: str | None = Query(default=None, max_length=2048),
+                             db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    query = select(PushSubscription.id).where(PushSubscription.user_id == user.id,
+        PushSubscription.organization_id == user.organization_id, PushSubscription.is_active.is_(True))
+    if endpoint:
+        query = query.where(PushSubscription.endpoint == endpoint)
+    subscribed = await db.scalar(query)
     return PushStateOut(supported=True, configured=configured(), subscribed=bool(subscribed))
 
 
