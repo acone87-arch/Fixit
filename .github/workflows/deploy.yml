@@ -24,11 +24,12 @@ jobs:
           VPS_USER: ${{ secrets.VPS_USER }}
           VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
           VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+          FIXIT_GIT_DEPLOY_KEY: ${{ secrets.FIXIT_GIT_DEPLOY_KEY }}
           VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
           VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
           VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}
         run: |
-          for name in VPS_HOST VPS_USER VPS_SSH_KEY VPS_KNOWN_HOSTS VAPID_PUBLIC_KEY VAPID_PRIVATE_KEY VAPID_SUBJECT; do
+          for name in VPS_HOST VPS_USER VPS_SSH_KEY VPS_KNOWN_HOSTS FIXIT_GIT_DEPLOY_KEY VAPID_PUBLIC_KEY VAPID_PRIVATE_KEY VAPID_SUBJECT; do
             if [ -z "${!name}" ]; then
               echo "Required GitHub Actions secret is missing: $name" >&2
               exit 1
@@ -49,6 +50,7 @@ jobs:
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
+          FIXIT_GIT_DEPLOY_KEY: ${{ secrets.FIXIT_GIT_DEPLOY_KEY }}
           VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
           VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
           VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}
@@ -56,6 +58,12 @@ jobs:
           ssh -o BatchMode=yes -o ConnectTimeout=15 "$VPS_USER@$VPS_HOST" 'bash -se' <<REMOTE
           set -euo pipefail
           cd /opt/fixit
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$FIXIT_GIT_DEPLOY_KEY" > ~/.ssh/fixit_github_ed25519
+          chmod 600 ~/.ssh/fixit_github_ed25519
+          ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts
+          git config core.sshCommand 'ssh -i ~/.ssh/fixit_github_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes'
+          git remote set-url origin git@github.com:acone87-arch/Fixit.git
           upsert_env() {
             local key="\$1" value="\$2"
             if grep -q "^\${key}=" .env; then
