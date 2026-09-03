@@ -430,7 +430,7 @@ const NAV = {
     ['pulse', 'Pulse'], ['requests', 'Мои заявки'], ['equipment', 'Оборудование'],
     ['warehouse', 'Мой склад'],
   ],
-  client_admin: [['pulse', 'Главная'], ['requests', 'Заявки'], ['equipment', 'Оборудование'], ['documents', 'Документы']],
+  client_admin: [['pulse', 'Главная'], ['requests', 'Заявки'], ['equipment', 'Оборудование'], ['clients', 'Команда'], ['documents', 'Документы']],
   client_site_user: [['pulse', 'Главная'], ['requests', 'Заявки'], ['equipment', 'Оборудование'], ['documents', 'Документы']],
 };
 
@@ -642,7 +642,9 @@ async function renderClientRequest(content, id) {
 async function renderClientEquipment(content) {
   const equipment = await api('/client-portal/equipment');
   const cards = equipment.length ? equipment.map((item) => `<button class="client-equipment-card" data-client-equipment="${item.id}">${item.primary_photo ? `<img data-client-equipment-photo="${item.id}" alt="Фото оборудования">` : '<div class="client-equipment-placeholder">FIXIT</div>'}<div><strong>${esc([item.manufacturer,item.model].filter(Boolean).join(' ') || item.name)}</strong><span>${esc(item.name)}</span><small>S/N ${esc(item.serial_number)} · ${esc(item.site_name)}</small>${clientBadge(item.status === 'needs_repair' ? 'in_progress' : 'completed')}</div></button>`).join('') : '<div class="client-empty">Нет оборудования на объекте</div>';
-  content.innerHTML = `<div class="page-header"><div><h1>Оборудование</h1><div class="page-subtitle">Моё оборудование и сервис</div></div></div><input class="client-search" placeholder="Поиск оборудования"><div class="client-equipment-list">${cards}</div>`;
+  const addButton = state.me.role === 'client_site_user' ? '<button class="btn btn-primary" id="client-add-equipment">+ Добавить оборудование</button>' : '';
+  content.innerHTML = `<div class="page-header"><div><h1>Оборудование</h1><div class="page-subtitle">Моё оборудование и сервис</div></div>${addButton}</div><input class="client-search" placeholder="Поиск оборудования"><div class="client-equipment-list">${cards}</div>`;
+  content.querySelector('#client-add-equipment')?.addEventListener('click', async () => { await ensureCustomers(true); openCreateEquipmentModal(); });
   content.querySelectorAll('[data-client-equipment]').forEach((button) => button.addEventListener('click', () => openClientRequestForm(button.dataset.clientEquipment)));
   content.querySelectorAll('[data-client-equipment-photo]').forEach((image) => apiBlob(`/equipment/${image.dataset.clientEquipmentPhoto}/photo`).then((blob) => { const url = URL.createObjectURL(blob); activeClientPhotoUrls.push(url); image.src = url; }).catch(() => image.remove()));
 }
@@ -1213,9 +1215,11 @@ async function renderClientDetail(content, clientId, tab = 'overview') {
   const client = state.clients.find((item) => item.id === clientId);
   if (!client) { content.innerHTML = '<div class="section-loading">Клиент не найден</div>'; return; }
   const canManageUsers = ['owner', 'admin', 'dispatcher'].includes(state.me.role);
-  const accessCount = canManageUsers ? (await api(`/client-portal/access?client_id=${encodeURIComponent(client.id)}`)).length : 0;
-  const tabs = [['overview', 'Обзор'], ['sites', 'Объекты'], ['equipment', 'Оборудование'], ['users', `Пользователи${canManageUsers ? ` (${accessCount})` : ''}`]];
-  const actions = canManageUsers ? `<div class="client-detail-actions"><button class="btn btn-secondary" id="client-action-site">+ Объект</button><button class="btn btn-secondary" id="client-action-user">+ Пользователь</button><button class="btn btn-primary" id="client-action-equipment">+ Оборудование</button></div>` : '';
+  const canManageClientTeam = canManageUsers || state.me.role === 'client_admin';
+  const accessCount = canManageClientTeam ? (await api(`/client-portal/access?client_id=${encodeURIComponent(client.id)}`)).length : 0;
+  const staffUsersTabLabel = `Пользователи${canManageUsers ? ` (${accessCount})` : ''}`;
+  const tabs = [['overview', 'Обзор'], ['sites', 'Объекты'], ['equipment', 'Оборудование'], ['users', canManageClientTeam ? `Пользователи (${accessCount})` : staffUsersTabLabel]];
+  const actions = ['owner','admin','dispatcher'].includes(state.me.role) ? `<div class="client-detail-actions"><button class="btn btn-secondary" id="client-action-site">+ Объект</button><button class="btn btn-secondary" id="client-action-user">+ Пользователь</button><button class="btn btn-primary" id="client-action-equipment">+ Оборудование</button></div>` : '';
   content.innerHTML = `<section class="client-detail-screen"><button class="sr-back" id="client-detail-back">← Клиенты</button><header class="client-detail-hero"><div><span>КЛИЕНТ</span><h1>${esc(client.legal_name || client.name)}</h1><p>${client.is_active ? '● Активен' : '● Отключён'}</p></div>${actions}</header><div class="client-detail-meta">${client.tax_id ? `<div><span>ИНН</span><strong>${esc(client.tax_id)}</strong></div>` : ''}<div><span>Контакт</span><strong>${esc(client.contact_name || 'Не указан')}</strong><small>${esc(client.contact_phone || client.contact_email || '')}</small></div></div><nav class="client-detail-tabs">${tabs.map(([key,label]) => `<button data-client-tab="${key}" class="${tab === key ? 'active' : ''}">${label}</button>`).join('')}</nav><div id="client-detail-panel"></div></section>`;
   content.querySelector('#client-detail-back').addEventListener('click', () => location.hash = 'clients');
   content.querySelectorAll('[data-client-tab]').forEach((button) => button.addEventListener('click', () => location.hash = `clients/${client.id}/${button.dataset.clientTab}`));
@@ -1235,7 +1239,7 @@ async function renderClientDetail(content, clientId, tab = 'overview') {
     panel.innerHTML = `<div class="client-equipment-detail-list">${equipment.length ? equipment.map((item) => `<button class="client-equipment-detail-card" data-client-equipment="${item.id}"><span class="client-equipment-photo" data-client-equipment-photo="${item.id}">FIXIT</span><div><strong>${esc([item.manufacturer, item.model].filter(Boolean).join(' ') || item.name)}</strong><span>${esc(item.name || 'Оборудование')}</span><small>S/N ${esc(item.serial_number || '—')} · ${esc(sites.get(item.site_id).name)}</small>${badge(EQUIPMENT_STATUS, item.status)}</div></button>`).join('') : '<div class="client-empty">Оборудования пока нет.</div>'}</div>`;
     bindClientEquipmentCards(panel);
   } else if (tab === 'users') {
-    if (!canManageUsers) { panel.innerHTML = '<div class="client-empty">У вас нет права управлять пользователями клиента.</div>'; return; }
+    if (!canManageClientTeam) { panel.innerHTML = '<div class="client-empty">У вас нет права управлять пользователями клиента.</div>'; return; }
     await renderClientUsersPanel(panel, client);
   } else {
     const [summary, serviceTechnicians] = await Promise.all([
@@ -1283,9 +1287,10 @@ async function renderClientUsersPanel(panel, client) {
       const group = result[access.user_id] || (result[access.user_id] = { ...access, accesses: [] });
       group.accesses.push(access); return result;
     }, {}));
-    panel.innerHTML = `<div class="client-users-head"><div><span>ПОЛЬЗОВАТЕЛИ</span><p>Доступ к личному кабинету клиента и его объектам.</p></div><button class="btn btn-primary" id="client-user-add">+ Добавить пользователя</button></div><div class="client-users-list">${grouped.length ? grouped.map((group) => `<article class="client-user-group"><header><div><strong>${esc(group.full_name)}</strong><small>${esc(group.email)}</small></div><span>${esc(clientRoleLabel(group.role))}</span></header><div class="client-user-scopes">${group.accesses.map((access) => `<div class="client-user-row ${access.is_active ? '' : 'is-disabled'}"><div><span>${esc(clientAccessLabel(access))}</span><small>${access.is_active ? 'Активен' : 'Отключён'}</small></div><button class="client-user-more" data-client-access-menu="${access.id}" aria-label="Действия для доступа">⋯</button></div>`).join('')}</div></article>`).join('') : '<div class="client-empty">У клиента пока нет пользователей кабинета</div>'}</div>`;
+    panel.innerHTML = `<div class="client-users-head"><div><span>КОМАНДА</span><p>Доступ к личному кабинету клиента и его объектам.</p></div><button class="btn btn-secondary" id="client-invite-manager">Пригласить менеджера</button><button class="btn btn-primary" id="client-invite-director">Подключить руководителя</button></div><div class="client-users-list">${grouped.length ? grouped.map((group) => `<article class="client-user-group"><header><div><strong>${esc(group.full_name)}</strong><small>${esc(group.email)}</small></div><span>${esc(clientRoleLabel(group.role))}</span></header><div class="client-user-scopes">${group.accesses.map((access) => `<div class="client-user-row ${access.is_active ? '' : 'is-disabled'}"><div><span>${esc(clientAccessLabel(access))}</span><small>${access.is_active ? 'Активен' : 'Отключён'}</small></div><button class="client-user-more" data-client-access-menu="${access.id}" aria-label="Действия для доступа">⋯</button></div>`).join('')}</div></article>`).join('') : '<div class="client-empty">У клиента пока нет пользователей кабинета</div>'}</div>`;
     const refresh = () => renderClientDetail(document.getElementById('content'), client.id, 'users');
-    panel.querySelector('#client-user-add').addEventListener('click', () => openClientUserEditor(client, null, refresh, false));
+    panel.querySelector('#client-invite-manager').addEventListener('click', () => openClientInviteModal(client, 'site-manager'));
+    panel.querySelector('#client-invite-director').addEventListener('click', () => openClientInviteModal(client, 'director'));
     panel.querySelectorAll('[data-client-access-menu]').forEach((button) => button.addEventListener('click', () => {
       const access = accesses.find((item) => item.id === button.dataset.clientAccessMenu);
       if (access) openClientAccessActions(client, access, refresh, false);
@@ -2012,6 +2017,8 @@ async function boot() {
     window.FixitOffline?.sync?.({ token: state.token, deviceId: 'fixit-pulse' });
     document.getElementById('login-screen').classList.add('hidden');
     document.getElementById('app').classList.remove('hidden');
+    const joinRoute = sessionStorage.getItem('fixit-join-route');
+    if (joinRoute) { sessionStorage.removeItem('fixit-join-route'); location.hash = joinRoute; }
     router();
     setTimeout(() => { maybeStartPwaOnboarding().catch(() => null); }, 0);
   } catch (e) {
@@ -2038,4 +2045,43 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
 
 document.getElementById('logout-btn').addEventListener('click', logout);
 
-boot();
+async function showJoinScreen(token) {
+  const host = document.getElementById('join-form-host');
+  const login = document.getElementById('login-form');
+  login.classList.add('hidden');
+  try {
+    const invite = await api(`/join/${encodeURIComponent(token)}`);
+    host.innerHTML = `<div class="subtitle">${esc(invite.role === 'client_admin' ? 'Подключение руководителя клиента' : 'Подключение менеджера объекта')}<br><b>${esc(invite.client_name)}</b>${invite.site_name ? ` · ${esc(invite.site_name)}` : ''}</div><form id="join-form"><div class="field"><label>ФИО ${invite.requires_existing_login ? '(для нового пользователя)' : ''}</label><input id="join-name" autocomplete="name"></div><div class="field"><label>Email</label><input id="join-email" type="email" required autocomplete="username"></div><div class="field"><label>Пароль</label><input id="join-password" type="password" required minlength="8" autocomplete="current-password"></div><div class="field"><label>Телефон</label><input id="join-phone" autocomplete="tel"></div><button class="btn btn-primary" style="width:100%;justify-content:center">Продолжить</button></form>`;
+    host.querySelector('#join-form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      try {
+        const result = await api(`/join/${encodeURIComponent(token)}/accept`, {method:'POST', body: JSON.stringify({full_name: host.querySelector('#join-name').value.trim() || null, email: host.querySelector('#join-email').value.trim(), password: host.querySelector('#join-password').value, phone: host.querySelector('#join-phone').value.trim() || null})});
+        state.token = result.access_token; localStorage.setItem('token', state.token);
+        sessionStorage.setItem('fixit-join-route', invite.role === 'client_admin' ? `clients/${invite.client_id}/users` : 'equipment');
+        history.replaceState(null, '', '/'); await boot();
+      } catch (error) { document.getElementById('login-error').textContent = error.message; document.getElementById('login-error').classList.remove('hidden'); }
+    });
+  } catch (error) { host.innerHTML = `<div class="login-error">${esc(error.message)}</div><button class="btn btn-secondary" id="join-back">Ко входу</button>`; host.querySelector('#join-back').addEventListener('click', () => { history.replaceState(null, '', '/'); login.classList.remove('hidden'); host.innerHTML=''; }); }
+}
+
+async function openClientInviteModal(client, kind) {
+  await ensureCustomers(true);
+  const manager = kind === 'site-manager';
+  const sites = state.sites.filter((site) => site.client_id === client.id && site.is_active);
+  const backdrop = openModal(manager ? 'Пригласить менеджера объекта' : 'Подключить руководителя', `<p class="onboarding-intro">${manager ? 'Менеджер получит доступ только к выбранному объекту.' : 'Руководитель увидит уже созданные объекты, оборудование, заявки и команду этого клиента.'}</p><div class="field"><label>Email (необязательно)</label><input id="invite-email" type="email"></div>${manager ? `<div class="field"><label>Объект</label><select id="invite-site"><option value="">Выберите объект</option>${sites.map((site) => `<option value="${site.id}">${esc(site.name)}</option>`).join('')}</select></div>` : ''}`, '<button class="btn btn-secondary" id="modal-cancel">Отмена</button><button class="btn btn-primary" id="modal-save">Создать безопасную ссылку</button>');
+  backdrop.querySelector('#modal-cancel').addEventListener('click', closeModal);
+  backdrop.querySelector('#modal-save').addEventListener('click', async () => {
+    const site_id = manager ? backdrop.querySelector('#invite-site').value : null;
+    if (manager && !site_id) return toast('Выберите объект', 'error');
+    try {
+      const invite = await api(`/client-portal/clients/${client.id}/invites/${kind}`, {method:'POST', body: JSON.stringify({site_id, invited_email: backdrop.querySelector('#invite-email').value.trim() || null})});
+      backdrop.querySelector('#modal-body').innerHTML = `<p>Скопируйте ссылку или покажите QR сотруднику. Она действует до ${fmtDate(invite.expires_at)} и принимается один раз.</p><div class="field"><input value="${esc(invite.join_url)}" readonly id="invite-url"></div><div id="invite-qr"></div><button class="btn btn-primary" id="copy-invite">Скопировать ссылку</button>`;
+      apiBlob(invite.qr_url).then((blob) => { const url = URL.createObjectURL(blob); activeClientPhotoUrls.push(url); backdrop.querySelector('#invite-qr').innerHTML = `<img src="${url}" alt="QR для приглашения">`; }).catch(() => null);
+      backdrop.querySelector('#copy-invite').addEventListener('click', async () => { await navigator.clipboard.writeText(invite.join_url); toast('Ссылка скопирована'); });
+    } catch (error) { toast(error.message, 'error'); }
+  });
+}
+
+const joinMatch = location.pathname.match(/^\/join\/([^/]+)$/);
+if (joinMatch && !state.token) { document.getElementById('login-screen').classList.remove('hidden'); showJoinScreen(joinMatch[1]); }
+else boot();

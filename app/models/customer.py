@@ -1,12 +1,14 @@
+import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, ForeignKey, Index, String, UniqueConstraint
+from sqlalchemy import Boolean, Enum, ForeignKey, Index, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
 from app.database import Base
+from app.models.core import UserRole
 
 
 class Client(Base):
@@ -24,6 +26,9 @@ class Client(Base):
     contact_name: Mapped[str | None] = mapped_column(String(255))
     contact_phone: Mapped[str | None] = mapped_column(String(32))
     contact_email: Mapped[str | None] = mapped_column(String(255))
+    adoption_status: Mapped[str] = mapped_column(
+        Enum("pilot", "active", name="client_adoption_status"), default="pilot", server_default="pilot"
+    )
     is_active: Mapped[bool] = mapped_column(default=True)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())
@@ -72,6 +77,35 @@ class ClientUserAccess(Base):
     client_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("clients.id", ondelete="CASCADE"), index=True)
     site_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("sites.id", ondelete="CASCADE"), index=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
+class ClientInviteStatus(str, enum.Enum):
+    pending = "pending"
+    accepted = "accepted"
+    revoked = "revoked"
+
+
+class ClientInvite(Base):
+    """Opaque, tenant-scoped join link for an existing client/team scope."""
+    __tablename__ = "client_invites"
+    __table_args__ = (
+        Index("ix_client_invites_org_client", "organization_id", "client_id"),
+        UniqueConstraint("token_hash", name="uq_client_invites_token_hash"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    client_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("clients.id", ondelete="CASCADE"), index=True)
+    site_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("sites.id", ondelete="CASCADE"), index=True)
+    target_role: Mapped["UserRole"] = mapped_column(Enum("client_admin", "client_site_user", name="user_role", create_type=False))
+    invited_by_user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"))
+    invited_email: Mapped[str | None] = mapped_column(String(255))
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(nullable=False)
+    status: Mapped["ClientInviteStatus"] = mapped_column(Enum("pending", "accepted", "revoked", name="client_invite_status"), default="pending", server_default="pending")
+    accepted_at: Mapped[datetime | None] = mapped_column()
+    accepted_by_user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
+    revoked_at: Mapped[datetime | None] = mapped_column()
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
 
 

@@ -114,8 +114,10 @@ async def list_equipment(client_id: uuid.UUID | None = None, site_id: uuid.UUID 
 async def create_equipment(
     payload: EquipmentCreate,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_roles(UserRole.admin, UserRole.dispatcher)),
+    user: CurrentUser = Depends(get_current_user),
 ):
+    if user.role not in {UserRole.owner, UserRole.admin, UserRole.dispatcher, UserRole.client_site_user}:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Недостаточно прав для добавления оборудования")
     equipment_type = await db.scalar(select(EquipmentType).where(
         EquipmentType.id == payload.equipment_type_id,
         EquipmentType.organization_id == user.organization_id,
@@ -129,6 +131,10 @@ async def create_equipment(
     ))
     if not site:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Активный объект обслуживания не найден")
+    if user.role == UserRole.client_site_user:
+        scoped_client_id, allowed_site_ids = await client_scope(user, db)
+        if site.client_id != scoped_client_id or allowed_site_ids is None or site.id not in allowed_site_ids:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Можно добавлять оборудование только на свой объект")
     # Не принимаем произвольное название из клиента: тип — единственное
     # название единицы оборудования во всех экранах.
     equipment = Equipment(
@@ -152,8 +158,10 @@ async def upload_equipment_photo(
     equipment_id: uuid.UUID,
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_roles(UserRole.admin, UserRole.dispatcher, UserRole.technician)),
+    user: CurrentUser = Depends(get_current_user),
 ):
+    if user.role not in {UserRole.owner, UserRole.admin, UserRole.dispatcher, UserRole.technician, UserRole.client_site_user}:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Недостаточно прав для фото оборудования")
     equipment = await _equipment_for_user(equipment_id, db, user)
     content = await file.read(MAX_PHOTO_BYTES + 1)
     if not content or len(content) > MAX_PHOTO_BYTES:
@@ -260,14 +268,15 @@ async def update_equipment(
     equipment_id: uuid.UUID,
     payload: EquipmentUpdate,
     db: AsyncSession = Depends(get_db),
-    user=Depends(require_roles(UserRole.admin, UserRole.dispatcher)),
+    user: CurrentUser = Depends(get_current_user),
 ):
-    equipment = await db.scalar(select(Equipment).where(
-        Equipment.id == equipment_id, Equipment.organization_id == user.organization_id
-    ))
-    if not equipment:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Оборудование не найдено")
+    if user.role not in {UserRole.owner, UserRole.admin, UserRole.dispatcher, UserRole.client_site_user}:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Недостаточно прав для изменения оборудования")
+    equipment = await _equipment_for_user(equipment_id, db, user) if user.role == UserRole.client_site_user else await db.scalar(select(Equipment).where(Equipment.id == equipment_id, Equipment.organization_id == user.organization_id))
+    if not equipment: raise HTTPException(status.HTTP_404_NOT_FOUND, "Оборудование не найдено")
     changes = payload.model_dump(exclude_unset=True)
+    if user.role == UserRole.client_site_user and changes.get("site_id"):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Менеджер объекта не может переносить оборудование")
     if changes.get("site_id"):
         site = await db.scalar(select(Site).where(
             Site.id == changes["site_id"],
@@ -487,11 +496,7 @@ async def get_passport(equipment_id: uuid.UUID, db: AsyncSession = Depends(get_d
 @router.get("/{equipment_id}/qr", response_class=Response)
 async def equipment_qr(equipment_id: uuid.UUID, db: AsyncSession = Depends(get_db),
                        user: CurrentUser = Depends(get_current_user)):
-    equipment = await db.scalar(select(Equipment).where(
-        Equipment.id == equipment_id, Equipment.organization_id == user.organization_id
-    ))
-    if not equipment:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Оборудование не найдено")
+    equipment = await _equipment_for_user(equipment_id, db, user)
     public_url = f"{settings.public_app_url.rstrip('/')}/e/{equipment.public_qr_token}"
     image = qrcode.make(public_url, image_factory=qrcode.image.svg.SvgPathImage, border=2)
     buffer = BytesIO()

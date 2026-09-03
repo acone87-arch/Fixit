@@ -11,7 +11,7 @@ from app.models.core import Equipment, EquipmentAttachment, EquipmentType, User,
 from app.models.customer import Client, ClientUserAccess, Site
 from app.models.repair import Repair
 from app.models.service_request import ServiceRequest
-from app.models.organization import OrganizationMembership
+from app.models.organization import AuditEvent, OrganizationMembership
 from app.routers.service_requests import client_label, serialize
 from app.schemas.customer import ClientAccessCreate, ClientAccessOut, ClientAccessUpdate
 from app.schemas.service_request import ServiceRequestApproval, ServiceRequestCreate, ServiceRequestDetail, ServiceRequestListItem
@@ -23,6 +23,16 @@ router = APIRouter(prefix="/api/client-portal", tags=["client portal"])
 
 
 ACCESS_MANAGERS = (UserRole.owner, UserRole.admin, UserRole.dispatcher)
+
+
+async def _ensure_team_manager(user: CurrentUser, client_id: uuid.UUID, db: AsyncSession) -> None:
+    if user.role in {UserRole.owner, UserRole.admin, UserRole.dispatcher}:
+        return
+    if user.role == UserRole.client_admin:
+        scoped_client_id, _ = await client_scope(user, db)
+        if scoped_client_id == client_id:
+            return
+    raise HTTPException(status.HTTP_403_FORBIDDEN, "Недостаточно прав для управления командой клиента")
 
 
 def repair_for_service_request_query(organization_id: uuid.UUID, request_id: uuid.UUID):
@@ -83,7 +93,8 @@ async def _access_rows(db, organization_id, client_id):
 
 @router.get("/access", response_model=list[ClientAccessOut])
 async def list_access(client_id: uuid.UUID, db: AsyncSession = Depends(get_db),
-                      user: CurrentUser = Depends(require_roles(*ACCESS_MANAGERS))):
+                      user: CurrentUser = Depends(get_current_user)):
+    await _ensure_team_manager(user, client_id, db)
     client = await db.scalar(select(Client.id).where(Client.id == client_id, Client.organization_id == user.organization_id))
     if not client:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Клиент не найден")
@@ -92,7 +103,8 @@ async def list_access(client_id: uuid.UUID, db: AsyncSession = Depends(get_db),
 
 @router.post("/access", response_model=ClientAccessOut, status_code=status.HTTP_201_CREATED)
 async def grant_access(payload: ClientAccessCreate, db: AsyncSession = Depends(get_db),
-                       user: CurrentUser = Depends(require_roles(*ACCESS_MANAGERS))):
+                       user: CurrentUser = Depends(get_current_user)):
+    await _ensure_team_manager(user, payload.client_id, db)
     member, _ = await _access_member_and_client(db, user.organization_id, payload.user_id, payload.client_id)
     site = await _validate_access_scope(db, user.organization_id, member, payload.client_id, payload.site_id)
     access = ClientUserAccess(organization_id=user.organization_id, user_id=payload.user_id,
@@ -107,12 +119,13 @@ async def grant_access(payload: ClientAccessCreate, db: AsyncSession = Depends(g
 
 @router.patch("/access/{access_id}", response_model=ClientAccessOut)
 async def update_access(access_id: uuid.UUID, payload: ClientAccessUpdate, db: AsyncSession = Depends(get_db),
-                        user: CurrentUser = Depends(require_roles(*ACCESS_MANAGERS))):
+                        user: CurrentUser = Depends(get_current_user)):
     access = await db.scalar(select(ClientUserAccess).where(
         ClientUserAccess.id == access_id, ClientUserAccess.organization_id == user.organization_id,
     ))
     if not access:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Доступ не найден")
+    await _ensure_team_manager(user, access.client_id, db)
     member, _ = await _access_member_and_client(db, user.organization_id, access.user_id, access.client_id)
     if "site_id" in payload.model_fields_set:
         site = await _validate_access_scope(db, user.organization_id, member, access.client_id, payload.site_id)
@@ -129,12 +142,16 @@ async def update_access(access_id: uuid.UUID, payload: ClientAccessUpdate, db: A
 
 @router.delete("/access/{access_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_access(access_id: uuid.UUID, db: AsyncSession = Depends(get_db),
-                        user: CurrentUser = Depends(require_roles(*ACCESS_MANAGERS))):
+                        user: CurrentUser = Depends(get_current_user)):
     access = await db.scalar(select(ClientUserAccess).where(
         ClientUserAccess.id == access_id, ClientUserAccess.organization_id == user.organization_id,
     ))
     if not access:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Доступ не найден")
+    await _ensure_team_manager(user, access.client_id, db)
+    db.add(AuditEvent(
+        organization_id=user.organization_id, actor_user_id=user.id, action="client.member_disabled",
+        entity_type="client_access", entity_id=str(access.id), details_json={"client_id": str(access.client_id)}))
     await db.delete(access)
     await db.commit()
 

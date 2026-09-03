@@ -33,6 +33,7 @@ class ClientOut(ClientBase):
     is_active: bool
     site_count: int = 0
     equipment_count: int = 0
+    adoption_status: str = "pilot"
     created_at: datetime
 
 
@@ -97,3 +98,30 @@ class ClientAccessOut(BaseModel):
 class TechnicianClientAccessUpdate(BaseModel):
     """Replacement set of technicians responsible for one service client."""
     technician_ids: list[uuid.UUID] = Field(default_factory=list)
+
+
+class ClientInviteCreate(BaseModel):
+    site_id: uuid.UUID | None = None
+    invited_email: EmailStr | None = None
+    expires_in_days: int = Field(default=14, ge=1, le=90)
+
+
+class ClientInviteOut(BaseModel):
+    id: uuid.UUID
+    client_id: uuid.UUID
+    site_id: uuid.UUID | None = None
+    target_role: str
+    invited_email: EmailStr | None = None
+    status: str
+    expires_at: datetime
+    accepted_at: datetime | None = None
+    revoked_at: datetime | None = None
+    join_url: str | None = None
+    qr_url: str | None = None
+
+
+class InviteAcceptRequest(BaseModel):
+    full_name: str | None = Field(default=None, min_length=2, max_length=255)
+    email: EmailStr
+    password: str = Field(min_length=8, max_length=255)
+    phone: str | None = Field(default=None, max_length=32)
