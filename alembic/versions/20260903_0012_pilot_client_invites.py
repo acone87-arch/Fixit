@@ -17,7 +17,7 @@ def upgrade():
         sa.Column("organization_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False),
         sa.Column("client_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("clients.id", ondelete="CASCADE"), nullable=False),
         sa.Column("site_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("sites.id", ondelete="CASCADE"), nullable=True),
-        sa.Column("target_role", sa.Enum("client_admin", "client_site_user", name="user_role", create_type=False), nullable=False),
+        sa.Column("target_role", postgresql.ENUM("client_admin", "client_site_user", name="user_role", create_type=False), nullable=False),
         sa.Column("invited_by_user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=False),
         sa.Column("invited_email", sa.String(length=255)), sa.Column("token_hash", sa.String(length=64), nullable=False),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
