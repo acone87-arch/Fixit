@@ -1920,15 +1920,39 @@ async function renderUsers(content) {
       <td>${esc(u.email)}</td>
       <td>${esc(ROLE_LABEL[u.role] || u.role)}</td>
       <td>${esc(u.phone || '—')}</td>
-      <td><button class="btn btn-secondary btn-compact" data-edit-user="${u.id}">Редактировать</button></td>
-    </tr>`).join('') : '<tr class="empty-row"><td colspan="4">Пользователей пока нет</td></tr>';
+      <td><button class="btn btn-secondary btn-compact" data-edit-user="${u.id}">Редактировать</button>${u.id !== state.me?.id ? ` <button class="btn btn-danger btn-compact" data-delete-user="${u.id}">Удалить</button>` : ''}</td>
+    </tr>`).join('') : '<tr class="empty-row"><td colspan="5">Пользователей пока нет</td></tr>';
 
   document.getElementById('add-user-btn').addEventListener('click', openCreateUserModal);
   document.getElementById('user-rows').addEventListener('click', (event) => {
-    const button = event.target.closest('[data-edit-user]');
+    const button = event.target.closest('[data-edit-user], [data-delete-user]');
     if (!button) return;
-    const user = users.find((item) => item.id === button.dataset.editUser);
-    if (user) openEditUserModal(user);
+    const user = users.find((item) => item.id === (button.dataset.editUser || button.dataset.deleteUser));
+    if (!user) return;
+    if (button.dataset.deleteUser) openDeleteUserModal(user);
+    else openEditUserModal(user);
+  });
+}
+
+function openDeleteUserModal(user) {
+  const backdrop = openModal('Удалить пользователя?',
+    `<p>Пользователь <strong>${esc(user.full_name)}</strong> больше не сможет войти в Fixit. Доступы к клиентам и объектам будут отозваны; история работ сохранится.</p>`,
+    '<button class="btn btn-secondary" id="modal-cancel">Отмена</button><button class="btn btn-danger" id="modal-delete">Удалить пользователя</button>');
+  backdrop.querySelector('#modal-cancel').addEventListener('click', closeModal);
+  backdrop.querySelector('#modal-delete').addEventListener('click', async (event) => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    button.textContent = 'Удаление…';
+    try {
+      await api(`/users/${user.id}`, { method: 'DELETE' });
+      closeModal();
+      toast('Пользователь удалён');
+      router();
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = 'Удалить пользователя';
+      toast(error.message, 'error');
+    }
   });
 }
 

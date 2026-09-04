@@ -1,14 +1,15 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Response, status
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import CurrentUser, get_current_user, require_roles
 from app.core.security import hash_password
 from app.database import get_db
 from app.models.core import User, UserRole
-from app.models.organization import OrganizationMembership
+from app.models.customer import ClientUserAccess, TechnicianClientAccess
+from app.models.organization import AuditEvent, OrganizationMembership
 from app.schemas.user import UserCreate, UserOut, UserUpdate
 
 router = APIRouter(prefix="/api/users", tags=["users"])
@@ -27,7 +28,8 @@ async def list_users(
     rows = (await db.execute(
         select(User, OrganizationMembership)
         .join(OrganizationMembership, OrganizationMembership.user_id == User.id)
-        .where(OrganizationMembership.organization_id == current.organization_id)
+        .where(OrganizationMembership.organization_id == current.organization_id,
+               OrganizationMembership.is_active.is_(True))
         .order_by(User.full_name)
     )).all()
     return [UserOut.model_validate(user).model_copy(update={
@@ -86,3 +88,67 @@ async def update_user(
     await db.commit()
     await db.refresh(user)
     return user
+
+
+@router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_user(
+    user_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current: CurrentUser = Depends(require_roles(UserRole.admin)),
+):
+    """Safely revoke a user's access without destroying operational history."""
+    if user_id == current.id:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Нельзя удалить собственную учётную запись")
+
+    membership = await db.scalar(
+        select(OrganizationMembership)
+        .where(OrganizationMembership.organization_id == current.organization_id,
+               OrganizationMembership.user_id == user_id,
+               OrganizationMembership.is_active.is_(True))
+        .with_for_update()
+    )
+    if not membership:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Пользователь не найден")
+
+    elevated = (await db.scalars(
+        select(OrganizationMembership)
+        .where(OrganizationMembership.organization_id == current.organization_id,
+               OrganizationMembership.is_active.is_(True),
+               OrganizationMembership.role.in_({UserRole.owner, UserRole.admin}))
+        .with_for_update()
+    )).all()
+    if membership.role in {UserRole.owner, UserRole.admin} and len(elevated) <= 1:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Нельзя удалить последнего администратора организации")
+
+    user = await db.get(User, user_id)
+    if not user:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Пользователь не найден")
+
+    membership.is_active = False
+    await db.execute(update(ClientUserAccess).where(
+        ClientUserAccess.organization_id == current.organization_id,
+        ClientUserAccess.user_id == user_id,
+    ).values(is_active=False))
+    await db.execute(delete(TechnicianClientAccess).where(
+        TechnicianClientAccess.organization_id == current.organization_id,
+        TechnicianClientAccess.technician_id == user_id,
+    ))
+    await db.flush()
+
+    active_memberships = await db.scalar(select(func.count()).select_from(OrganizationMembership).where(
+        OrganizationMembership.user_id == user_id,
+        OrganizationMembership.is_active.is_(True),
+    ))
+    if not active_memberships:
+        user.is_active = False
+
+    db.add(AuditEvent(
+        organization_id=current.organization_id,
+        actor_user_id=current.id,
+        action="user.deactivated",
+        entity_type="user",
+        entity_id=str(user_id),
+        details_json={"membership_revoked": True},
+    ))
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

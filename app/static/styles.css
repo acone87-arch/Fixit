@@ -89,6 +89,7 @@ input, select, textarea { font-family: inherit; font-size: 14px; }
 .btn-primary { background: var(--accent); color: var(--accent-ink); box-shadow: 0 7px 16px rgba(41,211,145,.17); }
 .btn-primary:hover { background: #20c787; transform: translateY(-1px); }.btn-primary:disabled { opacity: .5; cursor: not-allowed; }
 .btn-secondary { background: var(--surface-sunk); color: var(--ink); }.btn-secondary:hover { background: #e2e9e5; }
+.btn-danger { background: #b8303a; color: #fff; }.btn-danger:hover { background: #972833; transform: translateY(-1px); }.btn-danger:disabled { opacity: .55; cursor: not-allowed; }
 .btn-ghost { background: none; color: var(--ink-soft); padding: 6px 10px; }.btn-ghost:hover { color: var(--ink); }
 .btn-sm, .btn-compact { padding: 6px 9px; font-size: 10px; }
 
