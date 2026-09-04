@@ -58,13 +58,15 @@ def test_history_cards_are_whole_request_navigation_targets_with_thumbnail_urls(
     assert "Ремонтов ещё не было." in source
 
 
-def test_passport_has_one_compact_primary_photo_and_never_a_hero_photo():
+def test_passport_uses_a_prominent_primary_photo_with_an_in_app_viewer():
     source = (ROOT / "static" / "app.js").read_text(encoding="utf8")
     passport = source[source.index("async function openEquipmentPassport"):]
     assert 'id="passport-primary-photo"' in passport
-    assert "passport-hero-photo" not in passport
-    assert "data-passport-hero-photo" not in passport
-    assert "querySelectorAll('#passport-primary-photo" not in passport
+    assert 'id="passport-open-photo"' in passport
+    assert "passport-primary-photo-button" in passport
+    assert "passport-photo-placeholder" in passport
+    assert "openProtectedImage(`/equipment/${passport.id}/photo`" in passport
+    assert "canUploadPhoto" in passport and "canDeletePhoto" in passport
     assert "const image = backdrop.querySelector('#passport-primary-photo');" in passport
 
 
@@ -81,8 +83,8 @@ def test_history_card_keeps_technician_out_of_header_and_omits_identical_problem
 
 def test_passport_asset_versions_change_together_for_browser_cache_busting():
     index = (ROOT / "static" / "index.html").read_text(encoding="utf8")
-    assert "/static/styles.css?v=20260902-2" in index
-    assert "/static/app.js?v=20260902-2" in index
+    assert "/static/styles.css?v=20260904-4" in index
+    assert "/static/app.js?v=20260904-4" in index
 
 
 def test_protected_media_urls_do_not_receive_a_second_api_prefix():

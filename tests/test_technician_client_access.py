@@ -48,5 +48,6 @@ def test_technician_client_access_query_has_tenant_and_technician_keys():
 def test_frontend_offers_all_sites_and_hides_photo_deletion_for_technicians():
     source = (ROOT / "app" / "static" / "app.js").read_text(encoding="utf-8")
     assert 'Все объекты' in source
-    assert 'passport.primary_photo && isStaff' in source
+    assert "const canDeletePhoto = ['admin', 'dispatcher'].includes(state.me.role);" in source
+    assert "canDeletePhoto ? '<button type=\"button\" id=\"passport-photo-delete\">" in source
     assert 'после назначения клиента в обслуживание' in source
