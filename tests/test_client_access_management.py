@@ -95,3 +95,14 @@ def test_client_quick_actions_are_limited_to_service_staff():
     assert "id=\"client-action-site\"" in FRONTEND
     assert "id=\"client-action-user\"" in FRONTEND
     assert "id=\"client-action-equipment\"" in FRONTEND
+
+
+def test_client_details_can_edit_existing_business_and_contact_data():
+    customers = Path("app/routers/customers.py").read_text(encoding="utf8")
+    assert '@router.patch("/{client_id}", response_model=ClientOut)' in customers
+    assert "const canEditClient = ['admin', 'dispatcher'].includes(state.me.role);" in FRONTEND
+    assert 'id="client-action-edit"' in FRONTEND
+    assert "function openClientEditModal(client)" in FRONTEND
+    assert "method: 'PATCH'" in FRONTEND
+    for field in ("tax_id", "contact_name", "contact_phone", "contact_email", "is_active"):
+        assert field in FRONTEND

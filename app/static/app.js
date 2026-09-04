@@ -1218,14 +1218,16 @@ async function renderClientDetail(content, clientId, tab = 'overview') {
   const client = state.clients.find((item) => item.id === clientId);
   if (!client) { content.innerHTML = '<div class="section-loading">Клиент не найден</div>'; return; }
   const canManageUsers = ['owner', 'admin', 'dispatcher'].includes(state.me.role);
+  const canEditClient = ['admin', 'dispatcher'].includes(state.me.role);
   const canManageClientTeam = canManageUsers || state.me.role === 'client_admin';
   const accessCount = canManageClientTeam ? (await api(`/client-portal/access?client_id=${encodeURIComponent(client.id)}`)).length : 0;
   const staffUsersTabLabel = `Пользователи${canManageUsers ? ` (${accessCount})` : ''}`;
   const tabs = [['overview', 'Обзор'], ['sites', 'Объекты'], ['equipment', 'Оборудование'], ['users', canManageClientTeam ? `Пользователи (${accessCount})` : staffUsersTabLabel]];
-  const actions = ['owner','admin','dispatcher'].includes(state.me.role) ? `<div class="client-detail-actions"><button class="btn btn-secondary" id="client-action-site">+ Объект</button><button class="btn btn-secondary" id="client-action-user">+ Пользователь</button><button class="btn btn-primary" id="client-action-equipment">+ Оборудование</button></div>` : '';
-  content.innerHTML = `<section class="client-detail-screen"><button class="sr-back" id="client-detail-back">← Клиенты</button><header class="client-detail-hero"><div><span>КЛИЕНТ</span><h1>${esc(client.legal_name || client.name)}</h1><p>${client.is_active ? '● Активен' : '● Отключён'}</p></div>${actions}</header><div class="client-detail-meta">${client.tax_id ? `<div><span>ИНН</span><strong>${esc(client.tax_id)}</strong></div>` : ''}<div><span>Контакт</span><strong>${esc(client.contact_name || 'Не указан')}</strong><small>${esc(client.contact_phone || client.contact_email || '')}</small></div></div><nav class="client-detail-tabs">${tabs.map(([key,label]) => `<button data-client-tab="${key}" class="${tab === key ? 'active' : ''}">${label}</button>`).join('')}</nav><div id="client-detail-panel"></div></section>`;
+  const actions = ['owner','admin','dispatcher'].includes(state.me.role) ? `<div class="client-detail-actions">${canEditClient ? '<button class="btn btn-secondary" id="client-action-edit">Редактировать</button>' : ''}<button class="btn btn-secondary" id="client-action-site">+ Объект</button><button class="btn btn-secondary" id="client-action-user">+ Пользователь</button><button class="btn btn-primary" id="client-action-equipment">+ Оборудование</button></div>` : '';
+  content.innerHTML = `<section class="client-detail-screen"><button class="sr-back" id="client-detail-back">← Клиенты</button><header class="client-detail-hero"><div><span>КЛИЕНТ</span><h1>${esc(client.legal_name || client.name)}</h1><p>${client.is_active ? '● Активен' : '● Отключён'}</p></div>${actions}</header><div class="client-detail-meta"><div><span>ИНН</span><strong>${esc(client.tax_id || 'Не указан')}</strong></div><div><span>Контакт</span><strong>${esc(client.contact_name || 'Не указан')}</strong><small>${esc([client.contact_phone, client.contact_email].filter(Boolean).join(' · ') || 'Телефон и email не указаны')}</small></div></div><nav class="client-detail-tabs">${tabs.map(([key,label]) => `<button data-client-tab="${key}" class="${tab === key ? 'active' : ''}">${label}</button>`).join('')}</nav><div id="client-detail-panel"></div></section>`;
   content.querySelector('#client-detail-back').addEventListener('click', () => location.hash = 'clients');
   content.querySelectorAll('[data-client-tab]').forEach((button) => button.addEventListener('click', () => location.hash = `clients/${client.id}/${button.dataset.clientTab}`));
+  content.querySelector('#client-action-edit')?.addEventListener('click', () => openClientEditModal(client));
   content.querySelector('#client-action-site')?.addEventListener('click', () => openCreateSiteModal(client.id));
   content.querySelector('#client-action-user')?.addEventListener('click', () => openClientUserEditor(client, null, () => router(), false));
   content.querySelector('#client-action-equipment')?.addEventListener('click', () => openCreateEquipmentModal(client.id));
@@ -1414,6 +1416,38 @@ function openCreateClientModal() {
       }) });
       closeModal(); toast('Клиент создан'); router();
     } catch (e) { toast(e.message, 'error'); }
+  });
+}
+
+function openClientEditModal(client) {
+  const backdrop = openModal('Редактировать клиента', `
+    <form id="client-edit-form">
+      <div class="field"><label>Рабочее название</label><input id="f-client-name" value="${esc(client.name)}" required></div>
+      <div class="field"><label>Юридическое название</label><input id="f-client-legal" value="${esc(client.legal_name || '')}"></div>
+      <div class="field-row"><div class="field"><label>ИНН</label><input id="f-client-tax" inputmode="numeric" value="${esc(client.tax_id || '')}"></div><div class="field"><label>Контактное лицо</label><input id="f-client-contact" value="${esc(client.contact_name || '')}"></div></div>
+      <div class="field-row"><div class="field"><label>Телефон</label><input id="f-client-phone" type="tel" autocomplete="tel" value="${esc(client.contact_phone || '')}"></div><div class="field"><label>Email</label><input type="email" id="f-client-email" autocomplete="email" value="${esc(client.contact_email || '')}"></div></div>
+      <div class="field"><label><input id="f-client-active" type="checkbox" ${client.is_active ? 'checked' : ''}> Клиент активен</label></div>
+    </form>`,
+    '<button class="btn btn-secondary" id="modal-cancel">Отмена</button><button class="btn btn-primary" id="modal-save">Сохранить</button>');
+  backdrop.querySelector('#modal-cancel').addEventListener('click', closeModal);
+  backdrop.querySelector('#modal-save').addEventListener('click', async () => {
+    const name = backdrop.querySelector('#f-client-name').value.trim();
+    if (name.length < 2) return toast('Укажите название клиента', 'error');
+    const saveButton = backdrop.querySelector('#modal-save');
+    saveButton.disabled = true;
+    try {
+      await api(`/clients/${client.id}`, { method: 'PATCH', body: JSON.stringify({
+        name,
+        legal_name: backdrop.querySelector('#f-client-legal').value.trim() || null,
+        tax_id: backdrop.querySelector('#f-client-tax').value.trim() || null,
+        contact_name: backdrop.querySelector('#f-client-contact').value.trim() || null,
+        contact_phone: backdrop.querySelector('#f-client-phone').value.trim() || null,
+        contact_email: backdrop.querySelector('#f-client-email').value.trim() || null,
+        is_active: backdrop.querySelector('#f-client-active').checked,
+      }) });
+      await ensureCustomers(true);
+      closeModal(); toast('Данные клиента обновлены'); router();
+    } catch (error) { saveButton.disabled = false; toast(error.message || 'Не удалось обновить клиента', 'error'); }
   });
 }
 
