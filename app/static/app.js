@@ -2068,14 +2068,21 @@ async function openClientInviteModal(client, kind) {
   await ensureCustomers(true);
   const manager = kind === 'site-manager';
   const sites = state.sites.filter((site) => site.client_id === client.id && site.is_active);
-  const backdrop = openModal(manager ? 'Пригласить менеджера объекта' : 'Подключить руководителя', `<p class="onboarding-intro">${manager ? 'Менеджер получит доступ только к выбранному объекту.' : 'Руководитель увидит уже созданные объекты, оборудование, заявки и команду этого клиента.'}</p><div class="field"><label>Email (необязательно)</label><input id="invite-email" type="email"></div>${manager ? `<div class="field"><label>Объект</label><select id="invite-site"><option value="">Выберите объект</option>${sites.map((site) => `<option value="${site.id}">${esc(site.name)}</option>`).join('')}</select></div>` : ''}`, '<button class="btn btn-secondary" id="modal-cancel">Отмена</button><button class="btn btn-primary" id="modal-save">Создать безопасную ссылку</button>');
+  const backdrop = openModal(manager ? 'Пригласить менеджера объекта' : 'Подключить руководителя', `<p class="onboarding-intro">${manager ? 'Менеджер получит доступ только к выбранному объекту.' : 'Руководитель увидит уже созданные объекты, оборудование, заявки и команду этого клиента.'}</p><div class="field"><label>Email (необязательно)</label><input id="invite-email" type="email" autocomplete="email" placeholder="name@company.ru"></div>${manager ? `<div class="field"><label>Объект</label><select id="invite-site"><option value="">Выберите объект</option>${sites.map((site) => `<option value="${site.id}">${esc(site.name)}</option>`).join('')}</select></div>` : ''}`, '<button class="btn btn-secondary" id="modal-cancel">Отмена</button><button class="btn btn-primary" id="modal-save">Создать безопасную ссылку</button>');
+  const emailInput = backdrop.querySelector('#invite-email');
+  // A newly opened invite form must never retain a previously generated URL.
+  emailInput.value = '';
   backdrop.querySelector('#modal-cancel').addEventListener('click', closeModal);
   backdrop.querySelector('#modal-save').addEventListener('click', async () => {
     const site_id = manager ? backdrop.querySelector('#invite-site').value : null;
     if (manager && !site_id) return toast('Выберите объект', 'error');
+    const invited_email = emailInput.value.trim();
+    if (invited_email && !emailInput.checkValidity()) {
+      return toast('Укажите корректный email или оставьте поле пустым', 'error');
+    }
     try {
-      const invite = await api(`/client-portal/clients/${client.id}/invites/${kind}`, {method:'POST', body: JSON.stringify({site_id, invited_email: backdrop.querySelector('#invite-email').value.trim() || null})});
-      backdrop.querySelector('#modal-body').innerHTML = `<p>Скопируйте ссылку или покажите QR сотруднику. Она действует до ${fmtDate(invite.expires_at)} и принимается один раз.</p><div class="field"><input value="${esc(invite.join_url)}" readonly id="invite-url"></div><div id="invite-qr"></div><button class="btn btn-primary" id="copy-invite">Скопировать ссылку</button>`;
+      const invite = await api(`/client-portal/clients/${client.id}/invites/${kind}`, {method:'POST', body: JSON.stringify({site_id, invited_email: invited_email || null})});
+      backdrop.querySelector('#modal-body').innerHTML = `<p>Скопируйте ссылку или покажите QR сотруднику. Она действует до ${fmtDate(invite.expires_at)} и принимается один раз.</p><div class="field"><label>Ссылка-приглашение</label><input value="${esc(invite.join_url)}" readonly id="invite-url"></div><div id="invite-qr"></div><button class="btn btn-primary" id="copy-invite">Скопировать ссылку</button>`;
       apiBlob(invite.qr_url).then((blob) => { const url = URL.createObjectURL(blob); activeClientPhotoUrls.push(url); backdrop.querySelector('#invite-qr').innerHTML = `<img src="${url}" alt="QR для приглашения">`; }).catch(() => null);
       backdrop.querySelector('#copy-invite').addEventListener('click', async () => { await navigator.clipboard.writeText(invite.join_url); toast('Ссылка скопирована'); });
     } catch (error) { toast(error.message, 'error'); }

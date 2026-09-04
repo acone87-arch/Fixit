@@ -73,3 +73,13 @@ def test_existing_pwa_onboarding_and_deep_link_are_reused():
 def test_invite_qr_is_generated_from_opaque_capability_not_internal_ids():
     assert "secrets.compare_digest(invite.token_hash, _digest(token))" in INVITES
     assert "qrcode.make(_join_url(token)" in INVITES
+
+
+def test_invite_modal_keeps_optional_email_separate_from_generated_join_url():
+    modal = FRONTEND.split("async function openClientInviteModal", 1)[1]
+    assert 'emailInput.value = \'\'' in modal
+    assert 'const invited_email = emailInput.value.trim()' in modal
+    assert 'if (invited_email && !emailInput.checkValidity())' in modal
+    assert 'invited_email: invited_email || null' in modal
+    assert 'label>Ссылка-приглашение</label><input value="${esc(invite.join_url)}" readonly id="invite-url"' in modal
+    assert modal.index('!emailInput.checkValidity()') < modal.index('await api(`/client-portal/clients/${client.id}/invites/${kind}`')
