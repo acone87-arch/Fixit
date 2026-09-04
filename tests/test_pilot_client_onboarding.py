@@ -107,7 +107,12 @@ def test_invite_accept_uses_the_same_safe_role_conversion_for_issued_token():
 def test_join_screen_clears_stale_session_error_and_uses_fresh_pulse_bundle():
     join_screen = FRONTEND.split("async function showJoinScreen", 1)[1]
     assert "errorEl.classList.add('hidden')" in join_screen
-    assert "app.js?v=20260904-1" in Path("app/static/index.html").read_text(encoding="utf8")
+    assert "Если этот email уже зарегистрирован" in join_screen
+    assert "app.js?v=20260904-2" in Path("app/static/index.html").read_text(encoding="utf8")
+
+
+def test_public_join_401_preserves_the_actionable_authentication_error():
+    assert "!path.startsWith('/join/')" in FRONTEND
 
 
 def test_invite_qr_is_generated_from_opaque_capability_not_internal_ids():

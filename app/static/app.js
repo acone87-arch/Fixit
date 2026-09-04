@@ -46,7 +46,7 @@ async function registerPulseWorker() {
   if (!('serviceWorker' in navigator)) return null;
   const registrations = await navigator.serviceWorker.getRegistrations();
   await Promise.all(registrations.filter((item) => new URL(item.active?.scriptURL || item.waiting?.scriptURL || item.installing?.scriptURL || '', location.origin).pathname === '/static/offline/sw.js').map((item) => item.unregister()));
-  return navigator.serviceWorker.register('/sw.js?v=20260904-1', { scope: '/' });
+  return navigator.serviceWorker.register('/sw.js?v=20260904-2', { scope: '/' });
 }
 
 async function enablePush() {
@@ -159,7 +159,10 @@ async function api(path, options = {}) {
     headers['Content-Type'] = 'application/json';
   }
   const res = await fetch('/api' + path, { ...options, headers });
-  if (res.status === 401 && path !== '/auth/login') {
+  // Public invitation endpoints use 401 for actionable errors such as an
+  // incorrect password of an existing account. They must not log out the
+  // visitor or replace that message with a stale-session warning.
+  if (res.status === 401 && path !== '/auth/login' && !path.startsWith('/join/')) {
     logout();
     throw new Error('Сессия истекла, войдите заново');
   }
@@ -2054,7 +2057,7 @@ async function showJoinScreen(token) {
   errorEl.textContent = '';
   try {
     const invite = await api(`/join/${encodeURIComponent(token)}`);
-    host.innerHTML = `<div class="subtitle">${esc(invite.role === 'client_admin' ? 'Подключение руководителя клиента' : 'Подключение менеджера объекта')}<br><b>${esc(invite.client_name)}</b>${invite.site_name ? ` · ${esc(invite.site_name)}` : ''}</div><form id="join-form"><div class="field"><label>ФИО ${invite.requires_existing_login ? '(для нового пользователя)' : ''}</label><input id="join-name" autocomplete="name"></div><div class="field"><label>Email</label><input id="join-email" type="email" required autocomplete="username"></div><div class="field"><label>Пароль</label><input id="join-password" type="password" required minlength="8" autocomplete="current-password"></div><div class="field"><label>Телефон</label><input id="join-phone" autocomplete="tel"></div><button class="btn btn-primary" style="width:100%;justify-content:center">Продолжить</button></form>`;
+    host.innerHTML = `<div class="subtitle">${esc(invite.role === 'client_admin' ? 'Подключение руководителя клиента' : 'Подключение менеджера объекта')}<br><b>${esc(invite.client_name)}</b>${invite.site_name ? ` · ${esc(invite.site_name)}` : ''}</div><form id="join-form"><div class="field"><label>ФИО ${invite.requires_existing_login ? '(для нового пользователя)' : ''}</label><input id="join-name" autocomplete="name"></div><div class="field"><label>Email</label><input id="join-email" type="email" required autocomplete="username"></div><div class="field"><label>Пароль</label><input id="join-password" type="password" required minlength="8" autocomplete="current-password"><small>Если этот email уже зарегистрирован, укажите пароль существующей учётной записи.</small></div><div class="field"><label>Телефон</label><input id="join-phone" autocomplete="tel"></div><button class="btn btn-primary" style="width:100%;justify-content:center">Продолжить</button></form>`;
     host.querySelector('#join-form').addEventListener('submit', async (event) => {
       event.preventDefault();
       try {
