@@ -99,6 +99,17 @@ async def test_public_invite_inspection_handles_string_role_loaded_from_database
     assert result["role"] == "client_admin"
 
 
+def test_invite_accept_uses_the_same_safe_role_conversion_for_issued_token():
+    accept = INVITES.split("async def accept_invite", 1)[1]
+    assert "_role_value(invite.target_role)" in accept
+
+
+def test_join_screen_clears_stale_session_error_and_uses_fresh_pulse_bundle():
+    join_screen = FRONTEND.split("async function showJoinScreen", 1)[1]
+    assert "errorEl.classList.add('hidden')" in join_screen
+    assert "app.js?v=20260904-1" in Path("app/static/index.html").read_text(encoding="utf8")
+
+
 def test_invite_qr_is_generated_from_opaque_capability_not_internal_ids():
     assert "secrets.compare_digest(invite.token_hash, _digest(token))" in INVITES
     assert "qrcode.make(_join_url(token)" in INVITES

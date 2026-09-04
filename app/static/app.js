@@ -46,7 +46,7 @@ async function registerPulseWorker() {
   if (!('serviceWorker' in navigator)) return null;
   const registrations = await navigator.serviceWorker.getRegistrations();
   await Promise.all(registrations.filter((item) => new URL(item.active?.scriptURL || item.waiting?.scriptURL || item.installing?.scriptURL || '', location.origin).pathname === '/static/offline/sw.js').map((item) => item.unregister()));
-  return navigator.serviceWorker.register('/sw.js?v=20260902-1', { scope: '/' });
+  return navigator.serviceWorker.register('/sw.js?v=20260904-1', { scope: '/' });
 }
 
 async function enablePush() {
@@ -2048,7 +2048,10 @@ document.getElementById('logout-btn').addEventListener('click', logout);
 async function showJoinScreen(token) {
   const host = document.getElementById('join-form-host');
   const login = document.getElementById('login-form');
+  const errorEl = document.getElementById('login-error');
   login.classList.add('hidden');
+  errorEl.classList.add('hidden');
+  errorEl.textContent = '';
   try {
     const invite = await api(`/join/${encodeURIComponent(token)}`);
     host.innerHTML = `<div class="subtitle">${esc(invite.role === 'client_admin' ? 'Подключение руководителя клиента' : 'Подключение менеджера объекта')}<br><b>${esc(invite.client_name)}</b>${invite.site_name ? ` · ${esc(invite.site_name)}` : ''}</div><form id="join-form"><div class="field"><label>ФИО ${invite.requires_existing_login ? '(для нового пользователя)' : ''}</label><input id="join-name" autocomplete="name"></div><div class="field"><label>Email</label><input id="join-email" type="email" required autocomplete="username"></div><div class="field"><label>Пароль</label><input id="join-password" type="password" required minlength="8" autocomplete="current-password"></div><div class="field"><label>Телефон</label><input id="join-phone" autocomplete="tel"></div><button class="btn btn-primary" style="width:100%;justify-content:center">Продолжить</button></form>`;

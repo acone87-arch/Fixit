@@ -200,4 +200,4 @@ async def accept_invite(token: str, payload: InviteAcceptRequest, db: AsyncSessi
         await db.commit()
     except IntegrityError as exc:
         await db.rollback(); raise HTTPException(status.HTTP_409_CONFLICT, "Приглашение уже принято") from exc
-    return Token(access_token=create_access_token(user.id, invite.organization_id, invite.target_role.value), organization_id=invite.organization_id, role=invite.target_role)
+    return Token(access_token=create_access_token(user.id, invite.organization_id, _role_value(invite.target_role)), organization_id=invite.organization_id, role=invite.target_role)
