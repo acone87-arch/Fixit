@@ -51,5 +51,18 @@ async def ensure_repair_access(repair: Repair, user: CurrentUser, db: AsyncSessi
     if user.role in CLIENT_ROLES:
         await ensure_client_equipment(repair.equipment_id, user, db)
     elif user.role == UserRole.technician:
+        # A repair created from an assigned canonical request stays accessible to
+        # that technician after the request is completed.  This is deliberately
+        # narrower than fleet access: it authorizes only this repair, not other
+        # equipment or repairs of the same client.
+        if repair.technician_id == user.id:
+            return repair
+        if repair.service_request_id:
+            request = await db.scalar(select(ServiceRequest).where(
+                ServiceRequest.id == repair.service_request_id,
+                ServiceRequest.organization_id == user.organization_id,
+            ))
+            if request and request.assigned_technician_id == user.id:
+                return repair
         await ensure_equipment_access(repair.equipment_id, user, db)
     return repair

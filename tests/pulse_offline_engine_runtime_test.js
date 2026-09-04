@@ -31,18 +31,19 @@ function memoryIndexedDb() {
 }
 
 async function loadEngine(fetch) {
-  const context = { Blob, FormData, Promise, Map, Uint8Array, crypto: webcrypto, indexedDB: memoryIndexedDb(), navigator: { onLine: true }, fetch, self: null };
+  const errors = [];
+  const context = { Blob, FormData, Promise, Map, Uint8Array, crypto: webcrypto, indexedDB: memoryIndexedDb(), navigator: { onLine: true }, fetch, console: { error: (...args) => errors.push(args) }, self: null };
   context.self = context;
   vm.runInNewContext(fs.readFileSync('app/static/offline/engine.js', 'utf8'), context);
   await context.FixitOffline.configure({ token: 'test-token' });
-  return context.FixitOffline;
+  return { offline: context.FixitOffline, errors };
 }
 
 (async () => {
   let repairCalls = 0;
   let attachmentCalls = 0;
   let failAttachment = true;
-  const offline = await loadEngine(async (url, options = {}) => {
+  const loaded = await loadEngine(async (url, options = {}) => {
     if (url === '/api/v1/sync/repairs') {
       repairCalls += 1;
       const body = JSON.parse(options.body);
@@ -51,18 +52,26 @@ async function loadEngine(fetch) {
     attachmentCalls += 1;
     assert.equal(options.body.get('file') instanceof Blob, true, 'FormData never receives undefined');
     assert.equal(Boolean(options.body.get('client_id')), true, 'attachment retry has a stable client id');
-    return failAttachment ? { ok: false } : { ok: true };
+    return failAttachment ? { ok: false, status: 403, json: async () => ({ detail: 'Оборудование не назначено вам для обслуживания' }) } : { ok: true, status: 201 };
   });
+  const { offline } = loaded;
   const localUuid = await offline.enqueueRepair({ local_uuid: 'local-repair', service_request_id: 'request-1', equipment_id: 'equipment', description: 'work' }, [
     { file: new Blob(['one'], { type: 'image/jpeg' }), kind: 'after' },
     { file: new Blob(['two'], { type: 'image/jpeg' }), kind: 'after' },
   ]);
   assert.equal(localUuid, 'local-repair');
-  const partial = await offline.sync();
+  const uploadErrors = [];
+  const partial = await offline.sync({ onError: (error, attachment) => uploadErrors.push({ message: error.message, attachment }) });
   assert.equal(partial.status.repairPending, false, 'Repair is not requeued after server acknowledgement');
   assert.equal(partial.status.attachmentsPending, 2, 'failed photos remain durable');
   assert.equal((await offline.queueStatus({ serviceRequestId: 'request-1' })).attachmentsPending, 2, 'request reopens with its pending-photo state');
   assert.equal(repairCalls, 1);
+  assert.equal(uploadErrors.length, 2, 'each rejected attachment reaches the existing error hook');
+  assert.match(uploadErrors[0].message, /403: Оборудование не назначено вам для обслуживания/);
+  assert.equal(uploadErrors[0].attachment.repair_id, 'server-repair');
+  assert.equal(loaded.errors.length, 2, 'each rejected photo records backend diagnostics without deleting its queue item');
+  assert.match(loaded.errors[0][0], /attachment upload failed/);
+  assert.equal(loaded.errors[0][1].status, 403);
 
   failAttachment = false;
   const complete = await offline.sync();

@@ -5,12 +5,12 @@
 // даже если вкладка/приложение закрыты (см. п.3.2 ТЗ: "отложенная отправка").
 // ============================================================
 
-const CACHE_NAME = 'fixit-tech-shell-v10';
+const CACHE_NAME = 'fixit-tech-shell-v11';
 const SHELL_FILES = [
   '/tech/',
   '/tech/index.html',
   '/tech/styles.css',
-  '/tech/app.js?v=20260829-2',
+  '/tech/app.js?v=20260904-1',
   '/tech/db.js?v=20260828-8',
   '/tech/manifest.json',
   '/tech/icon-192.png',

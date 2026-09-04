@@ -6,7 +6,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.models.core import UserRole
-from app.services.access_policy import ACTIVE_ASSIGNED_STATES, ensure_equipment_access, ensure_service_request_access
+from app.services.access_policy import ACTIVE_ASSIGNED_STATES, ensure_equipment_access, ensure_repair_access, ensure_service_request_access
 
 
 def run(coro):
@@ -66,4 +66,41 @@ def test_fleet_access_does_not_change_service_request_workflow_ownership():
     )
     with pytest.raises(HTTPException) as denied:
         run(ensure_service_request_access(unassigned_request, technician(org, technician_id), Session([])))
+    assert denied.value.status_code == 404
+
+
+def test_own_completed_repair_allows_attachment_without_fleet_access():
+    org, technician_id = uuid.uuid4(), uuid.uuid4()
+    repair = SimpleNamespace(
+        organization_id=org, equipment_id=uuid.uuid4(), technician_id=technician_id,
+        service_request_id=uuid.uuid4(),
+    )
+    # Regression for the offline-photo failure: before the fix this fell through
+    # to ensure_equipment_access and returned 403 without TechnicianClientAccess.
+    assert run(ensure_repair_access(repair, technician(org, technician_id), Session([]))) is repair
+
+
+def test_assigned_completed_canonical_request_allows_its_repair_but_not_another_technician():
+    org, assigned_id, other_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    repair = SimpleNamespace(
+        organization_id=org, equipment_id=uuid.uuid4(), technician_id=uuid.uuid4(),
+        service_request_id=uuid.uuid4(),
+    )
+    completed_request = SimpleNamespace(organization_id=org, assigned_technician_id=assigned_id, status="completed")
+    assert run(ensure_repair_access(repair, technician(org, assigned_id), Session([completed_request]))) is repair
+
+    equipment = SimpleNamespace(id=repair.equipment_id, organization_id=org, site_id=uuid.uuid4())
+    with pytest.raises(HTTPException) as denied:
+        run(ensure_repair_access(repair, technician(org, other_id), Session([completed_request, equipment, None])))
+    assert denied.value.status_code == 403
+
+
+def test_repair_access_never_crosses_organization_even_for_own_repair():
+    org, technician_id = uuid.uuid4(), uuid.uuid4()
+    repair = SimpleNamespace(
+        organization_id=uuid.uuid4(), equipment_id=uuid.uuid4(), technician_id=technician_id,
+        service_request_id=uuid.uuid4(),
+    )
+    with pytest.raises(HTTPException) as denied:
+        run(ensure_repair_access(repair, technician(org, technician_id), Session([])))
     assert denied.value.status_code == 404

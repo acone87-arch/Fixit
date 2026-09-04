@@ -46,7 +46,7 @@ async function registerPulseWorker() {
   if (!('serviceWorker' in navigator)) return null;
   const registrations = await navigator.serviceWorker.getRegistrations();
   await Promise.all(registrations.filter((item) => new URL(item.active?.scriptURL || item.waiting?.scriptURL || item.installing?.scriptURL || '', location.origin).pathname === '/static/offline/sw.js').map((item) => item.unregister()));
-  return navigator.serviceWorker.register('/sw.js?v=20260904-3', { scope: '/' });
+  return navigator.serviceWorker.register('/sw.js?v=20260904-4', { scope: '/' });
 }
 
 async function enablePush() {

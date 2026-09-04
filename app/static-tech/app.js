@@ -114,10 +114,18 @@ async function uploadAttachment(repairId, attachment) {
   const form = new FormData();
   form.append('kind', attachment.kind);
   form.append('file', data, attachment.file_name || `${attachment.kind}.jpg`);
+  // Reuse the durable IndexedDB queue id so a retry after a timed-out response
+  // resolves to the original RepairAttachment instead of creating a duplicate.
+  form.append('client_id', attachment.id);
   const res = await fetch(`/api/repairs/${repairId}/attachments`, { method: 'POST', headers, body: form });
   if (!res.ok) {
-    let message = 'Не удалось загрузить вложение';
-    try { message = (await res.json()).detail || message; } catch (_) {}
+    let detail = '';
+    try {
+      const body = await res.json();
+      detail = typeof body?.detail === 'string' ? body.detail : JSON.stringify(body?.detail || '');
+    } catch (_) { /* A proxy or old server may return a non-JSON error page. */ }
+    const message = `${res.status || 'Ошибка'}: ${detail || 'Не удалось загрузить вложение'}`;
+    console.error('[FixitTech] attachment upload failed', { repairId, attachmentId: attachment.id, status: res.status, detail });
     throw new Error(message);
   }
   return res.json();

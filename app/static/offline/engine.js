@@ -55,7 +55,18 @@
     // the same durable queue item must not create a second RepairAttachment.
     form.append('client_id', attachment.id);
     const response = await fetch(`/api/repairs/${attachment.repair_id}/attachments`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: form });
-    if (!response.ok) throw new Error('Не удалось загрузить фото');
+    if (!response.ok) {
+      let detail = '';
+      try {
+        const body = await response.json();
+        detail = typeof body?.detail === 'string' ? body.detail : JSON.stringify(body?.detail || '');
+      } catch (_) { /* A proxy or old server may return a non-JSON error page. */ }
+      const message = `${response.status || 'Ошибка'}: ${detail || 'Не удалось загрузить фото'}`;
+      console.error('[FixitOffline] attachment upload failed', {
+        repairId: attachment.repair_id, attachmentId: attachment.id, status: response.status, detail,
+      });
+      throw new Error(message);
+    }
   }
 
   async function queueStatus(filter = null) {
@@ -130,7 +141,7 @@
   async function registerBackgroundSync() {
     if (typeof navigator === 'undefined' || !navigator.serviceWorker) return;
     try {
-      const registration = await navigator.serviceWorker.register('/sw.js?v=20260902-1', { scope: '/' });
+      const registration = await navigator.serviceWorker.register('/sw.js?v=20260904-4', { scope: '/' });
       if ('sync' in registration) await registration.sync.register('fixit-sync-repairs');
     } catch (_) { /* online retry remains available */ }
   }
