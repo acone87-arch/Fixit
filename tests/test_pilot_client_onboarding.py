@@ -4,11 +4,15 @@ Database integration is deployed through Alembic; these focused regression
 tests keep the API boundary and scope invariants visible without a local PG.
 """
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
 from app.models.customer import ClientInvite, ClientUserAccess
+from app.routers import invites
 
 
 INVITES = Path("app/routers/invites.py").read_text(encoding="utf8")
@@ -81,6 +85,18 @@ def test_join_deep_link_serves_pulse_spa_without_redirect():
     assert response.headers["content-type"].startswith("text/html")
     assert "Fixit Pulse" in response.text
     assert "app.js" in response.text
+
+
+@pytest.mark.asyncio
+async def test_public_invite_inspection_handles_string_role_loaded_from_database(monkeypatch):
+    invite = SimpleNamespace(client_id="client-id", site_id=None, target_role="client_admin", expires_at="future", invited_email=None)
+    db = AsyncMock()
+    db.get.return_value = SimpleNamespace(legal_name=None, name="Клиент")
+    monkeypatch.setattr(invites, "_usable_invite", AsyncMock(return_value=invite))
+
+    result = await invites.inspect_invite("test-token", db)
+
+    assert result["role"] == "client_admin"
 
 
 def test_invite_qr_is_generated_from_opaque_capability_not_internal_ids():

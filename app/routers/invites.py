@@ -36,9 +36,14 @@ def _join_url(token: str) -> str:
     return f"{settings.public_app_url.rstrip('/')}/join/{token}"
 
 
+def _role_value(role: UserRole | str) -> str:
+    """The existing PostgreSQL enum mapping returns a string on loaded invites."""
+    return role.value if hasattr(role, "value") else str(role)
+
+
 def _out(invite: ClientInvite, raw_token: str | None = None) -> ClientInviteOut:
     return ClientInviteOut(id=invite.id, client_id=invite.client_id, site_id=invite.site_id,
-        target_role=invite.target_role.value if hasattr(invite.target_role, "value") else str(invite.target_role),
+        target_role=_role_value(invite.target_role),
         invited_email=invite.invited_email, status=invite.status.value if hasattr(invite.status, "value") else str(invite.status),
         expires_at=invite.expires_at, accepted_at=invite.accepted_at, revoked_at=invite.revoked_at,
         join_url=_join_url(raw_token) if raw_token else None,
@@ -145,7 +150,7 @@ async def inspect_invite(token: str, db: AsyncSession = Depends(get_db)):
     client = await db.get(Client, invite.client_id)
     site = await db.get(Site, invite.site_id) if invite.site_id else None
     return {"client_name": client.legal_name or client.name, "site_name": site.name if site else None,
-        "client_id": invite.client_id, "role": invite.target_role.value, "expires_at": invite.expires_at, "requires_existing_login": bool(invite.invited_email)}
+        "client_id": invite.client_id, "role": _role_value(invite.target_role), "expires_at": invite.expires_at, "requires_existing_login": bool(invite.invited_email)}
 
 
 @public_router.post("/{token}/accept", response_model=Token)
