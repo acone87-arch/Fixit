@@ -5,6 +5,9 @@ tests keep the API boundary and scope invariants visible without a local PG.
 """
 from pathlib import Path
 
+from fastapi.testclient import TestClient
+
+from app.main import app
 from app.models.customer import ClientInvite, ClientUserAccess
 
 
@@ -68,6 +71,16 @@ def test_existing_pwa_onboarding_and_deep_link_are_reused():
     assert "showJoinScreen" in FRONTEND
     assert "clients/${invite.client_id}/users" in FRONTEND
     assert "'equipment'" in FRONTEND
+
+
+def test_join_deep_link_serves_pulse_spa_without_redirect():
+    with TestClient(app) as client:
+        response = client.get("/join/test-token", follow_redirects=False)
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert "Fixit Pulse" in response.text
+    assert "app.js" in response.text
 
 
 def test_invite_qr_is_generated_from_opaque_capability_not_internal_ids():

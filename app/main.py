@@ -85,6 +85,12 @@ async def guest_redirect():
     return RedirectResponse(url="/guest/")
 
 
+@app.get("/join/{token}", include_in_schema=False)
+async def join_page(token: str):
+    """Serve the Pulse SPA for a public invite deep link without changing it."""
+    return FileResponse("app/static/index.html", media_type="text/html")
+
+
 # Примечание: таблицы создаются через Alembic-миграции (см. README), а не через
 # Base.metadata.create_all в lifespan — это единственный источник правды о схеме
 # и для локальной разработки, и для прода.
