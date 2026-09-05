@@ -77,6 +77,29 @@ def test_existing_pwa_onboarding_and_deep_link_are_reused():
     assert "'equipment'" in FRONTEND
 
 
+def test_site_manager_join_copy_and_first_run_actions_are_site_specific():
+    join_screen = FRONTEND.split("async function showJoinScreen", 1)[1]
+    assert "Вы подключаетесь к объекту" in join_screen
+    assert "только на этом объекте" in join_screen
+    assert "получать QR-коды из паспорта оборудования" in join_screen
+    assert "fixit-client-join-welcome" in FRONTEND
+    assert "Добавить оборудование" in FRONTEND and "Открыть оборудование" in FRONTEND
+    assert "client-empty-add-equipment" in FRONTEND
+    assert "На объекте пока нет оборудования" in FRONTEND
+    assert "await openEquipmentPassport(equipment.id)" in FRONTEND
+
+
+def test_director_join_explains_existing_client_and_routes_to_existing_data_only():
+    join_screen = FRONTEND.split("async function showJoinScreen", 1)[1]
+    assert "Вы подключаетесь к уже существующей компании" in join_screen
+    assert "Новая организация не создаётся" in join_screen
+    assert "Посмотреть объекты" in FRONTEND
+    assert "clients/${welcome.client_id}/sites" in FRONTEND
+    accept = INVITES.split("async def accept_invite", 1)[1]
+    assert "Client(" not in accept
+    assert "access_site_id = None if invite.target_role" in accept
+
+
 def test_join_deep_link_serves_pulse_spa_without_redirect():
     with TestClient(app) as client:
         response = client.get("/join/test-token", follow_redirects=False)
@@ -108,7 +131,14 @@ def test_join_screen_clears_stale_session_error_and_uses_fresh_pulse_bundle():
     join_screen = FRONTEND.split("async function showJoinScreen", 1)[1]
     assert "errorEl.classList.add('hidden')" in join_screen
     assert "Если этот email уже зарегистрирован" in join_screen
-    assert "app.js?v=20260905-1" in Path("app/static/index.html").read_text(encoding="utf8")
+    assert "app.js?v=20260905-2" in Path("app/static/index.html").read_text(encoding="utf8")
+
+
+def test_login_stays_invite_only_but_explains_how_to_get_access():
+    login = Path("app/static/index.html").read_text(encoding="utf8")
+    assert "Доступ к Fixit выдаёт ваша сервисная команда" in login
+    assert "Получили приглашение или QR-код" in login
+    assert "Создать компанию" not in login and "Регистрация" not in login
 
 
 def test_public_join_401_preserves_the_actionable_authentication_error():

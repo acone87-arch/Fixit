@@ -92,6 +92,34 @@ function onboardingKey() {
   return `fixit-onboarding-dismissed:${state.me?.organization_id || 'org'}:${state.me?.id || 'user'}`;
 }
 
+function joinWelcomeKey() { return 'fixit-client-join-welcome'; }
+function dismissJoinWelcome() { sessionStorage.removeItem(joinWelcomeKey()); document.querySelector('.client-join-welcome')?.remove(); }
+
+async function maybeShowClientJoinWelcome() {
+  const raw = sessionStorage.getItem(joinWelcomeKey());
+  if (!raw || !state.me?.role?.startsWith('client_')) return;
+  let welcome;
+  try { welcome = JSON.parse(raw); } catch (_) { sessionStorage.removeItem(joinWelcomeKey()); return; }
+  if (welcome.role !== state.me.role || !welcome.client_id) { sessionStorage.removeItem(joinWelcomeKey()); return; }
+  const content = document.getElementById('content');
+  if (!content || content.querySelector('.client-join-welcome')) return;
+  if (welcome.role === 'client_site_user') {
+    const equipment = await api('/client-portal/equipment').catch(() => []);
+    const hasEquipment = equipment.length > 0;
+    content.insertAdjacentHTML('afterbegin', `<section class="client-join-welcome"><span>ОБЪЕКТ ПОДКЛЮЧЁН</span><h2>${esc(welcome.site_name || 'Ваш объект')}</h2><p>Вы управляете оборудованием и заявками только на этом объекте.</p><div><button class="btn btn-primary" id="join-welcome-primary">${hasEquipment ? 'Открыть оборудование' : 'Добавить оборудование'}</button><button class="btn btn-secondary" id="join-welcome-request">Создать заявку</button><button class="btn btn-ghost" id="join-welcome-qr">Как получить QR</button></div><button class="client-join-dismiss" id="join-welcome-dismiss">Понятно</button></section>`);
+    content.querySelector('#join-welcome-primary').addEventListener('click', async () => { dismissJoinWelcome(); if (hasEquipment) { location.hash = 'equipment'; return; } await ensureCustomers(true); openCreateEquipmentModal(); });
+    content.querySelector('#join-welcome-request').addEventListener('click', () => { dismissJoinWelcome(); openClientRequestForm(); });
+    content.querySelector('#join-welcome-qr').addEventListener('click', () => { dismissJoinWelcome(); toast('Откройте паспорт оборудования и выберите «Скачать QR».', 'info'); });
+  } else if (welcome.role === 'client_admin') {
+    content.insertAdjacentHTML('afterbegin', `<section class="client-join-welcome"><span>КОМПАНИЯ ПОДКЛЮЧЕНА</span><h2>${esc(welcome.client_name || 'Ваша компания')}</h2><p>Fixit уже содержит объекты, оборудование, заявки и историю обслуживания вашей компании. Новая организация не создаётся.</p><div><button class="btn btn-primary" id="join-welcome-primary">Посмотреть объекты</button><button class="btn btn-secondary" id="join-welcome-equipment">Открыть оборудование</button><button class="btn btn-ghost" id="join-welcome-requests">Посмотреть заявки</button></div><button class="client-join-dismiss" id="join-welcome-dismiss">Понятно</button></section>`);
+    content.querySelector('#join-welcome-primary').addEventListener('click', () => { dismissJoinWelcome(); location.hash = `clients/${welcome.client_id}/sites`; });
+    content.querySelector('#join-welcome-equipment').addEventListener('click', () => { dismissJoinWelcome(); location.hash = 'equipment'; });
+    content.querySelector('#join-welcome-requests').addEventListener('click', () => { dismissJoinWelcome(); location.hash = 'requests'; });
+  } else return;
+  content.querySelector('#join-welcome-dismiss').addEventListener('click', dismissJoinWelcome);
+  sessionStorage.removeItem(joinWelcomeKey());
+}
+
 async function currentPushState() {
   if (!pushSupported()) return { state: 'unsupported' };
   if (Notification.permission === 'denied') return { state: 'denied' };
@@ -644,10 +672,12 @@ async function renderClientRequest(content, id) {
 
 async function renderClientEquipment(content) {
   const equipment = await api('/client-portal/equipment');
-  const cards = equipment.length ? equipment.map((item) => `<button class="client-equipment-card" data-client-equipment="${item.id}">${item.primary_photo ? `<img data-client-equipment-photo="${item.id}" alt="Фото оборудования">` : '<div class="client-equipment-placeholder">FIXIT</div>'}<div><strong>${esc([item.manufacturer,item.model].filter(Boolean).join(' ') || item.name)}</strong><span>${esc(item.name)}</span><small>S/N ${esc(item.serial_number)} · ${esc(item.site_name)}</small>${clientBadge(item.status === 'needs_repair' ? 'in_progress' : 'completed')}</div></button>`).join('') : '<div class="client-empty">Нет оборудования на объекте</div>';
+  const empty = state.me.role === 'client_site_user' ? '<div class="client-empty"><strong>На объекте пока нет оборудования</strong><br><small>Добавьте первую единицу, чтобы вести паспорт, QR и заявки.</small><br><button class="btn btn-primary" id="client-empty-add-equipment">Добавить оборудование</button></div>' : '<div class="client-empty">Нет оборудования на объекте</div>';
+  const cards = equipment.length ? equipment.map((item) => `<button class="client-equipment-card" data-client-equipment="${item.id}">${item.primary_photo ? `<img data-client-equipment-photo="${item.id}" alt="Фото оборудования">` : '<div class="client-equipment-placeholder">FIXIT</div>'}<div><strong>${esc([item.manufacturer,item.model].filter(Boolean).join(' ') || item.name)}</strong><span>${esc(item.name)}</span><small>S/N ${esc(item.serial_number)} · ${esc(item.site_name)}</small>${clientBadge(item.status === 'needs_repair' ? 'in_progress' : 'completed')}</div></button>`).join('') : empty;
   const addButton = state.me.role === 'client_site_user' ? '<button class="btn btn-primary" id="client-add-equipment">+ Добавить оборудование</button>' : '';
   content.innerHTML = `<div class="page-header"><div><h1>Оборудование</h1><div class="page-subtitle">Моё оборудование и сервис</div></div>${addButton}</div><input class="client-search" placeholder="Поиск оборудования"><div class="client-equipment-list">${cards}</div>`;
   content.querySelector('#client-add-equipment')?.addEventListener('click', async () => { await ensureCustomers(true); openCreateEquipmentModal(); });
+  content.querySelector('#client-empty-add-equipment')?.addEventListener('click', async () => { await ensureCustomers(true); openCreateEquipmentModal(); });
   content.querySelectorAll('[data-client-equipment]').forEach((button) => button.addEventListener('click', () => openClientRequestForm(button.dataset.clientEquipment)));
   content.querySelectorAll('[data-client-equipment-photo]').forEach((image) => apiBlob(`/equipment/${image.dataset.clientEquipmentPhoto}/photo`).then((blob) => { const url = URL.createObjectURL(blob); activeClientPhotoUrls.push(url); image.src = url; }).catch(() => image.remove()));
 }
@@ -1654,7 +1684,7 @@ function openCreateEquipmentModal(preselectedClientId = null) {
         try { await uploadEquipmentPhoto(equipment.id, selectedPhoto); toast('Оборудование и фото добавлены'); }
         catch (_) { toast('Оборудование создано, фото не удалось загрузить. Повторите загрузку из паспорта.', 'error'); }
       } else toast('Оборудование добавлено');
-      router();
+      await openEquipmentPassport(equipment.id);
     } catch (e) {
       toast(e.message, 'error');
     }
@@ -2100,7 +2130,7 @@ async function boot() {
     document.getElementById('app').classList.remove('hidden');
     const joinRoute = sessionStorage.getItem('fixit-join-route');
     if (joinRoute) { sessionStorage.removeItem('fixit-join-route'); location.hash = joinRoute; }
-    router();
+    router().then(() => maybeShowClientJoinWelcome().catch(() => null));
     setTimeout(() => { maybeStartPwaOnboarding().catch(() => null); }, 0);
   } catch (e) {
     logout();
@@ -2135,12 +2165,14 @@ async function showJoinScreen(token) {
   errorEl.textContent = '';
   try {
     const invite = await api(`/join/${encodeURIComponent(token)}`);
-    host.innerHTML = `<div class="subtitle">${esc(invite.role === 'client_admin' ? 'Подключение руководителя клиента' : 'Подключение менеджера объекта')}<br><b>${esc(invite.client_name)}</b>${invite.site_name ? ` · ${esc(invite.site_name)}` : ''}</div><form id="join-form"><div class="field"><label>ФИО ${invite.requires_existing_login ? '(для нового пользователя)' : ''}</label><input id="join-name" autocomplete="name"></div><div class="field"><label>Email</label><input id="join-email" type="email" required autocomplete="username"></div><div class="field"><label>Пароль</label><input id="join-password" type="password" required minlength="8" autocomplete="current-password"><small>Если этот email уже зарегистрирован, укажите пароль существующей учётной записи.</small></div><div class="field"><label>Телефон</label><input id="join-phone" autocomplete="tel"></div><button class="btn btn-primary" style="width:100%;justify-content:center">Продолжить</button></form>`;
+    const welcome = invite.role === 'client_admin' ? `<div class="join-welcome"><strong>Вы подключаетесь к уже существующей компании «${esc(invite.client_name)}».</strong><p>Объекты, оборудование, заявки и история обслуживания уже могут быть в Fixit. Новая организация не создаётся — вы получите доступ к существующим данным компании.</p></div>` : `<div class="join-welcome"><strong>Вы подключаетесь к объекту «${esc(invite.site_name || 'Объект')}» компании «${esc(invite.client_name)}».</strong><p>Вы сможете управлять оборудованием и заявками только на этом объекте: добавлять оборудование, создавать обращения и получать QR-коды из паспорта оборудования.</p></div>`;
+    host.innerHTML = `${welcome}<form id="join-form"><div class="field"><label>ФИО ${invite.requires_existing_login ? '(для нового пользователя)' : ''}</label><input id="join-name" autocomplete="name"></div><div class="field"><label>Email</label><input id="join-email" type="email" required autocomplete="username"></div><div class="field"><label>Пароль</label><input id="join-password" type="password" required minlength="8" autocomplete="current-password"><small>Если этот email уже зарегистрирован, укажите пароль существующей учётной записи.</small></div><div class="field"><label>Телефон</label><input id="join-phone" autocomplete="tel"></div><button class="btn btn-primary" style="width:100%;justify-content:center">Продолжить</button></form>`;
     host.querySelector('#join-form').addEventListener('submit', async (event) => {
       event.preventDefault();
       try {
         const result = await api(`/join/${encodeURIComponent(token)}/accept`, {method:'POST', body: JSON.stringify({full_name: host.querySelector('#join-name').value.trim() || null, email: host.querySelector('#join-email').value.trim(), password: host.querySelector('#join-password').value, phone: host.querySelector('#join-phone').value.trim() || null})});
         state.token = result.access_token; localStorage.setItem('token', state.token);
+        sessionStorage.setItem(joinWelcomeKey(), JSON.stringify({ role: invite.role, client_id: invite.client_id, client_name: invite.client_name, site_name: invite.site_name }));
         sessionStorage.setItem('fixit-join-route', invite.role === 'client_admin' ? `clients/${invite.client_id}/users` : 'equipment');
         history.replaceState(null, '', '/'); await boot();
       } catch (error) { document.getElementById('login-error').textContent = error.message; document.getElementById('login-error').classList.remove('hidden'); }
