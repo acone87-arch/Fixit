@@ -80,13 +80,24 @@ jobs:
           docker compose -f docker-compose.prod.yml run --rm -T api alembic upgrade head </dev/null
           docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate api
 
+          healthy=false
           for attempt in \$(seq 1 20); do
             if curl -fsS http://127.0.0.1:8000/health; then
-              exit 0
+              healthy=true
+              break
             fi
             sleep 2
           done
+          if [ "\$healthy" != true ]; then
+            docker compose -f docker-compose.prod.yml logs --tail=100 api
+            exit 1
+          fi
 
-          docker compose -f docker-compose.prod.yml logs --tail=100 api
-          exit 1
+          # Keep the new hostname isolated from the existing IP-based vhost.
+          # TLS is configured in a separate step after public DNS resolves.
+          sudo -n install -d -m 755 /var/www/letsencrypt
+          sudo -n install -m 644 deploy/fixitpulse-http.conf /etc/nginx/conf.d/fixitpulse.conf
+          sudo -n nginx -t
+          sudo -n systemctl reload nginx
+          curl -fsS -H 'Host: fixitpulse.ru' http://127.0.0.1:80/health >/dev/null
           REMOTE
