@@ -27,6 +27,12 @@
   .msg { padding:11px; border-radius:8px; font-size:13px; margin-bottom:14px; }
   .msg-error { background:#C9432A1A; color:var(--warn); }
   .msg-success { background:#2F7A4D1A; color:var(--good); text-align:center; }
+  .btn-secondary { margin-top:10px; background:#E4E5DE; color:var(--ink); }
+  .upload-list { margin:12px 0; padding:0; list-style:none; border-top:1px solid var(--line); }
+  .upload-item { display:flex; gap:9px; align-items:flex-start; padding:9px 0; border-bottom:1px solid var(--line); font-size:12px; text-align:left; }
+  .upload-item > span { display:grid; place-items:center; width:20px; height:20px; flex:none; border-radius:50%; background:#E4E5DE; font-weight:700; }
+  .upload-item div { min-width:0; }.upload-item b,.upload-item small { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }.upload-item small { margin-top:2px; color:var(--ink-soft); }
+  .upload-success > span { color:#fff; background:var(--good); }.upload-failed > span { color:#fff; background:var(--warn); }.upload-warning { margin:12px 0; color:var(--warn); font-size:13px; font-weight:700; }
   .eq-name { font-weight:600; }
   .hidden { display:none !important; }
 </style>
@@ -51,11 +57,10 @@
       </form>
     </div>
 
-    <div id="success" class="hidden">
-      <div class="msg msg-success"><strong>✓ Заявка отправлена</strong><br><span id="success-number"></span><br>Сервисная служба получила сообщение. Можно закрыть страницу.</div>
-    </div>
+    <div id="success" class="hidden"></div>
   </div>
 
-<script src="/guest/app.js?v=20260829-1"></script>
+<script src="/guest/upload.js?v=20260905-1"></script>
+<script src="/guest/app.js?v=20260905-1"></script>
 </body>
 </html>

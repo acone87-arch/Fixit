@@ -51,7 +51,12 @@ class ServiceRequestAttachment(Base):
     """Evidence attached to a request before a Repair exists (for example, approval photos)."""
 
     __tablename__ = "service_request_attachments"
-    __table_args__ = (Index("ix_request_attachment_request_created", "service_request_id", "created_at"),)
+    __table_args__ = (
+        Index("ix_request_attachment_request_created", "service_request_id", "created_at"),
+        # A guest retry can happen after the server has stored the image but
+        # before the phone received its response.  Keep that retry idempotent.
+        UniqueConstraint("organization_id", "service_request_id", "client_id", name="uq_request_attachment_client"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id"), index=True)
@@ -62,4 +67,5 @@ class ServiceRequestAttachment(Base):
     original_name: Mapped[str | None] = mapped_column(String(255))
     media_type: Mapped[str | None] = mapped_column(String(100))
     byte_size: Mapped[int | None] = mapped_column(Integer)
+    client_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())

@@ -4,7 +4,7 @@
 const params = new URLSearchParams(location.search);
 const qrToken = params.get('token');
 
-const state = { severity: 'not_working', tags: new Set(), equipment: null };
+const state = { severity: 'not_working', tags: new Set(), equipment: null, submitting: false, uploadingPhotos: false, createdRequest: null, photos: [] };
 
 function createIdempotencyKey() {
   if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
@@ -37,10 +37,66 @@ function showError(text) {
   document.getElementById('card').innerHTML = `<div class="msg msg-error">${text}</div>`;
 }
 
-document.getElementById('photos').addEventListener('change', (event) => { document.getElementById('photo-count').textContent = `Выбрано: ${Math.min(event.target.files.length, 3)} из 3`; });
+document.getElementById('photos').addEventListener('change', (event) => {
+  document.getElementById('photo-count').textContent = `Выбрано: ${Math.min(event.target.files.length, 3)} из 3`;
+});
+
+function photoSummary() {
+  const total = state.photos.length;
+  const success = state.photos.filter((photo) => photo.status === 'success').length;
+  const uploading = state.photos.filter((photo) => photo.status === 'uploading').length;
+  const failed = state.photos.filter((photo) => photo.status === 'failed');
+  const retryable = failed.filter((photo) => photo.retryable);
+  return { total, success, uploading, failed, retryable };
+}
+
+function renderUploadState() {
+  const success = document.getElementById('success');
+  const number = `SR-${String(state.createdRequest.number || '').padStart(5, '0')}`;
+  const summary = photoSummary();
+  const rows = state.photos.map((photo) => {
+    const label = photo.status === 'success' ? 'Отправлено' : photo.status === 'uploading' ? 'Загружается…' : photo.status === 'failed' ? (photo.retryable ? `Не отправлено: ${photo.error}` : `Фото отклонено: ${photo.error}`) : 'Ожидает отправки';
+    const icon = photo.status === 'success' ? '✓' : photo.status === 'failed' ? '!' : '…';
+    return `<li class="upload-item upload-${photo.status}"><span>${icon}</span><div><b>${escapeHtml(photo.name)}</b><small>${label}</small></div></li>`;
+  }).join('');
+  const isDone = !summary.uploading && !summary.failed.length;
+  const heading = isDone ? '✓ Заявка отправлена' : 'Заявка создана';
+  const detail = summary.total
+    ? `Фотографии: ${summary.success} из ${summary.total} отправлено${summary.uploading ? ' · идёт загрузка' : ''}`
+    : 'Сервисная служба получила сообщение.';
+  const failure = summary.failed.length ? `<p class="upload-warning">Не удалось отправить ${summary.failed.length} из ${summary.total} фотографий.</p>` : '';
+  const retry = summary.retryable.length ? `<button type="button" class="btn" id="retry-photos" ${state.uploadingPhotos ? 'disabled' : ''}>ПОВТОРИТЬ ОТПРАВКУ</button>` : '';
+  success.innerHTML = `<div class="msg msg-success"><strong>${heading}</strong><br><span>${number}${state.createdRequest.active_request ? ' · Заявка уже в работе' : ''}</span><br><span>${detail}</span></div>${state.photos.length ? `<ul class="upload-list">${rows}</ul>` : ''}${failure}${retry}<button type="button" class="btn btn-secondary" id="upload-done">Готово</button>`;
+  success.classList.remove('hidden');
+  success.querySelector('#retry-photos')?.addEventListener('click', retryFailedPhotos);
+  success.querySelector('#upload-done').addEventListener('click', () => { success.querySelector('#upload-done').textContent = 'Можно закрыть страницу'; });
+}
+
+function escapeHtml(value) {
+  const node = document.createElement('span');
+  node.textContent = value || 'Фотография';
+  return node.innerHTML;
+}
+
+async function sendPhotos() {
+  if (state.uploadingPhotos) return;
+  state.uploadingPhotos = true;
+  try {
+    await window.FixitGuestPhotoUpload.uploadPending(state.photos, { qrToken, requestId: state.createdRequest.service_request_id }, renderUploadState);
+  } finally {
+    state.uploadingPhotos = false;
+    renderUploadState();
+  }
+}
+
+async function retryFailedPhotos() {
+  await sendPhotos();
+}
 
 document.getElementById('form').addEventListener('submit', async (e) => {
   e.preventDefault();
+  if (state.submitting || state.createdRequest) return;
+  state.submitting = true;
   const errorEl = document.getElementById('error');
   errorEl.classList.add('hidden');
   const btn = document.getElementById('submit-btn');
@@ -76,19 +132,20 @@ document.getElementById('form').addEventListener('submit', async (e) => {
     }
     const body = await res.json();
     if (!body.service_request_id) throw new Error('Не удалось определить созданную заявку');
-    const files = [...document.getElementById('photos').files].slice(0, 3);
-    const uploads = await Promise.allSettled(files.map((file) => { const data = new FormData(); data.append('file', file); return fetch(`/api/public/equipment/${qrToken}/requests/${body.service_request_id}/attachments`, { method: 'POST', body: data }); }));
-    if (uploads.some((upload) => upload.status === 'rejected' || !upload.value.ok)) console.warn('Не все фотографии загружены');
-    // Следующее обращение по этому QR — это уже новая заявка, а не повтор
-    // предыдущей отправки. При ошибке ключ намеренно остаётся для ретрая.
+    state.createdRequest = body;
+    state.photos = [...document.getElementById('photos').files].slice(0, 3).map((file) => ({ id: createIdempotencyKey(), file, name: file.name || 'Фотография', status: 'pending', error: null, retryable: false }));
+    // From this point retries operate only on attachment client_ids.  A
+    // ServiceRequest must never be submitted again from this page session.
     localStorage.removeItem(idKey);
     document.getElementById('content').classList.add('hidden');
-    document.getElementById('success-number').textContent = `SR-${String(body.number || '').padStart(5, '0')} · ${body.active_request ? 'Заявка уже в работе' : 'Заявка принята'}`;
-    document.getElementById('success').classList.remove('hidden');
+    renderUploadState();
+    await sendPhotos();
   } catch (err) {
     errorEl.textContent = err.message;
     errorEl.classList.remove('hidden');
     btn.disabled = false;
+  } finally {
+    state.submitting = false;
   }
 });
 

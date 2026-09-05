@@ -2,7 +2,7 @@ import uuid
 from collections import defaultdict, deque
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -109,11 +109,23 @@ async def create_guest_ticket(qr_token: uuid.UUID, payload: GuestTicketCreate, r
 
 
 @public_router.post("/{qr_token}/requests/{request_id}/attachments", status_code=status.HTTP_201_CREATED)
-async def upload_guest_problem_photo(qr_token: uuid.UUID, request_id: uuid.UUID, request: Request, file: UploadFile = File(...), db: AsyncSession = Depends(get_db)):
+async def upload_guest_problem_photo(qr_token: uuid.UUID, request_id: uuid.UUID, request: Request,
+                                    file: UploadFile = File(...), client_id: str = Form(...),
+                                    db: AsyncSession = Depends(get_db)):
     _rate_limit(request, qr_token)
     service_request = await db.scalar(select(ServiceRequest).join(Equipment, Equipment.id == ServiceRequest.equipment_id).where(
-        ServiceRequest.id == request_id, Equipment.public_qr_token == qr_token))
+        ServiceRequest.id == request_id, Equipment.public_qr_token == qr_token).with_for_update())
     if not service_request: raise HTTPException(status.HTTP_404_NOT_FOUND, "Заявка не найдена")
+    client_id = client_id.strip()
+    if not client_id or len(client_id) > 120:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Некорректный идентификатор фотографии")
+    existing = await db.scalar(select(ServiceRequestAttachment).where(
+        ServiceRequestAttachment.organization_id == service_request.organization_id,
+        ServiceRequestAttachment.service_request_id == request_id,
+        ServiceRequestAttachment.client_id == client_id,
+    ))
+    if existing:
+        return {"id": str(existing.id), "duplicate": True}
     count = await db.scalar(select(func.count(ServiceRequestAttachment.id)).where(ServiceRequestAttachment.service_request_id == request_id))
     if count >= 3: raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Можно добавить не более трёх фотографий")
     content = await file.read(MAX_GUEST_PHOTO_BYTES + 1)
@@ -123,7 +135,7 @@ async def upload_guest_problem_photo(qr_token: uuid.UUID, request_id: uuid.UUID,
     attachment_id = uuid.uuid4()
     relative = Path(str(service_request.organization_id)) / "service-requests" / str(request_id) / f"{attachment_id}{suffix}"
     destination = UPLOAD_ROOT / relative; await run_in_threadpool(destination.parent.mkdir, parents=True, exist_ok=True); await run_in_threadpool(destination.write_bytes, content)
-    db.add(ServiceRequestAttachment(id=attachment_id, organization_id=service_request.organization_id, service_request_id=request_id, uploaded_by_user_id=None, kind="problem", file_url=str(relative).replace('\\', '/'), original_name=(file.filename or "Фото проблемы")[:255], media_type=media_type[:100], byte_size=len(content)))
+    db.add(ServiceRequestAttachment(id=attachment_id, organization_id=service_request.organization_id, service_request_id=request_id, uploaded_by_user_id=None, kind="problem", file_url=str(relative).replace('\\', '/'), original_name=(file.filename or "Фото проблемы")[:255], media_type=media_type[:100], byte_size=len(content), client_id=client_id))
     await db.commit()
     return {"id": str(attachment_id)}
 
