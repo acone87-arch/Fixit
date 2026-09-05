@@ -102,24 +102,26 @@ jobs:
           upsert_env VAPID_PRIVATE_KEY "$VAPID_PRIVATE_KEY"
           upsert_env VAPID_SUBJECT "$VAPID_SUBJECT"
           # Keep the current QR/invitation origin intact during the dual-origin
-          # phase.  Its value is read only to derive explicit CORS/Host lists.
+          # phase.  If the legacy installation relies on the application
+          # default, derive the public legacy host from active nginx instead.
           current_public_app_url="\$(sed -n 's/^PUBLIC_APP_URL=//p' .env | tail -n 1)"
-          if [ -z "$current_public_app_url" ]; then
-            echo 'PUBLIC_APP_URL is missing from /opt/fixit/.env' >&2
+          legacy_host="\$(sudo -n nginx -T 2>/dev/null | awk '\$1 == "server_name" && \$2 != "fixitpulse.ru" && \$2 != "www.fixitpulse.ru" { gsub(";", "", \$2); print \$2; exit }')"
+          if [ -z "\$legacy_host" ]; then
+            echo 'Could not determine legacy host from active nginx configuration' >&2
             exit 1
           fi
-          legacy_host="\${current_public_app_url#*://}"
-          legacy_host="\${legacy_host%%/*}"
-          legacy_host="\${legacy_host%%:*}"
-          if [ -z "$legacy_host" ]; then
-            echo 'PUBLIC_APP_URL has no usable hostname' >&2
-            exit 1
+          if [ -n "\$current_public_app_url" ]; then
+            legacy_origin="\$current_public_app_url"
+            echo "PUBLIC_APP_URL: \$current_public_app_url"
+          else
+            legacy_origin="https://\$legacy_host"
+            echo 'PUBLIC_APP_URL: <unset; application default remains http://localhost:8000>'
           fi
-          upsert_env ALLOWED_ORIGINS "$current_public_app_url,https://fixitpulse.ru"
-          upsert_env ALLOWED_HOSTS "$legacy_host,fixitpulse.ru,localhost,127.0.0.1"
-          echo "Dual-origin legacy PUBLIC_APP_URL: $current_public_app_url"
-          echo "ALLOWED_ORIGINS: $current_public_app_url,https://fixitpulse.ru"
-          echo "ALLOWED_HOSTS: $legacy_host,fixitpulse.ru,localhost,127.0.0.1"
+          upsert_env ALLOWED_ORIGINS "\$legacy_origin,https://fixitpulse.ru"
+          upsert_env ALLOWED_HOSTS "\$legacy_host,fixitpulse.ru,localhost,127.0.0.1"
+          echo "Dual-origin legacy origin: \$legacy_origin"
+          echo "ALLOWED_ORIGINS: \$legacy_origin,https://fixitpulse.ru"
+          echo "ALLOWED_HOSTS: \$legacy_host,fixitpulse.ru,localhost,127.0.0.1"
           git pull --ff-only origin main
           docker compose -f docker-compose.prod.yml build api
           docker compose -f docker-compose.prod.yml run --rm -T api alembic upgrade head </dev/null
