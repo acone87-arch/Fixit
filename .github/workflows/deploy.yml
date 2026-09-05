@@ -24,6 +24,11 @@ jobs:
       - name: Install test dependencies
         run: pip install -r requirements.txt -r requirements-dev.txt
       - name: Run Python regression tests
+        env:
+          PYTHONPATH: .
+          DATABASE_URL: postgresql+asyncpg://fsm:fsm@localhost:5432/fsm
+          SECRET_KEY: ci-test-secret
+          PUBLIC_APP_URL: http://localhost:8000
         run: pytest -q
       - name: Run offline runtime tests
         run: |
