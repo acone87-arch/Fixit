@@ -13,14 +13,24 @@ def test_guest_attachment_retry_has_a_durable_per_photo_client_id():
     assert "uq_request_attachment_client" in constraints
 
 
-def test_public_photo_endpoint_returns_existing_upload_before_the_attachment_limit():
+def test_public_photo_endpoint_keeps_new_idempotency_and_accepts_legacy_uploads():
     source = (ROOT / "app" / "routers" / "tickets.py").read_text(encoding="utf8")
     handler = source.split("async def upload_guest_problem_photo", 1)[1].split("@admin_router.get", 1)[0]
-    assert "client_id: str = Form(...)" in handler
+    assert "client_id: str | None = Form(None)" in handler
+    assert "if client_id is not None:" in handler
     assert "ServiceRequestAttachment.client_id == client_id" in handler
     assert handler.index("if existing:") < handler.index("if count >= 3")
     assert "return {\"id\": str(existing.id), \"duplicate\": True}" in handler
     assert "with_for_update()" in handler
+    assert "client_id=client_id" in handler
+    assert "normalize_image(content)" in handler
+    assert "MAX_GUEST_PHOTO_BYTES" in handler
+
+
+def test_postgresql_unique_constraint_keeps_multiple_legacy_null_client_ids_compatible():
+    migration = (ROOT / "alembic" / "versions" / "20260905_0013_guest_attachment_client_id.py").read_text(encoding="utf8")
+    assert 'nullable=True' in migration
+    assert "NULLS NOT DISTINCT" not in migration
 
 
 def test_guest_upload_regression_runtime_covers_success_partial_retry_validation_and_double_submit():
