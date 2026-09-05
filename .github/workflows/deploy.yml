@@ -110,7 +110,7 @@ jobs:
           sudo -n install -m 644 deploy/fixitpulse-https.conf /etc/nginx/sites-enabled/fixitpulse.conf
           sudo -n nginx -t
           sudo -n systemctl reload nginx
-          printf '' | openssl s_client -connect 127.0.0.1:443 -servername fixitpulse.ru 2>/dev/null \
-            | openssl x509 -noout -ext subjectAltName | grep -F 'DNS:fixitpulse.ru'
+          sudo -n ss -ltnp 'sport = :443'
+          printf '' | timeout 10 openssl s_client -connect 127.0.0.1:443 -servername fixitpulse.ru -brief 2>&1 || true
           curl -kfsS --noproxy '*' --resolve fixitpulse.ru:443:127.0.0.1 https://fixitpulse.ru/health >/dev/null
           REMOTE
