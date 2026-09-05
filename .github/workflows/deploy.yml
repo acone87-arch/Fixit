@@ -105,7 +105,7 @@ jobs:
           # phase.  If the legacy installation relies on the application
           # default, derive the public legacy host from active nginx instead.
           current_public_app_url="\$(sed -n 's/^PUBLIC_APP_URL=//p' .env | tail -n 1)"
-          legacy_host="\$(sudo -n nginx -T 2>/dev/null | awk '\$1 == "server_name" && \$2 != "fixitpulse.ru" && \$2 != "www.fixitpulse.ru" { gsub(";", "", \$2); print \$2; exit }')"
+          legacy_host="\$(sudo -n nginx -T 2>/dev/null | awk '\$1 == "server_name" && \$2 != "fixitpulse.ru" && \$2 != "www.fixitpulse.ru" && !found { gsub(";", "", \$2); value = \$2; found = 1 } END { print value }')"
           if [ -z "\$legacy_host" ]; then
             echo 'Could not determine legacy host from active nginx configuration' >&2
             exit 1
