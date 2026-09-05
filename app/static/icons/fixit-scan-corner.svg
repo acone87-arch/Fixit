@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title">
+  <title id="title">Fixit Scan Corner</title>
+  <g fill="none" stroke="#4A90FF" stroke-width="16" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M88 40H56a16 16 0 0 0-16 16v32M168 40h32a16 16 0 0 1 16 16v32M40 168v32a16 16 0 0 0 16 16h32M216 168v32a16 16 0 0 1-16 16h-32"/>
+  </g>
+  <path fill="#7EB6FF" d="M190 31h13v13h-13zm18 0h17v17h-17zm0 22h13v13h-13z"/>
+</svg>

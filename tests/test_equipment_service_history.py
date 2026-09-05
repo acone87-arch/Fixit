@@ -83,8 +83,8 @@ def test_history_card_keeps_technician_out_of_header_and_omits_identical_problem
 
 def test_passport_asset_versions_change_together_for_browser_cache_busting():
     index = (ROOT / "static" / "index.html").read_text(encoding="utf8")
-    assert "/static/styles.css?v=20260904-6" in index
-    assert "/static/app.js?v=20260904-6" in index
+    assert "/static/styles.css?v=20260905-1" in index
+    assert "/static/app.js?v=20260905-1" in index
 
 
 def test_protected_media_urls_do_not_receive_a_second_api_prefix():

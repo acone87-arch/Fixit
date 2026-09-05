@@ -46,7 +46,7 @@ async function registerPulseWorker() {
   if (!('serviceWorker' in navigator)) return null;
   const registrations = await navigator.serviceWorker.getRegistrations();
   await Promise.all(registrations.filter((item) => new URL(item.active?.scriptURL || item.waiting?.scriptURL || item.installing?.scriptURL || '', location.origin).pathname === '/static/offline/sw.js').map((item) => item.unregister()));
-  return navigator.serviceWorker.register('/sw.js?v=20260904-4', { scope: '/' });
+  return navigator.serviceWorker.register('/sw.js?v=20260905-1', { scope: '/' });
 }
 
 async function enablePush() {
@@ -495,7 +495,7 @@ function openQrQuickAction() {
     ? `<div class="qr-security-note">Камера блокируется браузером на HTTP. Откройте <a href="${esc(httpsUrl)}">защищённую версию HTTPS</a>.</div>`
     : '';
   const backdrop = openModal('Сканировать QR', `
-    <div class="admin-qr-scanner"><video id="admin-qr-video" autoplay muted playsinline></video><div class="admin-qr-frame"></div></div>
+    <div class="admin-qr-scanner"><video id="admin-qr-video" autoplay muted playsinline></video><div class="admin-qr-frame"><img src="/static/icons/fixit-scan-corner.svg" alt="" aria-hidden="true"></div></div>
     <p class="text-soft" id="admin-qr-hint" style="line-height:1.55">Наведите камеру на QR-код оборудования.</p>${secureWarning}
     <div class="field" style="margin-top:14px"><label>Или вставьте ссылку / код вручную</label><input id="admin-qr-manual" placeholder="https://…/e/…"></div>`,
     '<button class="btn btn-secondary" id="modal-cancel">Закрыть</button><button class="btn btn-secondary" id="admin-qr-start">Включить камеру</button><button class="btn btn-primary" id="admin-qr-open">Открыть</button>');

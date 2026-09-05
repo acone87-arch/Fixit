@@ -3,15 +3,17 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="theme-color" content="#081511">
+<meta name="theme-color" content="#0B1220">
+<meta name="application-name" content="Fixit Pulse">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Fixit">
 <title>Fixit Pulse — сервисная платформа</title>
 <link rel="manifest" href="/static/manifest.webmanifest">
-<link rel="apple-touch-icon" href="/static/icons/fixit-192.svg">
-<link rel="stylesheet" href="/static/styles.css?v=20260904-6">
+<link rel="icon" href="/static/icons/fixit-192.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/static/icons/fixit-180.png">
+<link rel="stylesheet" href="/static/styles.css?v=20260905-1">
 </head>
 <body>
 
@@ -20,7 +22,7 @@
 <!-- Экран входа -->
 <div id="login-screen" class="login-screen hidden">
   <div class="login-card">
-    <div class="login-brand"><span class="pulse-logo-dot"></span><strong>FIXIT</strong><em>PULSE</em></div>
+    <div class="login-brand"><img class="brand-mark" src="/static/icons/fixit-hidden-x.svg" alt=""><strong>FI<span>X</span>IT</strong><em>PULSE</em></div>
     <div class="display">Сервис под контролем</div>
     <div class="subtitle">Операционная платформа для сервисного бизнеса</div>
     <div id="login-error" class="login-error hidden"></div>
@@ -42,7 +44,7 @@
 <!-- Основное приложение -->
 <div id="app" class="hidden">
   <div class="sidebar">
-    <div class="brand"><span class="pulse-logo-dot"></span><strong>FIXIT</strong><em>PULSE</em></div>
+    <div class="brand"><img class="brand-mark" src="/static/icons/fixit-hidden-x.svg" alt=""><strong>FI<span>X</span>IT</strong><em>PULSE</em></div>
     <div class="brand-caption">SERVICE OPERATIONS</div>
     <nav id="nav"></nav>
     <div class="sidebar-footer">
@@ -56,7 +58,7 @@
   <div class="main">
     <header class="app-topbar"><span>Сервисная платформа</span><div><i></i> Live operations</div></header>
     <header class="mobile-topbar">
-      <div class="brand"><span class="pulse-logo-dot"></span><strong>FIXIT</strong><em>PULSE</em></div>
+      <div class="brand"><img class="brand-mark" src="/static/icons/fixit-hidden-x.svg" alt=""><strong>FI<span>X</span>IT</strong><em>PULSE</em></div>
       <button class="mobile-profile" id="mobile-profile-btn" aria-label="Меню пользователя"><span></span></button>
     </header>
     <div id="content"></div>
@@ -66,6 +68,6 @@
 </div>
 
 <script src="/static/offline/engine.js?v=20260904-2"></script>
-<script src="/static/app.js?v=20260904-6"></script>
+<script src="/static/app.js?v=20260905-1"></script>
 </body>
 </html>

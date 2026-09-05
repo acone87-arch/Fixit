@@ -141,7 +141,7 @@
   async function registerBackgroundSync() {
     if (typeof navigator === 'undefined' || !navigator.serviceWorker) return;
     try {
-      const registration = await navigator.serviceWorker.register('/sw.js?v=20260904-4', { scope: '/' });
+      const registration = await navigator.serviceWorker.register('/sw.js?v=20260905-1', { scope: '/' });
       if ('sync' in registration) await registration.sync.register('fixit-sync-repairs');
     } catch (_) { /* online retry remains available */ }
   }

@@ -1,4 +1,5 @@
 import uuid
+import json
 from pathlib import Path
 
 from app.models.push import PushSubscription
@@ -43,7 +44,7 @@ def test_pwa_uses_one_root_scoped_worker_without_losing_offline_sync():
     engine = (ROOT / "app/static/offline/engine.js").read_text(encoding="utf-8")
     worker = (ROOT / "app/static/sw.js").read_text(encoding="utf-8")
     app = (ROOT / "app/static/app.js").read_text(encoding="utf-8")
-    assert "register('/sw.js?v=20260904-4', { scope: '/' })" in engine
+    assert "register('/sw.js?v=20260905-1', { scope: '/' })" in engine
     assert "fixit-sync-repairs" in worker and "FixitOffline.sync" in worker
     assert "fixit-tech-db" in engine and "pendingRepairs" in engine and "pendingAttachments" in engine
     assert "beforeinstallprompt" in app and "Notification.requestPermission()" in app
@@ -59,6 +60,34 @@ def test_first_device_session_has_nonblocking_pwa_push_onboarding_and_profile_fa
     assert "onboarding-continue" in source and "fixit-onboarding-dismissed:" in source
     assert "setTimeout(() => { maybeStartPwaOnboarding()" in source
     assert "pwaControls()" in source
+
+
+def test_pulse_brand_manifest_uses_hidden_x_raster_icons_and_approved_palette():
+    manifest = json.loads((ROOT / "app/static/manifest.webmanifest").read_text(encoding="utf-8"))
+    assert manifest["name"] == "Fixit Pulse"
+    assert manifest["short_name"] == "Fixit"
+    assert manifest["start_url"] == "/" and manifest["scope"] == "/"
+    assert manifest["display"] == "standalone"
+    assert manifest["theme_color"] == "#0B1220"
+    assert manifest["background_color"] == "#0B1220"
+    expected = {
+        ("/static/icons/fixit-192.png", "192x192", "any"),
+        ("/static/icons/fixit-512.png", "512x512", "any"),
+        ("/static/icons/fixit-512-maskable.png", "512x512", "maskable"),
+    }
+    assert {(icon["src"], icon["sizes"], icon["purpose"]) for icon in manifest["icons"]} == expected
+    for path, _, _ in expected:
+        assert (ROOT / "app" / path.lstrip("/")).is_file()
+
+
+def test_pulse_html_uses_fixit_brand_assets_and_scan_corner_only_for_scanning():
+    index = (ROOT / "app/static/index.html").read_text(encoding="utf-8")
+    app = (ROOT / "app/static/app.js").read_text(encoding="utf-8")
+    hidden_x = (ROOT / "app/static/icons/fixit-hidden-x.svg").read_text(encoding="utf-8")
+    assert 'application-name" content="Fixit Pulse"' in index
+    assert "fixit-hidden-x.svg" in index and "fixit-180.png" in index
+    assert "#0B1220" in hidden_x and "#4A90FF" in hidden_x and 'stroke-linecap="round"' in hidden_x
+    assert "fixit-scan-corner.svg" in app
 
 
 def test_onboarding_skips_completed_device_steps_using_browser_and_backend_state():

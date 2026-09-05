@@ -1,7 +1,7 @@
 // Root-scoped Fixit Pulse worker: preserves the durable offline repair engine.
 importScripts('/static/offline/engine.js?v=20260904-2');
-const SHELL_CACHE = 'fixit-pulse-shell-v5';
-const SHELL = ['/', '/static/styles.css?v=20260904-6', '/static/app.js?v=20260904-6', '/static/offline/engine.js?v=20260904-2'];
+const SHELL_CACHE = 'fixit-pulse-shell-v6';
+const SHELL = ['/', '/static/styles.css?v=20260905-1', '/static/app.js?v=20260905-1', '/static/offline/engine.js?v=20260904-2', '/static/icons/fixit-192.png', '/static/icons/fixit-512.png', '/static/icons/fixit-512-maskable.png'];
 self.addEventListener('install', (event) => event.waitUntil(caches.open(SHELL_CACHE).then((cache) => cache.addAll(SHELL)).then(() => self.skipWaiting())));
 self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));
 self.addEventListener('sync', (event) => {
@@ -20,7 +20,7 @@ self.addEventListener('push', (event) => {
   const title = String(data.title || 'Fixit Pulse').slice(0, 120);
   const body = String(data.body || 'Есть обновление по заявке').slice(0, 240);
   const url = typeof data.url === 'string' && data.url.startsWith('/#requests/') ? data.url : '/#requests';
-  event.waitUntil(self.registration.showNotification(title, { body, icon: '/static/icons/fixit-192.svg', badge: '/static/icons/fixit-192.svg', data: { url }, tag: `fixit:${url}`, renotify: true }));
+  event.waitUntil(self.registration.showNotification(title, { body, icon: '/static/icons/fixit-192.png', badge: '/static/icons/fixit-192.png', data: { url }, tag: `fixit:${url}`, renotify: true }));
 });
 self.addEventListener('notificationclick', (event) => event.waitUntil((async () => {
   event.notification.close(); const target = new URL(event.notification.data?.url || '/#requests', self.location.origin).href;
