@@ -2,18 +2,24 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from app.config import settings
 from app.routers import auth, client_portal, customers, equipment, invites, organizations, push, repairs, service_requests, sync, tasks, tickets, users, warehouses
 
-app = FastAPI(title="Service & Warehouse Management API", version="0.1.0")
+def configure_http_security(application: FastAPI) -> None:
+    """Apply explicit, environment-controlled browser and Host allowlists."""
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    application.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.trusted_hosts)
 
-# В проде сузить до конкретных origin (админ-панель, домен мобильного PWA).
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+
+app = FastAPI(title="Service & Warehouse Management API", version="0.1.0")
+configure_http_security(app)
 
 app.include_router(auth.router)
 app.include_router(organizations.router)

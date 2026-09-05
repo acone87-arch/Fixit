@@ -13,7 +13,26 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install test dependencies
+        run: pip install -r requirements.txt -r requirements-dev.txt
+      - name: Run Python regression tests
+        run: pytest -q
+      - name: Run offline runtime tests
+        run: |
+          node tests/pulse_offline_engine_runtime_test.js
+          node tests/technician_workflow_runtime_test.js
+          node tests/offline_attachment_sync_runtime_test.js
+
   deploy:
+    needs: test
     runs-on: ubuntu-latest
     environment: production
     timeout-minutes: 15
@@ -75,6 +94,25 @@ jobs:
           upsert_env VAPID_PUBLIC_KEY "$VAPID_PUBLIC_KEY"
           upsert_env VAPID_PRIVATE_KEY "$VAPID_PRIVATE_KEY"
           upsert_env VAPID_SUBJECT "$VAPID_SUBJECT"
+          # Keep the current QR/invitation origin intact during the dual-origin
+          # phase.  Its value is read only to derive explicit CORS/Host lists.
+          current_public_app_url="\$(sed -n 's/^PUBLIC_APP_URL=//p' .env | tail -n 1)"
+          if [ -z "$current_public_app_url" ]; then
+            echo 'PUBLIC_APP_URL is missing from /opt/fixit/.env' >&2
+            exit 1
+          fi
+          legacy_host="\${current_public_app_url#*://}"
+          legacy_host="\${legacy_host%%/*}"
+          legacy_host="\${legacy_host%%:*}"
+          if [ -z "$legacy_host" ]; then
+            echo 'PUBLIC_APP_URL has no usable hostname' >&2
+            exit 1
+          fi
+          upsert_env ALLOWED_ORIGINS "$current_public_app_url,https://fixitpulse.ru"
+          upsert_env ALLOWED_HOSTS "$legacy_host,fixitpulse.ru,localhost,127.0.0.1"
+          echo "Dual-origin legacy PUBLIC_APP_URL: $current_public_app_url"
+          echo "ALLOWED_ORIGINS: $current_public_app_url,https://fixitpulse.ru"
+          echo "ALLOWED_HOSTS: $legacy_host,fixitpulse.ru,localhost,127.0.0.1"
           git pull --ff-only origin main
           docker compose -f docker-compose.prod.yml build api
           docker compose -f docker-compose.prod.yml run --rm -T api alembic upgrade head </dev/null
@@ -93,24 +131,29 @@ jobs:
             exit 1
           fi
 
-          # Keep the new hostname isolated from the existing IP-based vhost.
-          # TLS is configured in a separate step after public DNS resolves.
-          sudo -n install -d -m 755 /var/www/letsencrypt
+          # Both origins remain independent full application origins.  Do not
+          # introduce a canonical redirect in this dual-origin phase.
           sudo -n rm -f /etc/nginx/conf.d/fixitpulse.conf
-          sudo -n install -m 644 deploy/fixitpulse-http.conf /etc/nginx/sites-enabled/fixitpulse.conf
-          sudo -n nginx -t
-          sudo -n systemctl reload nginx
-          curl -fsS -H 'Host: fixitpulse.ru' http://127.0.0.1:80/health >/dev/null
-
-          # The root A record is live before this step. Keep registration local
-          # to the VPS so no contact address is stored in GitHub.
-          sudo -n certbot certonly --webroot -w /var/www/letsencrypt \
-            --non-interactive --agree-tos --register-unsafely-without-email \
-            --keep-until-expiring -d fixitpulse.ru
           sudo -n install -m 644 deploy/fixitpulse-https.conf /etc/nginx/sites-enabled/fixitpulse.conf
           sudo -n nginx -t
           sudo -n systemctl reload nginx
-          sudo -n ss -ltnp 'sport = :443'
-          printf '' | timeout 10 openssl s_client -connect 127.0.0.1:443 -servername fixitpulse.ru -brief 2>&1 || true
-          curl -kfsS --noproxy '*' --resolve fixitpulse.ru:443:127.0.0.1 https://fixitpulse.ru/health >/dev/null
+
+          if ! systemctl list-unit-files certbot.timer --no-legend 2>/dev/null | grep -q '^certbot.timer'; then
+            echo 'certbot.timer is not installed; refusing to rely on an unmanaged certificate renewal path' >&2
+            exit 1
+          fi
+          sudo -n systemctl enable --now certbot.timer
+          echo "certbot.timer: \$(systemctl is-active certbot.timer)"
+          sudo -n install -d -m 755 /etc/letsencrypt/renewal-hooks/deploy
+          printf '%s\n' '#!/bin/sh' 'nginx -t && systemctl reload nginx' | sudo -n tee /etc/letsencrypt/renewal-hooks/deploy/reload-nginx >/dev/null
+          sudo -n chmod 755 /etc/letsencrypt/renewal-hooks/deploy/reload-nginx
+          if [ ! -f /opt/fixit/.certbot-renew-dry-run-ok ]; then
+            sudo -n certbot renew --dry-run
+            sudo -n touch /opt/fixit/.certbot-renew-dry-run-ok
+          fi
+
+          # --resolve sends real SNI and validates the issued certificate; no
+          # insecure -k bypass is permitted.
+          curl -fsS --noproxy '*' --connect-timeout 10 --max-time 20 \
+            --resolve fixitpulse.ru:443:127.0.0.1 https://fixitpulse.ru/health >/dev/null
           REMOTE
