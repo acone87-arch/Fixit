@@ -29,6 +29,8 @@ jobs:
           DATABASE_URL: postgresql+asyncpg://fsm:fsm@localhost:5432/fsm
           SECRET_KEY: ci-test-secret
           PUBLIC_APP_URL: http://localhost:8000
+          ALLOWED_ORIGINS: http://localhost:8000
+          ALLOWED_HOSTS: testserver,localhost,127.0.0.1
         run: pytest -q
       - name: Run offline runtime tests
         run: |
