@@ -96,7 +96,8 @@ jobs:
           # Keep the new hostname isolated from the existing IP-based vhost.
           # TLS is configured in a separate step after public DNS resolves.
           sudo -n install -d -m 755 /var/www/letsencrypt
-          sudo -n install -m 644 deploy/fixitpulse-http.conf /etc/nginx/conf.d/fixitpulse.conf
+          sudo -n rm -f /etc/nginx/conf.d/fixitpulse.conf
+          sudo -n install -m 644 deploy/fixitpulse-http.conf /etc/nginx/sites-enabled/fixitpulse.conf
           sudo -n nginx -t
           sudo -n systemctl reload nginx
           curl -fsS -H 'Host: fixitpulse.ru' http://127.0.0.1:80/health >/dev/null
@@ -106,7 +107,7 @@ jobs:
           sudo -n certbot certonly --webroot -w /var/www/letsencrypt \
             --non-interactive --agree-tos --register-unsafely-without-email \
             --keep-until-expiring -d fixitpulse.ru
-          sudo -n install -m 644 deploy/fixitpulse-https.conf /etc/nginx/conf.d/fixitpulse.conf
+          sudo -n install -m 644 deploy/fixitpulse-https.conf /etc/nginx/sites-enabled/fixitpulse.conf
           sudo -n nginx -t
           sudo -n systemctl reload nginx
           curl -fsS --noproxy '*' --resolve fixitpulse.ru:443:127.0.0.1 https://fixitpulse.ru/health >/dev/null
