@@ -150,6 +150,9 @@ jobs:
           if systemctl list-unit-files certbot.timer --no-legend 2>/dev/null | grep -q '^certbot.timer'; then
             sudo -n systemctl enable --now certbot.timer
             echo "certbot.timer: \$(systemctl is-active certbot.timer)"
+          elif systemctl list-unit-files snap.certbot.renew.timer --no-legend 2>/dev/null | grep -q '^snap.certbot.renew.timer'; then
+            sudo -n systemctl enable --now snap.certbot.renew.timer
+            echo "snap.certbot.renew.timer: \$(systemctl is-active snap.certbot.renew.timer)"
           elif [ -f /etc/cron.d/certbot ]; then
             echo 'certbot.timer: not installed; using existing /etc/cron.d/certbot scheduler'
           else
