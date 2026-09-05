@@ -100,4 +100,14 @@ jobs:
           sudo -n nginx -t
           sudo -n systemctl reload nginx
           curl -fsS -H 'Host: fixitpulse.ru' http://127.0.0.1:80/health >/dev/null
+
+          # The root A record is live before this step. Keep registration local
+          # to the VPS so no contact address is stored in GitHub.
+          sudo -n certbot certonly --webroot -w /var/www/letsencrypt \
+            --non-interactive --agree-tos --register-unsafely-without-email \
+            --keep-until-expiring -d fixitpulse.ru
+          sudo -n install -m 644 deploy/fixitpulse-https.conf /etc/nginx/conf.d/fixitpulse.conf
+          sudo -n nginx -t
+          sudo -n systemctl reload nginx
+          curl -fsS --resolve fixitpulse.ru:443:127.0.0.1 https://fixitpulse.ru/health >/dev/null
           REMOTE
