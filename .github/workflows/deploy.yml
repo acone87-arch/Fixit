@@ -147,12 +147,16 @@ jobs:
           sudo -n nginx -t
           sudo -n systemctl reload nginx
 
-          if ! systemctl list-unit-files certbot.timer --no-legend 2>/dev/null | grep -q '^certbot.timer'; then
-            echo 'certbot.timer is not installed; refusing to rely on an unmanaged certificate renewal path' >&2
+          if systemctl list-unit-files certbot.timer --no-legend 2>/dev/null | grep -q '^certbot.timer'; then
+            sudo -n systemctl enable --now certbot.timer
+            echo "certbot.timer: \$(systemctl is-active certbot.timer)"
+          elif [ -f /etc/cron.d/certbot ]; then
+            echo 'certbot.timer: not installed; using existing /etc/cron.d/certbot scheduler'
+          else
+            echo 'No existing Certbot renewal scheduler was found' >&2
+            systemctl list-timers --all --no-pager | grep -Ei 'certbot|letsencrypt' || true
             exit 1
           fi
-          sudo -n systemctl enable --now certbot.timer
-          echo "certbot.timer: \$(systemctl is-active certbot.timer)"
           sudo -n install -d -m 755 /etc/letsencrypt/renewal-hooks/deploy
           printf '%s\n' '#!/bin/sh' 'nginx -t && systemctl reload nginx' | sudo -n tee /etc/letsencrypt/renewal-hooks/deploy/reload-nginx >/dev/null
           sudo -n chmod 755 /etc/letsencrypt/renewal-hooks/deploy/reload-nginx
