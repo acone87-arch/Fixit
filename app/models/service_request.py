@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -27,7 +27,10 @@ class ServiceRequest(Base):
     # the authorised representative of the client through the portal.
     approval_target: Mapped[str] = mapped_column(String(20), default="internal")
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
-    completed_at: Mapped[datetime | None]
+    # Keep the ORM contract aligned with the original migration and PostgreSQL
+    # column.  Completion timestamps are compared to an aware UTC cutoff in
+    # client summaries.
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     repairs: Mapped[list["Repair"]] = relationship(  # noqa: F821
         back_populates="service_request", foreign_keys="Repair.service_request_id"

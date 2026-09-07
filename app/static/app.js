@@ -1250,9 +1250,18 @@ async function renderClientDetail(content, clientId, tab = 'overview') {
   const canManageUsers = ['owner', 'admin', 'dispatcher'].includes(state.me.role);
   const canEditClient = ['admin', 'dispatcher'].includes(state.me.role);
   const canManageClientTeam = canManageUsers || state.me.role === 'client_admin';
-  const accessCount = canManageClientTeam ? (await api(`/client-portal/access?client_id=${encodeURIComponent(client.id)}`)).length : 0;
-  const staffUsersTabLabel = `Пользователи${canManageUsers ? ` (${accessCount})` : ''}`;
-  const tabs = [['overview', 'Обзор'], ['sites', 'Объекты'], ['equipment', 'Оборудование'], ['users', canManageClientTeam ? `Пользователи (${accessCount})` : staffUsersTabLabel]];
+  let accessCount = null;
+  let accessCountError = null;
+  if (canManageClientTeam) {
+    try {
+      accessCount = (await api(`/client-portal/access?client_id=${encodeURIComponent(client.id)}`)).length;
+    } catch (error) {
+      accessCountError = error;
+      console.error('Не удалось загрузить количество пользователей клиента', error);
+    }
+  }
+  const usersTabLabel = accessCount === null ? 'Пользователи' : `Пользователи (${accessCount})`;
+  const tabs = [['overview', 'Обзор'], ['sites', 'Объекты'], ['equipment', 'Оборудование'], ['users', canManageClientTeam ? usersTabLabel : 'Пользователи']];
   const actions = ['owner','admin','dispatcher'].includes(state.me.role) ? `<div class="client-detail-actions">${canEditClient ? '<button class="btn btn-secondary" id="client-action-edit">Редактировать</button>' : ''}<button class="btn btn-secondary" id="client-action-site">+ Объект</button><button class="btn btn-secondary" id="client-action-user">+ Пользователь</button><button class="btn btn-primary" id="client-action-equipment">+ Оборудование</button></div>` : '';
   content.innerHTML = `<section class="client-detail-screen"><button class="sr-back" id="client-detail-back">← Клиенты</button><header class="client-detail-hero"><div><span>КЛИЕНТ</span><h1>${esc(client.legal_name || client.name)}</h1><p>${client.is_active ? '● Активен' : '● Отключён'}</p></div>${actions}</header><div class="client-detail-meta"><div><span>ИНН</span><strong>${esc(client.tax_id || 'Не указан')}</strong></div><div><span>Контакт</span><strong>${esc(client.contact_name || 'Не указан')}</strong><small>${esc([client.contact_phone, client.contact_email].filter(Boolean).join(' · ') || 'Телефон и email не указаны')}</small></div></div><nav class="client-detail-tabs">${tabs.map(([key,label]) => `<button data-client-tab="${key}" class="${tab === key ? 'active' : ''}">${label}</button>`).join('')}</nav><div id="client-detail-panel"></div></section>`;
   content.querySelector('#client-detail-back').addEventListener('click', () => location.hash = 'clients');
@@ -1268,21 +1277,33 @@ async function renderClientDetail(content, clientId, tab = 'overview') {
     panel.innerHTML = `<div class="client-detail-card-list">${sites.length ? sites.map((site) => `<button class="client-site-card" data-client-site="${site.id}"><strong>${esc(site.name)}</strong><span>${esc(site.address || 'Адрес не указан')}</span><small>${esc([site.contact_name, site.contact_phone].filter(Boolean).join(' · ') || 'Контакт не указан')} · Оборудование: ${site.equipment_count}</small><b>Открыть объект →</b></button>`).join('') : '<div class="client-empty">У клиента пока нет объектов.</div>'}</div>`;
     panel.querySelectorAll('[data-client-site]').forEach((button) => button.addEventListener('click', () => location.hash = `clients/${client.id}/sites/${button.dataset.clientSite}`));
   } else if (tab === 'equipment') {
-    const items = await api('/equipment');
-    const sites = new Map(state.sites.filter((site) => site.client_id === client.id).map((site) => [site.id, site]));
-    const equipment = items.filter((item) => sites.has(item.site_id));
-    panel.innerHTML = `<div class="client-equipment-detail-list">${equipment.length ? equipment.map((item) => `<button class="client-equipment-detail-card" data-client-equipment="${item.id}"><span class="client-equipment-photo" data-client-equipment-photo="${item.id}">FIXIT</span><div><strong>${esc([item.manufacturer, item.model].filter(Boolean).join(' ') || item.name)}</strong><span>${esc(item.name || 'Оборудование')}</span><small>S/N ${esc(item.serial_number || '—')} · ${esc(sites.get(item.site_id).name)}</small>${badge(EQUIPMENT_STATUS, item.status)}</div></button>`).join('') : '<div class="client-empty">Оборудования пока нет.</div>'}</div>`;
-    bindClientEquipmentCards(panel);
+    try {
+      const items = await api('/equipment');
+      const sites = new Map(state.sites.filter((site) => site.client_id === client.id).map((site) => [site.id, site]));
+      const equipment = items.filter((item) => sites.has(item.site_id));
+      panel.innerHTML = `<div class="client-equipment-detail-list">${equipment.length ? equipment.map((item) => `<button class="client-equipment-detail-card" data-client-equipment="${item.id}"><span class="client-equipment-photo" data-client-equipment-photo="${item.id}">FIXIT</span><div><strong>${esc([item.manufacturer, item.model].filter(Boolean).join(' ') || item.name)}</strong><span>${esc(item.name || 'Оборудование')}</span><small>S/N ${esc(item.serial_number || '—')} · ${esc(sites.get(item.site_id).name)}</small>${badge(EQUIPMENT_STATUS, item.status)}</div></button>`).join('') : '<div class="client-empty">Оборудования пока нет.</div>'}</div>`;
+      bindClientEquipmentCards(panel);
+    } catch (error) {
+      console.error('Не удалось загрузить оборудование клиента', error);
+      panel.innerHTML = clientDetailLoadError('оборудование', error);
+      bindClientDetailRetry(panel, client.id, 'equipment');
+    }
   } else if (tab === 'users') {
     if (!canManageClientTeam) { panel.innerHTML = '<div class="client-empty">У вас нет права управлять пользователями клиента.</div>'; return; }
     await renderClientUsersPanel(panel, client);
   } else {
-    const [summary, serviceTechnicians] = await Promise.all([
+    const [summaryResult, techniciansResult] = await Promise.allSettled([
       api(`/clients/${client.id}/summary`),
       canManageUsers ? api(`/clients/${client.id}/technicians`) : Promise.resolve([]),
     ]);
-    const technicianPanel = canManageUsers ? `<section class="client-detail-contact"><h2>Сервисные техники</h2><p>Техники видят всё оборудование этого клиента, но работают только со своими назначенными заявками.</p><div class="client-technician-list">${serviceTechnicians.length ? serviceTechnicians.map((item) => `<label><input type="checkbox" data-service-technician="${item.id}" ${item.assigned ? 'checked' : ''}> ${esc(item.full_name)}</label>`).join('') : '<p>Нет активных техников организации.</p>'}</div><button class="btn btn-primary" id="save-service-technicians">Сохранить назначение</button></section>` : '';
-    panel.innerHTML = `<div class="client-detail-overview"><article><span>ОБЪЕКТЫ</span><strong>${client.site_count}</strong><p>Площадки обслуживания клиента</p></article><article><span>ОБОРУДОВАНИЕ</span><strong>${client.equipment_count}</strong><p>Единиц в сервисе</p></article><article><span>АКТИВНЫЕ ЗАЯВКИ</span><strong>${summary.active_requests}</strong><p>Требуют внимания</p></article><article><span>В РЕМОНТЕ</span><strong>${summary.in_repair}</strong><p>${summary.waiting_approval} ожидают согласования</p></article><article><span>ЗАВЕРШЕНО · 30 ДНЕЙ</span><strong>${summary.completed_last_30_days}</strong><p>Закрытых сервисных работ</p></article></div><section class="client-detail-contact"><h2>Контактные данные</h2><p>${esc(client.contact_name || 'Контактное лицо не указано')}</p><a href="tel:${esc(client.contact_phone || '')}">${esc(client.contact_phone || '')}</a><p>${esc(client.contact_email || '')}</p></section>${technicianPanel}`;
+    if (summaryResult.status === 'rejected') console.error('Не удалось загрузить сводку клиента', summaryResult.reason);
+    if (techniciansResult.status === 'rejected') console.error('Не удалось загрузить сервисных техников', techniciansResult.reason);
+    const summary = summaryResult.status === 'fulfilled' ? summaryResult.value : null;
+    const serviceTechnicians = techniciansResult.status === 'fulfilled' ? techniciansResult.value : null;
+    const summaryPanel = summary ? `<div class="client-detail-overview"><article><span>ОБЪЕКТЫ</span><strong>${client.site_count}</strong><p>Площадки обслуживания клиента</p></article><article><span>ОБОРУДОВАНИЕ</span><strong>${client.equipment_count}</strong><p>Единиц в сервисе</p></article><article><span>АКТИВНЫЕ ЗАЯВКИ</span><strong>${summary.active_requests}</strong><p>Требуют внимания</p></article><article><span>В РЕМОНТЕ</span><strong>${summary.in_repair}</strong><p>${summary.waiting_approval} ожидают согласования</p></article><article><span>ЗАВЕРШЕНО · 30 ДНЕЙ</span><strong>${summary.completed_last_30_days}</strong><p>Закрытых сервисных работ</p></article></div>` : clientDetailLoadError('сводку по заявкам', summaryResult.reason);
+    const technicianPanel = !canManageUsers ? '' : serviceTechnicians === null ? clientDetailLoadError('список сервисных техников', techniciansResult.reason) : `<section class="client-detail-contact"><h2>Сервисные техники</h2><p>Техники видят всё оборудование этого клиента, но работают только со своими назначенными заявками.</p><div class="client-technician-list">${serviceTechnicians.length ? serviceTechnicians.map((item) => `<label><input type="checkbox" data-service-technician="${item.id}" ${item.assigned ? 'checked' : ''}> ${esc(item.full_name)}</label>`).join('') : '<p>Нет активных техников организации.</p>'}</div><button class="btn btn-primary" id="save-service-technicians">Сохранить назначение</button></section>`;
+    panel.innerHTML = `${summaryPanel}<section class="client-detail-contact"><h2>Контактные данные</h2><p>${esc(client.contact_name || 'Контактное лицо не указано')}</p><a href="tel:${esc(client.contact_phone || '')}">${esc(client.contact_phone || '')}</a><p>${esc(client.contact_email || '')}</p></section>${technicianPanel}${accessCountError ? '<p class="text-soft">Количество пользователей временно недоступно. Откройте вкладку «Пользователи», чтобы повторить загрузку.</p>' : ''}`;
+    bindClientDetailRetry(panel, client.id, 'overview');
     panel.querySelector('#save-service-technicians')?.addEventListener('click', async () => {
       const technician_ids = [...panel.querySelectorAll('[data-service-technician]:checked')].map((input) => input.dataset.serviceTechnician);
       try {
@@ -1291,6 +1312,15 @@ async function renderClientDetail(content, clientId, tab = 'overview') {
       } catch (error) { toast(error.message || 'Не удалось сохранить назначение', 'error'); }
     });
   }
+}
+
+function clientDetailLoadError(subject, error) {
+  const detail = error?.message ? `: ${esc(error.message)}` : '';
+  return `<section class="client-detail-contact client-detail-load-error"><h2>Не удалось загрузить ${subject}</h2><p>Основные данные клиента сохранены. Повторите попытку${detail}</p><button class="btn btn-secondary" data-client-detail-retry>Повторить</button></section>`;
+}
+
+function bindClientDetailRetry(container, clientId, tab) {
+  container.querySelectorAll('[data-client-detail-retry]').forEach((button) => button.addEventListener('click', () => renderClientDetail(document.getElementById('content'), clientId, tab)));
 }
 
 async function renderClientSiteDetail(content, client, siteId) {
@@ -1330,7 +1360,11 @@ async function renderClientUsersPanel(panel, client) {
       const access = accesses.find((item) => item.id === button.dataset.clientAccessMenu);
       if (access) openClientAccessActions(client, access, refresh, false);
     }));
-  } catch (error) { panel.innerHTML = `<div class="client-empty">${esc(error.message)}</div>`; }
+  } catch (error) {
+    console.error('Не удалось загрузить пользователей клиента', error);
+    panel.innerHTML = clientDetailLoadError('пользователей клиента', error);
+    bindClientDetailRetry(panel, client.id, 'users');
+  }
 }
 
 function clientRoleLabel(role) {

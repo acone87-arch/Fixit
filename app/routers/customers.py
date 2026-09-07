@@ -117,7 +117,18 @@ async def client_summary(
         "active_requests": sum(status in active_statuses for status, _, _ in rows),
         "in_repair": sum(status in repair_statuses for status, _, _ in rows),
         "waiting_approval": sum(status == "waiting_approval" for status, _, _ in rows),
-        "completed_last_30_days": sum(status in {"completed", "closed"} and completed_at and completed_at >= cutoff for status, completed_at, _ in rows),
+        # ``and completed_at`` used to yield ``None`` for legacy completed
+        # requests without a completion timestamp.  ``sum`` cannot add that
+        # value to its integer accumulator, which made the whole client
+        # detail summary fail with a 500.  Count only qualifying records so
+        # incomplete historical timestamps are safely ignored.
+        "completed_last_30_days": sum(
+            1
+            for status, completed_at, _ in rows
+            if status in {"completed", "closed"}
+            and completed_at is not None
+            and completed_at >= cutoff
+        ),
         "sites": per_site,
     }
 
@@ -208,7 +219,7 @@ async def list_sites(
 
 
 @router.get("/{client_id}/technicians")
-async def list_service_technicians(client_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(require_roles(UserRole.admin, UserRole.dispatcher))):
+async def list_service_technicians(client_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(require_roles(UserRole.owner, UserRole.admin, UserRole.dispatcher))):
     client = await db.scalar(select(Client.id).where(Client.id == client_id, Client.organization_id == user.organization_id))
     if not client: raise HTTPException(status.HTTP_404_NOT_FOUND, "Клиент не найден")
     rows = (await db.execute(select(User, TechnicianClientAccess).join(OrganizationMembership, (OrganizationMembership.user_id == User.id) & (OrganizationMembership.organization_id == user.organization_id)).outerjoin(TechnicianClientAccess, (TechnicianClientAccess.technician_id == User.id) & (TechnicianClientAccess.client_id == client_id) & (TechnicianClientAccess.organization_id == user.organization_id)).where(OrganizationMembership.role == UserRole.technician, User.is_active.is_(True)).order_by(User.full_name))).all()
@@ -216,7 +227,7 @@ async def list_service_technicians(client_id: uuid.UUID, db: AsyncSession = Depe
 
 
 @router.put("/{client_id}/technicians")
-async def replace_service_technicians(client_id: uuid.UUID, payload: TechnicianClientAccessUpdate, db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(require_roles(UserRole.admin, UserRole.dispatcher))):
+async def replace_service_technicians(client_id: uuid.UUID, payload: TechnicianClientAccessUpdate, db: AsyncSession = Depends(require_roles(UserRole.owner, UserRole.admin, UserRole.dispatcher))):
     client = await db.scalar(select(Client).where(Client.id == client_id, Client.organization_id == user.organization_id))
     if not client: raise HTTPException(status.HTTP_404_NOT_FOUND, "Клиент не найден")
     technician_ids = set(payload.technician_ids)

@@ -86,7 +86,7 @@ def test_client_detail_connects_sites_equipment_summary_and_existing_passport():
     assert "clients/${client.id}/sites/${button.dataset.clientSite}" in FRONTEND
     assert "openEquipmentPassport(button.dataset.clientEquipment)" in FRONTEND
     assert "apiBlob(`/equipment/${frame.dataset.clientEquipmentPhoto}/photo`)" in FRONTEND
-    assert "Пользователи${canManageUsers ? ` (${accessCount})` : ''}" in FRONTEND
+    assert "const usersTabLabel = accessCount === null ? 'Пользователи'" in FRONTEND
     assert "У клиента пока нет пользователей кабинета" in FRONTEND
 
 
