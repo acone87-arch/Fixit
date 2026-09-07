@@ -131,7 +131,7 @@ def test_join_screen_clears_stale_session_error_and_uses_fresh_pulse_bundle():
     join_screen = FRONTEND.split("async function showJoinScreen", 1)[1]
     assert "errorEl.classList.add('hidden')" in join_screen
     assert "Если этот email уже зарегистрирован" in join_screen
-    assert "app.js?v=20260905-2" in Path("app/static/index.html").read_text(encoding="utf8")
+    assert "app.js?v=20260907-1" in Path("app/static/index.html").read_text(encoding="utf8")
 
 
 def test_login_stays_invite_only_but_explains_how_to_get_access():
