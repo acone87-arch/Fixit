@@ -18,7 +18,7 @@ from app.core.security import create_access_token, hash_password, verify_passwor
 from app.database import get_db
 from app.models.core import User, UserRole
 from app.models.customer import Client, ClientInvite, ClientInviteStatus, ClientUserAccess, Site
-from app.models.organization import AuditEvent, OrganizationMembership
+from app.models.organization import AuditEvent, Organization, OrganizationMembership
 from app.schemas.customer import ClientInviteCreate, ClientInviteOut, InviteAcceptRequest
 from app.schemas.user import Token
 from app.services.client_portal import client_scope
@@ -70,7 +70,9 @@ async def _client_or_404(client_id: uuid.UUID, user: CurrentUser, db: AsyncSessi
 async def _create_invite(client_id: uuid.UUID, payload: ClientInviteCreate, role: UserRole,
                          user: CurrentUser, db: AsyncSession) -> ClientInviteOut:
     await _can_manage_client(user, client_id, db)
-    await _client_or_404(client_id, user, db)
+    client = await _client_or_404(client_id, user, db)
+    if not client.is_active:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Клиент отключён")
     site_id = payload.site_id
     if role == UserRole.client_site_user:
         if not site_id:
@@ -141,6 +143,25 @@ async def _usable_invite(token: str, db: AsyncSession, lock: bool = False) -> Cl
     now = datetime.now(timezone.utc)
     if not invite or invite.status != ClientInviteStatus.pending or invite.expires_at <= now:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Приглашение недействительно, отозвано или истекло")
+    organization = await db.get(Organization, invite.organization_id)
+    client = await db.get(Client, invite.client_id)
+    site = await db.get(Site, invite.site_id) if invite.site_id else None
+    role = _role_value(invite.target_role)
+    if (not organization or not organization.is_active or not client or not client.is_active
+            or client.organization_id != invite.organization_id
+            or role not in {"client_admin", "client_site_user"}
+            or (role == "client_site_user" and (not site or not site.is_active
+                or site.organization_id != invite.organization_id or site.client_id != invite.client_id))
+            or (role == "client_admin" and invite.site_id is not None)):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Приглашение больше не предоставляет действующий доступ")
+    inviter = await db.get(User, invite.invited_by_user_id)
+    inviter_membership = await db.scalar(select(OrganizationMembership).where(
+        OrganizationMembership.organization_id == invite.organization_id,
+        OrganizationMembership.user_id == invite.invited_by_user_id,
+        OrganizationMembership.is_active.is_(True)))
+    if not inviter or not inviter.is_active or not inviter_membership:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Приглашение больше не предоставляет действующий доступ")
+    await _can_manage_client(CurrentUser(inviter, organization, inviter_membership), invite.client_id, db)
     return invite
 
 
@@ -159,18 +180,37 @@ async def accept_invite(token: str, payload: InviteAcceptRequest, db: AsyncSessi
     email = str(payload.email).lower()
     if invite.invited_email and invite.invited_email.lower() != email:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Этот invite выпущен для другого email")
-    user = await db.scalar(select(User).where(func.lower(User.email) == email))
+    # Serialize separate invites accepted by the same existing account too.
+    user = await db.scalar(select(User).where(func.lower(User.email) == email).with_for_update())
     if user:
         if not verify_password(payload.password, user.hashed_password):
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Неверный пароль существующей учётной записи")
+        if not user.is_active:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Учётная запись отключена. Обратитесь в сервисную компанию")
     else:
         if not payload.full_name:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Укажите ФИО для регистрации")
         user = User(full_name=payload.full_name, email=email, phone=payload.phone, role=UserRole.technician, hashed_password=hash_password(payload.password))
-        db.add(user); await db.flush()
+        db.add(user)
+        try:
+            await db.flush()
+        except IntegrityError as exc:
+            await db.rollback()
+            raise HTTPException(status.HTTP_409_CONFLICT, "Учётная запись уже создана. Повторите вход с её паролем") from exc
     membership = await db.scalar(select(OrganizationMembership).where(OrganizationMembership.organization_id == invite.organization_id, OrganizationMembership.user_id == user.id))
+    if membership and not membership.is_active:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Доступ к организации отключён. Обратитесь в сервисную компанию")
     if membership and membership.role not in {UserRole.client_admin, UserRole.client_site_user}:
         raise HTTPException(status.HTTP_409_CONFLICT, "Учётная запись уже является внутренним сотрудником этой организации")
+    existing_accesses = (await db.scalars(select(ClientUserAccess).where(
+        ClientUserAccess.organization_id == invite.organization_id,
+        ClientUserAccess.user_id == user.id))).all()
+    if any(access.is_active and access.client_id != invite.client_id for access in existing_accesses):
+        raise HTTPException(status.HTTP_409_CONFLICT, "Учётная запись уже подключена к другому клиенту этой организации")
+    if any(not access.is_active and access.client_id == invite.client_id
+           and (access.site_id == invite.site_id or invite.target_role == UserRole.client_admin)
+           for access in existing_accesses):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Доступ отозван. Обратитесь в сервисную компанию")
     if not membership:
         membership = OrganizationMembership(organization_id=invite.organization_id, user_id=user.id, role=invite.target_role, is_active=True); db.add(membership)
     elif membership.role != invite.target_role:
@@ -192,8 +232,8 @@ async def accept_invite(token: str, payload: InviteAcceptRequest, db: AsyncSessi
     client = await db.get(Client, invite.client_id)
     if invite.target_role == UserRole.client_admin:
         client.adoption_status = "active"
-    db.add(AuditEvent(organization_id=invite.organization_id, actor_user_id=user.id, action="invite.accepted", entity_type="client_invite", entity_id=str(invite.id), details_json={"client_id": str(invite.client_id), "role": invite.target_role.value}))
-    db.add(AuditEvent(organization_id=invite.organization_id, actor_user_id=user.id, action="client.member_added", entity_type="client", entity_id=str(invite.client_id), details_json={"role": invite.target_role.value, "site_id": str(access_site_id) if access_site_id else None}))
+    db.add(AuditEvent(organization_id=invite.organization_id, actor_user_id=user.id, action="invite.accepted", entity_type="client_invite", entity_id=str(invite.id), details_json={"client_id": str(invite.client_id), "role": _role_value(invite.target_role)}))
+    db.add(AuditEvent(organization_id=invite.organization_id, actor_user_id=user.id, action="client.member_added", entity_type="client", entity_id=str(invite.client_id), details_json={"role": _role_value(invite.target_role), "site_id": str(access_site_id) if access_site_id else None}))
     if invite.target_role == UserRole.client_admin:
         db.add(AuditEvent(organization_id=invite.organization_id, actor_user_id=user.id, action="client.promoted_to_active", entity_type="client", entity_id=str(invite.client_id), details_json={"reason": "director_joined"}))
     try:

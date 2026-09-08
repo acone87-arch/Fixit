@@ -222,16 +222,16 @@ async def list_sites(
 async def list_service_technicians(client_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(require_roles(UserRole.owner, UserRole.admin, UserRole.dispatcher))):
     client = await db.scalar(select(Client.id).where(Client.id == client_id, Client.organization_id == user.organization_id))
     if not client: raise HTTPException(status.HTTP_404_NOT_FOUND, "Клиент не найден")
-    rows = (await db.execute(select(User, TechnicianClientAccess).join(OrganizationMembership, (OrganizationMembership.user_id == User.id) & (OrganizationMembership.organization_id == user.organization_id)).outerjoin(TechnicianClientAccess, (TechnicianClientAccess.technician_id == User.id) & (TechnicianClientAccess.client_id == client_id) & (TechnicianClientAccess.organization_id == user.organization_id)).where(OrganizationMembership.role == UserRole.technician, User.is_active.is_(True)).order_by(User.full_name))).all()
+    rows = (await db.execute(select(User, TechnicianClientAccess).join(OrganizationMembership, (OrganizationMembership.user_id == User.id) & (OrganizationMembership.organization_id == user.organization_id)).outerjoin(TechnicianClientAccess, (TechnicianClientAccess.technician_id == User.id) & (TechnicianClientAccess.client_id == client_id) & (TechnicianClientAccess.organization_id == user.organization_id)).where(OrganizationMembership.role == UserRole.technician, OrganizationMembership.is_active.is_(True), User.is_active.is_(True)).order_by(User.full_name))).all()
     return [{"id": account.id, "full_name": account.full_name, "assigned": access is not None} for account, access in rows]
 
 
 @router.put("/{client_id}/technicians")
-async def replace_service_technicians(client_id: uuid.UUID, payload: TechnicianClientAccessUpdate, db: AsyncSession = Depends(require_roles(UserRole.owner, UserRole.admin, UserRole.dispatcher))):
-    client = await db.scalar(select(Client).where(Client.id == client_id, Client.organization_id == user.organization_id))
+async def replace_service_technicians(client_id: uuid.UUID, payload: TechnicianClientAccessUpdate, db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(require_roles(UserRole.owner, UserRole.admin, UserRole.dispatcher))):
+    client = await db.scalar(select(Client).where(Client.id == client_id, Client.organization_id == user.organization_id).with_for_update())
     if not client: raise HTTPException(status.HTTP_404_NOT_FOUND, "Клиент не найден")
     technician_ids = set(payload.technician_ids)
-    valid = set((await db.scalars(select(User.id).join(OrganizationMembership, (OrganizationMembership.user_id == User.id) & (OrganizationMembership.organization_id == user.organization_id)).where(User.id.in_(technician_ids), OrganizationMembership.role == UserRole.technician, User.is_active.is_(True)))).all()) if technician_ids else set()
+    valid = set((await db.scalars(select(User.id).join(OrganizationMembership, (OrganizationMembership.user_id == User.id) & (OrganizationMembership.organization_id == user.organization_id)).where(User.id.in_(technician_ids), OrganizationMembership.role == UserRole.technician, OrganizationMembership.is_active.is_(True), User.is_active.is_(True)))).all()) if technician_ids else set()
     if valid != technician_ids: raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Можно назначить только активных техников организации")
     existing = (await db.scalars(select(TechnicianClientAccess).where(TechnicianClientAccess.organization_id == user.organization_id, TechnicianClientAccess.client_id == client_id))).all()
     for item in existing:

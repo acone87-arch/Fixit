@@ -107,7 +107,7 @@ async function maybeShowClientJoinWelcome() {
     const equipment = await api('/client-portal/equipment').catch(() => []);
     const hasEquipment = equipment.length > 0;
     content.insertAdjacentHTML('afterbegin', `<section class="client-join-welcome"><span>ОБЪЕКТ ПОДКЛЮЧЁН</span><h2>${esc(welcome.site_name || 'Ваш объект')}</h2><p>Вы управляете оборудованием и заявками только на этом объекте.</p><div><button class="btn btn-primary" id="join-welcome-primary">${hasEquipment ? 'Открыть оборудование' : 'Добавить оборудование'}</button><button class="btn btn-secondary" id="join-welcome-request">Создать заявку</button><button class="btn btn-ghost" id="join-welcome-qr">Как получить QR</button></div><button class="client-join-dismiss" id="join-welcome-dismiss">Понятно</button></section>`);
-    content.querySelector('#join-welcome-primary').addEventListener('click', async () => { dismissJoinWelcome(); if (hasEquipment) { location.hash = 'equipment'; return; } await ensureCustomers(true); openCreateEquipmentModal(); });
+    content.querySelector('#join-welcome-primary').addEventListener('click', async () => { dismissJoinWelcome(); if (hasEquipment) { location.hash = 'equipment'; return; } await ensureCustomers(true); await openCreateEquipmentModal(); });
     content.querySelector('#join-welcome-request').addEventListener('click', () => { dismissJoinWelcome(); openClientRequestForm(); });
     content.querySelector('#join-welcome-qr').addEventListener('click', () => { dismissJoinWelcome(); toast('Откройте паспорт оборудования и выберите «Скачать QR».', 'info'); });
   } else if (welcome.role === 'client_admin') {
@@ -676,8 +676,8 @@ async function renderClientEquipment(content) {
   const cards = equipment.length ? equipment.map((item) => `<button class="client-equipment-card" data-client-equipment="${item.id}">${item.primary_photo ? `<img data-client-equipment-photo="${item.id}" alt="Фото оборудования">` : '<div class="client-equipment-placeholder">FIXIT</div>'}<div><strong>${esc([item.manufacturer,item.model].filter(Boolean).join(' ') || item.name)}</strong><span>${esc(item.name)}</span><small>S/N ${esc(item.serial_number)} · ${esc(item.site_name)}</small>${clientBadge(item.status === 'needs_repair' ? 'in_progress' : 'completed')}</div></button>`).join('') : empty;
   const addButton = state.me.role === 'client_site_user' ? '<button class="btn btn-primary" id="client-add-equipment">+ Добавить оборудование</button>' : '';
   content.innerHTML = `<div class="page-header"><div><h1>Оборудование</h1><div class="page-subtitle">Моё оборудование и сервис</div></div>${addButton}</div><input class="client-search" placeholder="Поиск оборудования"><div class="client-equipment-list">${cards}</div>`;
-  content.querySelector('#client-add-equipment')?.addEventListener('click', async () => { await ensureCustomers(true); openCreateEquipmentModal(); });
-  content.querySelector('#client-empty-add-equipment')?.addEventListener('click', async () => { await ensureCustomers(true); openCreateEquipmentModal(); });
+  content.querySelector('#client-add-equipment')?.addEventListener('click', async () => { await ensureCustomers(true); await openCreateEquipmentModal(); });
+  content.querySelector('#client-empty-add-equipment')?.addEventListener('click', async () => { await ensureCustomers(true); await openCreateEquipmentModal(); });
   content.querySelectorAll('[data-client-equipment]').forEach((button) => button.addEventListener('click', () => openClientRequestForm(button.dataset.clientEquipment)));
   content.querySelectorAll('[data-client-equipment-photo]').forEach((image) => apiBlob(`/equipment/${image.dataset.clientEquipmentPhoto}/photo`).then((blob) => { const url = URL.createObjectURL(blob); activeClientPhotoUrls.push(url); image.src = url; }).catch(() => image.remove()));
 }
@@ -1654,7 +1654,13 @@ async function renderEquipment(content) {
   }
 }
 
-function openCreateEquipmentModal(preselectedClientId = null) {
+async function openCreateEquipmentModal(preselectedClientId = null) {
+  try { await ensureEquipmentTypes(); }
+  catch (error) { return toast(`Не удалось загрузить типы оборудования: ${error.message}`, 'error'); }
+  const canCreateType = ['owner', 'admin', 'dispatcher'].includes(state.me.role);
+  if (!state.equipmentTypes.length && !canCreateType) {
+    return toast('Сервисная компания ещё не добавила типы оборудования. Обратитесь к диспетчеру.', 'error');
+  }
   const typeOptions = state.equipmentTypes.map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join('');
   const activeSites = state.sites.filter((site) => site.is_active && (!preselectedClientId || site.client_id === preselectedClientId));
   if (!activeSites.length) return toast('Сначала создайте объект обслуживания', 'error');
@@ -1665,7 +1671,7 @@ function openCreateEquipmentModal(preselectedClientId = null) {
   const backdrop = openModal('Новое оборудование', `
     <form id="equipment-form">
       <div class="field"><label>Тип оборудования</label>
-        <select id="f-type" required>${typeOptions}<option value="__new">+ Новый тип…</option></select>
+        <select id="f-type" required>${typeOptions}${canCreateType ? '<option value="__new">+ Новый тип…</option>' : ''}</select>
       </div>
       <div class="field hidden" id="f-newtype-wrap"><label>Название нового типа</label><input id="f-newtype"></div>
       <div class="field-row">

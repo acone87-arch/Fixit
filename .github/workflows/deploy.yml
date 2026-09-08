@@ -37,6 +37,7 @@ jobs:
           node tests/pulse_offline_engine_runtime_test.js
           node tests/technician_workflow_runtime_test.js
           node tests/offline_attachment_sync_runtime_test.js
+          node tests/onboarding_equipment_runtime_test.js
 
   deploy:
     needs: test
