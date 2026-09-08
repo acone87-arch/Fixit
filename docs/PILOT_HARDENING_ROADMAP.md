@@ -114,20 +114,21 @@ DoD подтверждён на PostgreSQL 16 и Chromium в Actions. 18 PG-сц
 
 | ID | Статус | Задача и актуальное основание |
 |---|---|---|
-| SR-01 | 🔴 blocker | Повтор QR с активной заявкой и новым ключом: неимпортированный TicketStatus, NameError |
-| SR-02 | 🔴 blocker | `max(number)+1` не сериализован между разными Equipment tenant; нужен безопасный конкурентный номер/повтор |
-| SR-03 | ⬜ не начато | Same key, response loss, другой QR с прежним ключом; guest client_id, partial retry и старые NULL client_id. Не переписывать уже работающий частичный retry |
-| SR-04 | 🔴 blocker | UI отправляет details.approval без approval_target; 422. Сохранить необходимое содержание согласования |
-| SR-05 | 🔴 blocker | Client approval: LEFT OUTER JOIN + общий FOR UPDATE; проблемный SQL скомпилирован в аудите, фактическое исполнение на PG ещё требуется |
-| SR-06 | 🔴 blocker | completed_at не заполняется на completed; исключение из 30-дневной сводки |
-| SR-07 | 🔴 blocker | Повтор sync после ожидания row lock не перепроверяет SyncOperation; возможен ошибочный ответ вместо already_synced |
-| SR-08 | ⬜ не начато | Прямой API не закрывает SR без Repair; waiting_parts, internal/client approval/reject, cancellation, версии Equipment и несколько активных SR дают согласованный результат |
+| SR-01 | 🟢 выполнено и проверено | Повтор QR использует существующую ServiceRequest, в том числе без Ticket; 201 вместо NameError |
+| SR-02 | 🟢 выполнено и проверено | QR/staff/client intake используют общий transaction advisory lock для номера; конкурентные HTTP-запросы проходят |
+| SR-03 | 🟢 выполнено и проверено | Receipt сохраняет ключ повтора после completion; другой Equipment получает 409 без чужого ID. Guest partial/photo retry и legacy NULL client_id проверены, исправление их поведения не требовалось |
+| SR-04 | 🟠 исправлено, но не полностью подтверждено | Target и валидированный approval snapshot сохраняются; прежний Pulse payload поддержан. Первый browser internal прошёл, клиентский UI с предложением/фото проходит финальную приёмку |
+| SR-05 | 🟢 выполнено и проверено | FOR UPDATE OF ServiceRequest: client approve/reject, cross-site deny и конкурентные решения проходят на PostgreSQL |
+| SR-06 | 🟢 выполнено и проверено | Сервер ставит completed_at при canonical completion; retry не меняет дату. Старые неоднозначные даты не заполнены |
+| SR-07 | 🟢 выполнено и проверено | Повторная проверка SyncOperation после Equipment lock возвращает already_synced с проверкой ownership; один Repair и одно completion event |
+| SR-08 | 🟢 выполнено и проверено | Без Repair / в waiting / чужим участником завершить нельзя; approval/reject/cancellation, версии и несколько активных SR проверены. Staff/client intake меняет status/version под Equipment lock |
 
 **Код:** `app/routers/tickets.py`, `service_requests.py`, `client_portal.py`, `app/services/service_requests.py`, `service_request_workflow.py`, `sync_service.py`, guest upload/UI, Pulse approval payload.
 
 **Доказательства:** реальные PG-транзакции двух обращений/двух sync; настоящий UI payload; полный переход с approve/reject; запрет status bypass; guest response loss и photo retry. Не приравнивать автоматически все разные неисправности одного Equipment к одной поломке — сохранять подтверждённую продуктовую семантику.
 
-**Миграция:** возможно data migration completed_at по надёжным Repair/events; неоднозначные старые даты не придумывать. Нумерация не обязательно требует новой модели. **Риск:** высокий — canonical lifecycle и старые данные.
+**Миграция:** `20260908_0014`, новая таблица guest_request_receipts. Upgrade/downgrade/upgrade на существующих данных и transaction rollback проверены на PG. Схема остальных сущностей и исторические completed_at не менялись. Нумерация без новой сущности. **Риск:** высокий — canonical lifecycle и старые данные.
+
 
 ## P0.4 — Technician result
 
@@ -431,3 +432,8 @@ Verify: main по-прежнему `80ec53e84402b24c3a8bb263d150e7bf7a0dd865`; c
 - Локально после исправлений: связанные Python **32 passed**; весь доступный suite **165 passed, 96 skipped** (PostgreSQL/browser требуют CI), пять JS runtime-файлов проходят. Начальный локальный запуск без обязательных settings дал четыре collection errors, после задания синтетической конфигурации устранены. Старый source assertion ожидал общий `with_for_update()`; актуализирован на `of=ServiceRequest`, а фактическая блокировка проверяется конкурентными HTTP/PG тестами. Mock session канонического sync получил дополнительные ответы для новых SQL-проверок; полноценный PG тест сохранён.
 
 - Дополнительный подтверждённый пробел SR-04: клиентский экран approval использовал problem/outcome вместо proposal; UI техника не давал выбрать уже поддержанный API client target. Добавлен выбор «Диспетчер / Клиент», вывод диагностики, предложенных работ, деталей, комментария и защищённых approval photos в клиентском кабинете. Browser E2E проверяет оба target, настоящий multipart upload, декодирование изображения у Site Manager, его решение и сохранение черновика техника после reload. Результат приёмки пока ожидается.
+
+- Первый успешный прогон исправлений: [34244620120](https://github.com/acone87-arch/Fixit/actions/runs/34244620120), SHA `a2e9ff6cb24600663a729ad1de1cc2bf720778f5`: **263 passed, 0 failed, 0 skipped**, 464 предупреждения зависимостей, 269.33 s; пять JS runtime-файлов — passed. Включены 26 новых workflow PG, две проверки migration 0014, один новый Chromium E2E и все P0.1/P0.2 regression tests.
+- Финальное дополнение к приёмке: два одновременных QR с одним ключом в одном/разных tenant; Chromium для обоих approval target с клиентским просмотром proposal/photos. SHA `786f3b8a3e9d427b66c83f9eeb8c748f37c6a068` пока проходит CI. Локально **165 passed, 101 skipped**; пропуски PG/browser компенсируются только фактическим CI, не считаются успехом.
+
+- Прогон дополнения [34245383893](https://github.com/acone87-arch/Fixit/actions/runs/34245383893), SHA `786f3b8`: **1 failed, 265 passed, 0 skipped**, 489 предупреждений. Найден UI regression: добавление фото перерисовывало select и сбрасывало client target в internal. Исправлено сохранением target в существующем RequestDraftStore и восстановлением при draw/reload; browser test сохраняет именно выявившую сбой последовательность. Дополнительно UI внутренних решений приведён к серверным ролям: owner/admin/dispatcher, только internal target; owner проходит реальную браузерную форму согласования.

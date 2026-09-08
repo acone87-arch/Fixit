@@ -37,6 +37,9 @@ async def test_pulse_approval_payload_and_dispatcher_result(live, flow, target):
                 image = BytesIO(); Image.new('RGB', (4, 4), color='red').save(image, format='PNG')
                 await page.locator('#request-gallery').set_input_files({'name': 'diagnostic.png', 'mimeType': 'image/png', 'buffer': image.getvalue()})
                 await expect(page.locator('.tech-request-photo-count')).to_contain_text('Выбрано 1')
+                await expect(page.locator('#request-approval-target')).to_have_value('client')
+                await page.reload()
+                await expect(page.locator('#request-approval-target')).to_have_value('client')
             async with page.expect_response(lambda r: r.url.endswith(f'/{request_id}/status') and r.request.method == 'PATCH') as result:
                 await page.locator('#request-wait-approval').click()
             response = await result.value
@@ -48,9 +51,22 @@ async def test_pulse_approval_payload_and_dispatcher_result(live, flow, target):
             assert event['details']['approval']['diagnostic'] == APPROVAL['diagnostic']
             assert event['details']['approval']['work'] == APPROVAL['work']
             if target == 'internal':
-                decision = await flow.http.patch(f'/api/service-requests/{request_id}/approval',
-                    headers=auth(flow.owner, flow.org), json={'action': 'approved'})
-                assert decision.status_code == 200, decision.text
+                owner_page = await browser.new_page()
+                await owner_page.goto('http://127.0.0.1:8765/')
+                await owner_page.locator('#login-email').fill(flow.owner.email)
+                await owner_page.locator('#login-password').fill(PASSWORD)
+                await owner_page.locator('#login-form button').click()
+                await expect(owner_page.locator('#login-screen')).to_be_hidden()
+                await owner_page.locator('#onboarding-continue').click(timeout=15000)
+                await owner_page.goto(f'http://127.0.0.1:8765/#requests/{request_id}')
+                await expect(owner_page.locator('.approval-context')).to_contain_text(APPROVAL['work'])
+                await owner_page.locator('#approval-approve').click()
+                await owner_page.locator('#approval-comment').fill('Согласовано сервисом')
+                async with owner_page.expect_response(lambda r: r.url.endswith(f'/{request_id}/approval') and r.request.method == 'PATCH') as decision_result:
+                    await owner_page.locator('.pulse-dialog button[type=submit]').click()
+                decision = await decision_result.value
+                assert decision.status == 200, await decision.text()
+                await owner_page.close()
             else:
                 client_page = await browser.new_page()
                 await client_page.goto('http://127.0.0.1:8765/')
