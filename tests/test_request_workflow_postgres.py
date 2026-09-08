@@ -65,6 +65,8 @@ async def start(f, request_id):
     for target in ['on_the_way', 'in_progress']:
         response = await status(f, request_id, target)
         assert response.status_code == 200, response.text
+    async with f.sessions() as db:
+        f.equipment = [await db.get(Equipment, eq.id) for eq in f.equipment]
 
 
 def repair_body(f, request_id, **overrides):
@@ -290,3 +292,72 @@ async def test_other_active_request_or_version_conflict_preserves_equipment(flow
     async with flow.sessions() as db:
         eq = await db.get(Equipment, flow.equipment[0].id)
         assert eq.status == EquipmentStatus.needs_repair
+
+
+async def test_client_approval_executes_postgres_lock(flow):
+    request_id = await new_request(flow)
+    await start(flow, request_id)
+    waiting = await status(flow, request_id, 'waiting_approval', details={'approval_target': 'client'})
+    assert waiting.status_code == 200, waiting.text
+    response = await flow.http.patch(f'/api/client-portal/requests/{request_id}/approval',
+        headers=flow.manager_headers, json={'action': 'approved'})
+    assert response.status_code == 200, response.text
+    assert response.json()['status'] == 'in_progress'
+
+
+async def test_cached_pulse_approval_and_invalid_snapshot(flow):
+    request_id = await new_request(flow)
+    await start(flow, request_id)
+    invalid = await status(flow, request_id, 'waiting_approval', details={
+        'approval_target': 'internal', 'approval': {**APPROVAL, 'parts': [{'name': 'Двигатель', 'quantity': -1}]}})
+    assert invalid.status_code == 422
+    waiting = await status(flow, request_id, 'waiting_approval', details={'approval': APPROVAL})
+    assert waiting.status_code == 200, waiting.text
+    assert waiting.json()['approval_target'] == 'internal'
+
+
+async def test_legacy_ticket_key_preserved_and_scope_checked(flow):
+    # Старые данные до guest_request_receipts остаются поддержанными.
+    async with flow.sessions() as db:
+        ticket = Ticket(organization_id=flow.org.id, equipment_id=flow.equipment[0].id,
+            idempotency_key=uuid.uuid4(), severity='not_working')
+        db.add(ticket); await db.flush()
+        request = ServiceRequest(organization_id=flow.org.id, equipment_id=flow.equipment[0].id,
+            ticket_id=ticket.id, number=1, title='Историческая QR заявка', status='completed')
+        db.add(request); await db.commit()
+    repeated = await qr(flow, qr_body(ticket.idempotency_key))
+    assert repeated.status_code == 201 and repeated.json()['service_request_id'] == str(request.id)
+    denied = await qr(flow, qr_body(ticket.idempotency_key), index=1)
+    assert denied.status_code == 409
+
+
+async def test_concurrent_guest_photo_retry_and_foreign_qr(flow):
+    first = await qr(flow)
+    request_id = first.json()['service_request_id']
+    content = BytesIO(); Image.new('RGB', (3, 3)).save(content, format='PNG')
+    async def photo(index):
+        return await flow.http.post(f'/api/public/equipment/{flow.equipment[index].public_qr_token}/requests/{request_id}/attachments',
+            data={'client_id': 'same-photo'}, files={'file': ('photo.png', content.getvalue(), 'image/png')})
+    responses = await asyncio.gather(photo(0), photo(0))
+    assert all(r.status_code == 201 for r in responses), [r.text for r in responses]
+    assert responses[0].json()['id'] == responses[1].json()['id']
+    assert (await photo(1)).status_code == 404
+
+
+async def test_client_approval_other_site_denied_and_concurrent_decision(flow):
+    foreign = await new_request(flow, 1)
+    await start(flow, foreign)
+    assert (await status(flow, foreign, 'waiting_approval', details={'approval_target': 'client'})).status_code == 200
+    denied = await flow.http.patch(f'/api/client-portal/requests/{foreign}/approval',
+        headers=flow.manager_headers, json={'action': 'approved'})
+    assert denied.status_code == 404, denied.text
+    request_id = await new_request(flow)
+    await start(flow, request_id)
+    assert (await status(flow, request_id, 'waiting_approval', details={'approval_target': 'client'})).status_code == 200
+    responses = await asyncio.gather(*[flow.http.patch(f'/api/client-portal/requests/{request_id}/approval',
+        headers=flow.manager_headers, json={'action': action, 'comment': 'Решение'}) for action in ('approved', 'rejected')])
+    assert sorted(r.status_code for r in responses) == [200, 409], [r.text for r in responses]
+    async with flow.sessions() as db:
+        assert await db.scalar(select(func.count()).select_from(ServiceRequestEvent).where(
+            ServiceRequestEvent.service_request_id == uuid.UUID(request_id),
+            ServiceRequestEvent.event_type.in_(['approval.approved', 'approval.rejected']))) == 1
