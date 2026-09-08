@@ -377,3 +377,26 @@ async def test_authenticated_intake_marks_equipment_for_service(flow, client):
     assert response.status_code == 201, response.text
     assert response.json()['equipment_status'] == 'needs_repair'
     assert response.json()['equipment_version'] == original.version + 1
+
+
+@pytest.mark.parametrize('other_tenant', [False, True])
+async def test_concurrent_qr_key_is_scoped_to_equipment_and_tenant(flow, other_tenant):
+    from app.models.core import EquipmentType
+    if other_tenant:
+        site = flow.sites[3]
+        async with flow.sessions() as db:
+            kind = EquipmentType(organization_id=site.organization_id, name='Чужая поломойка')
+            db.add(kind); await db.flush()
+            equipment = Equipment(organization_id=site.organization_id, site_id=site.id,
+                equipment_type_id=kind.id, name='Чужой tenant', serial_number='FOREIGN-QR')
+            db.add(equipment); await db.commit()
+        flow.equipment[1] = equipment
+    body = qr_body()
+    results = await asyncio.gather(qr(flow, body, 0), qr(flow, body, 1))
+    assert sorted(r.status_code for r in results) == ([201, 201] if other_tenant else [201, 409]), [r.text for r in results]
+    if other_tenant:
+        assert {r.json()['number'] for r in results} == {1}
+        assert len({r.json()['service_request_id'] for r in results}) == 2
+    else:
+        async with flow.sessions() as db:
+            assert await db.scalar(select(func.count()).select_from(ServiceRequest)) == 1
