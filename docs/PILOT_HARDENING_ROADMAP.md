@@ -452,6 +452,7 @@ Verify: main по-прежнему `80ec53e84402b24c3a8bb263d150e7bf7a0dd865`; c
 - Новый P0.3: 28 HTTP/PG сценариев; 2 migration cases; 2 настоящих Chromium сценария. Это части 266, а не дополнительные к общему числу тесты.
 - Все пять JS runtime-файлов прошли. Добавлены фактический async-render regression и проверка cache-first fetch со старым app.js; последняя воспроизвела stale UI локально и прошла после согласованного изменения URL HTML/SHELL. Финальный commit включает эту смену версии и журнал; его Actions status проверяется отдельно.
 - Regression failures сохранены в истории: исходные 15/20 failures, сброс recipient после photo и гонка dashboard. Ничего не скрыто через skip/xfail или замену на source assertion.
+- Дополнительный прогон `214952d25e2d29d1c781b77a7acecfb987a630ca`, [Actions 34275528627](https://github.com/acone87-arch/Fixit/actions/runs/34275528627): **2 failed, 264 passed**, 511 предупреждений; JS-шаг не запускался после failure. Обе ошибки — старые source assertions с точным URL `app.js?v=20260907-1` после необходимого обновления PWA. Проверка ассетов теперь сравнивает версии HTML и SHELL, дублирующая привязка onboarding к старой дате удалена. Работоспособность обновления проверяет существующий runtime-тест реального SW fetch-handler со старым кешем; итоговый HEAD требует полного зелёного CI, результат фиксируется в PR №5.
 
 **Что подтверждено:**
 
@@ -482,6 +483,8 @@ Verify: main по-прежнему `80ec53e84402b24c3a8bb263d150e7bf7a0dd865`; c
 - `tests/test_guest_photo_retry.py`
 - `tests/technician_workflow_runtime_test.js`
 - `tests/onboarding_equipment_runtime_test.js`
+- `tests/test_equipment_service_history.py`
+- `tests/test_pilot_client_onboarding.py`
 - `docs/PILOT_HARDENING_ROADMAP.md`
 
 **Остаточные ограничения:**

@@ -1,6 +1,7 @@
 """Regression contract for the compact Equipment Passport service history."""
 from datetime import datetime, timezone
 from pathlib import Path
+import re
 import uuid
 
 from app.schemas.equipment import EquipmentServiceHistoryEntry
@@ -83,8 +84,11 @@ def test_history_card_keeps_technician_out_of_header_and_omits_identical_problem
 
 def test_passport_asset_versions_change_together_for_browser_cache_busting():
     index = (ROOT / "static" / "index.html").read_text(encoding="utf8")
-    assert "/static/styles.css?v=20260905-2" in index
-    assert "/static/app.js?v=20260907-1" in index
+    worker = (ROOT / "static" / "sw.js").read_text(encoding="utf8")
+    for asset in ("styles.css", "app.js"):
+        urls = re.findall(r'/static/' + re.escape(asset) + r'\?v=\d{8}-\d+', index)
+        assert len(urls) == 1
+        assert f"'{urls[0]}'" in worker
 
 
 def test_protected_media_urls_do_not_receive_a_second_api_prefix():
