@@ -10,7 +10,7 @@
 - Последняя сверенная main: `87e3044f30a40b6d0cff0306e71f9aee83aca329`.
 - Последняя сверка: 08.09.2026; GitHub Compare `identical`, ahead/behind `0/0`, новых commits `0`, изменённых файлов `0`. GitHub commit lookup отдельно подтвердил HEAD.
 - P0.1 выполнен и проверен в PR [№3](https://github.com/acone87-arch/Fixit/pull/3); проверенный SHA кода: `cde3d81a79b7f29efd17f65bac0538914a75ca1c`. Изменения ещё не в main и не в production.
-- Текущий шаг: **P0.2 выполнен и проверен; остановка до команды на P0.3**. Ветка `codex/p0-2-security`, PR №4; проверенный SHA кода `8e46ae7dc552bca00535be414d773de125ad714c`. Сохранены P0.1 из PR №3 и актуальный main; merge в main/deploy не выполнялись.
+- Текущий шаг: **P0.3 в работе: QR, согласование и completion/retry**. Ветка `codex/p0-2-security`, PR №4; проверенный SHA кода `8e46ae7dc552bca00535be414d773de125ad714c`. Сохранены P0.1 из PR №3 и актуальный main; merge в main/deploy не выполнялись.
 - **FIXIT PILOT READY не подтверждён.**
 
 ### Как читать доказательства
@@ -53,7 +53,7 @@
 |---|---|---|
 | P0.1 Onboarding | 🟢 выполнено и проверено | 186 Python passed, включая 18 PostgreSQL и 3 browser E2E; пять JS runtime-файлов прошли. PR №3, production не обновлён |
 | P0.2 Security boundaries | 🟢 выполнено и проверено | 48 PostgreSQL security-сценариев; полный suite 234 passed, 0 skipped; browser P0.1 и 5 JS runtime-файлов проходят. PR №4, production не обновлён |
-| P0.3 QR + ServiceRequest | 🔴 blocker | Повтор QR, approval, completed_at, конкурентный retry/номер |
+| P0.3 QR + ServiceRequest | 🟡 в работе | Дефекты воспроизведены через PostgreSQL; исправления проходят приёмку в PR №5 |
 | P0.4 Technician result | 🔴 blocker | Исходные фото и клиентский результат не доведены; полный E2E не подтверждён |
 | P0.5 Durable offline queue | 🔴 blocker | data_url, atomic queue, ownership, межконтекстные гонки |
 | P0.6 Warehouse integrity | 🔴 blocker | Отрицательное количество, mobile warehouse, связь движения с Repair |
@@ -108,7 +108,7 @@ DoD подтверждён на PostgreSQL 16 и Chromium в Actions. 18 PG-сц
 
 ## P0.3 — QR + ServiceRequest
 
-**Статус: 🔴 blocker. Исполнение не начато.**
+**Статус: 🟡 в работе. Приёмка исправлений в PR №5.**
 
 **Definition of Done:** повтор QR не падает и не создаёт некорректных дублей; одна бизнес-поломка проходит существующий ServiceRequest workflow. Approval и completion работают, время завершения фиксируется, повтор sync возвращает согласованный результат без нового canonical Repair.
 
@@ -416,3 +416,13 @@ Verify: main по-прежнему `80ec53e84402b24c3a8bb263d150e7bf7a0dd865`; c
 4. **Следующий этап — P0.3 QR + ServiceRequest.** После закрытия ACL остаются подтверждённые ошибки повторного QR, approval contract/locking, completed_at и retry. Начинать только после команды «Начинай следующий этап».
 
 **FIXIT PILOT READY всего продукта ещё не подтверждён.**
+
+
+### 08.09.2026 — P0.3, воспроизведение и исправления в работе
+
+- Команда пользователя: «Давай следующий этап». Текущий main `87e3044f30a40b6d0cff0306e71f9aee83aca329`, compare от предыдущей точки identical. База ветки — `a369aa70fb963896eb5fc6d81fb7070e4d8efca7`, сохраняет P0.1/P0.2; PR [№5](https://github.com/acone87-arch/Fixit/pull/5).
+- Воспроизведение `bbe4c0a4960536d42fc58c5006a8ae60f91993ed`, [Actions 34213791333](https://github.com/acone87-arch/Fixit/actions/runs/34213791333): **15 failed, 238 passed**, JS-шаг skipped после Python failure. Все 15 failures — новые проверки P0.3. Подтверждены QR NameError, раскрытие чужой заявки по ключу другого Equipment, конфликт номера у QR/staff/client, потеря approval snapshot, отсутствие completed_at, конкурентный retry=failed, ошибочное working при другой активной заявке.
+- Уже работали: guest partial/photo retry и legacy NULL client_id, проверка изображения/лимита, защита completion без Repair, waiting_parts, конфликт Equipment version. Минимально сужен guest photo row lock до ServiceRequest для единого порядка с sync; поведение фото не переписывается.
+- Исправления: транзакционная сериализация intake/номеров; постоянная привязка QR submit к заявке (включая повтор активной); проверка Equipment при повторе; явный internal target в Pulse и совместимость с прежним payload; сохранение/валидация approval snapshot; FOR UPDATE OF service_requests в client approval; completed_at при completed; повторная проверка SyncOperation после Equipment lock с сохранением P0.2 ownership; сохранение needs_repair при другой активной заявке и версионирование ручного/client intake.
+- Миграция **0014**, только новая guest_request_receipts. Ticket остаётся fallback для старых ключей. Исторические completed_at не заполняются недоказанными датами. При rollback сохранять таблицу и останавливать QR intake до возврата версии, которая читает receipts: старое приложение игнорирует новые ключи. Downgrade после новых QR удалит ключи повторов, поэтому после приёма данных не применять. Runbook безопасного rollback — P0.7.
+- Приёмка в процессе: точные итоги PostgreSQL/Chromium и SHA будут внесены после окончания, статус 🟢 пока не присваивается. Полный migration chain/production backup restore/HTTPS остаются P0.7.

@@ -21,7 +21,7 @@ def test_public_photo_endpoint_keeps_new_idempotency_and_accepts_legacy_uploads(
     assert "ServiceRequestAttachment.client_id == client_id" in handler
     assert handler.index("if existing:") < handler.index("if count >= 3")
     assert "return {\"id\": str(existing.id), \"duplicate\": True}" in handler
-    assert "with_for_update()" in handler
+    assert "with_for_update(of=ServiceRequest)" in handler
     assert "client_id=client_id" in handler
     assert "normalize_image(content)" in handler
     assert "MAX_GUEST_PHOTO_BYTES" in handler

@@ -55,12 +55,7 @@ def validate_canonical_completion(
     return request
 
 
-async def sync_one_repair(db: AsyncSession, technician_id: uuid.UUID, organization_id: uuid.UUID,
-                          payload: RepairCreate) -> SyncItemResult:
-    # local_uuid служит и первичным ключом идемпотентности синка (через
-    # sync_operations), и уникальным ключом самой записи repairs — при повторной
-    # отправке того же пакета сервер не создаёт дубликат, а возвращает то же
-    # самое решение, что было принято в первый раз.
+async def _existing_sync_result(db, technician_id, organization_id, payload) -> SyncItemResult | None:
     existing_op = await db.scalar(select(SyncOperation).where(
         SyncOperation.operation_id == payload.local_uuid,
         SyncOperation.organization_id == organization_id,
@@ -78,6 +73,19 @@ async def sync_one_repair(db: AsyncSession, technician_id: uuid.UUID, organizati
             resolved_as="already_synced",
         )
 
+    return None
+
+
+async def sync_one_repair(db: AsyncSession, technician_id: uuid.UUID, organization_id: uuid.UUID,
+                          payload: RepairCreate) -> SyncItemResult:
+    # local_uuid служит и первичным ключом идемпотентности синка (через
+    # sync_operations), и уникальным ключом самой записи repairs — при повторной
+    # отправке того же пакета сервер не создаёт дубликат, а возвращает то же
+    # самое решение, что было принято в первый раз.
+    retry = await _existing_sync_result(db, technician_id, organization_id, payload)
+    if retry:
+        return retry
+
     result: SyncItemResult | None = None
     try:
         # Каждый элемент пакета — в своей savepoint-транзакции. Если по одной
@@ -87,10 +95,16 @@ async def sync_one_repair(db: AsyncSession, technician_id: uuid.UUID, organizati
         async with db.begin_nested():
             equipment = await db.scalar(
                 select(Equipment).where(Equipment.id == payload.equipment_id,
-                                        Equipment.organization_id == organization_id).with_for_update()
+                                        Equipment.organization_id == organization_id).with_for_update().execution_options(populate_existing=True)
             )
             if not equipment:
                 raise _SyncFailure("Оборудование не найдено")
+
+            # Пока ожидали Equipment lock, другой запрос мог уже зафиксировать
+            # тот же local_uuid. Проверка владельца обязательна и на этом пути.
+            retry = await _existing_sync_result(db, technician_id, organization_id, payload)
+            if retry:
+                return retry
 
             task = None
             ticket_id = payload.ticket_id
@@ -223,7 +237,12 @@ async def sync_one_repair(db: AsyncSession, technician_id: uuid.UUID, organizati
             # офлайн-ремонт, "побеждает": статус остаётся requires_repair, и
             # диспетчер разбирает ситуацию вручную (см. conflict выше), а не
             # затирается автоматическим "всё починено".
-            if not conflict:
+            other_active = await db.scalar(select(ServiceRequest.id).where(
+                ServiceRequest.organization_id == organization_id,
+                ServiceRequest.equipment_id == equipment.id,
+                ServiceRequest.status.not_in({"completed", "closed", "cancelled"}),
+            ).limit(1))
+            if not conflict and not other_active:
                 equipment.status = EquipmentStatus.working
                 equipment.version += 1
 

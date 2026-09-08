@@ -214,7 +214,11 @@ async def test_approval_contract_and_authority(flow, target, approved):
     assert decision.json()['status'] == ('in_progress' if approved else 'cancelled')
     again = await flow.http.patch(f'{route}/{request_id}/approval', headers=headers, json={'action': 'approved'})
     assert again.status_code == 409
-    if not approved: assert decision.json()['completed_at']
+    if not approved:
+        assert decision.json()['completed_at']
+    else:
+        result = await sync(flow, repair_body(flow, request_id))
+        assert result['resolved_as'] == 'applied', result
 
 
 async def test_waiting_parts_completion_and_cancellation_guards(flow):
@@ -285,6 +289,7 @@ async def test_other_active_request_or_version_conflict_preserves_equipment(flow
     request_id = await new_request(flow)
     await start(flow, request_id)
     if not conflict: await new_request(flow)
+    # Изолируем проверку нескольких активных SR от отдельной optimistic version.
     await changed(flow, Equipment, flow.equipment[0].id, status=EquipmentStatus.needs_repair,
                   version=flow.equipment[0].version + (1 if conflict else 0))
     result = await sync(flow, repair_body(flow, request_id))
@@ -361,3 +366,14 @@ async def test_client_approval_other_site_denied_and_concurrent_decision(flow):
         assert await db.scalar(select(func.count()).select_from(ServiceRequestEvent).where(
             ServiceRequestEvent.service_request_id == uuid.UUID(request_id),
             ServiceRequestEvent.event_type.in_(['approval.approved', 'approval.rejected']))) == 1
+
+
+@pytest.mark.parametrize('client', [False, True])
+async def test_authenticated_intake_marks_equipment_for_service(flow, client):
+    original = flow.equipment[0]
+    response = await flow.http.post('/api/client-portal/requests' if client else '/api/service-requests',
+        headers=flow.manager_headers if client else auth(flow.owner, flow.org),
+        json={'equipment_id': str(original.id), 'title': 'Неисправность'})
+    assert response.status_code == 201, response.text
+    assert response.json()['equipment_status'] == 'needs_repair'
+    assert response.json()['equipment_version'] == original.version + 1

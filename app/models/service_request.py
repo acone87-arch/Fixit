@@ -37,6 +37,14 @@ class ServiceRequest(Base):
     )
 
 
+class GuestRequestReceipt(Base):
+    """Стабильный результат каждого QR submit, включая повтор активной заявки."""
+    __tablename__ = "guest_request_receipts"
+    organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id"), primary_key=True)
+    idempotency_key: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    service_request_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("service_requests.id"), index=True)
+
+
 class ServiceRequestEvent(Base):
     __tablename__ = "service_request_events"
     __table_args__ = (Index("ix_service_request_event_request_created", "service_request_id", "created_at"),)

@@ -150,7 +150,7 @@ def test_offline_sync_persists_canonical_link_and_retry_is_idempotent():
         description="Completed offline", device_updated_at=datetime.now(timezone.utc),
         base_equipment_version=1,
     )
-    session = _SyncSession([None, equipment, item, None])
+    session = _SyncSession([None, equipment, None, item, None, None])
     result = asyncio.run(sync_one_repair(session, technician_id, organization_id, payload))
     repairs = [saved for saved in session.added if isinstance(saved, Repair)]
     assert result.resolved_as == "applied"

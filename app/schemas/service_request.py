@@ -1,14 +1,34 @@
 import uuid
 from datetime import datetime
 from typing import Any, Literal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 REQUEST_STATUSES = {"new", "assigned", "on_the_way", "arrived", "in_progress", "waiting_parts", "waiting_approval", "completed", "closed", "cancelled"}
+
+class ApprovalPart(BaseModel):
+    name: str = Field(max_length=255)
+    quantity: int = Field(gt=0)
+
+
+class ApprovalContext(BaseModel):
+    diagnostic: str = Field(default="", max_length=10000)
+    work: str = Field(default="", max_length=10000)
+    comment: str = Field(default="", max_length=10000)
+    parts: list[ApprovalPart] = Field(default_factory=list, max_length=100)
+    photo_count: int = Field(default=0, ge=0, le=5)
+
 
 class ServiceRequestStatusUpdate(BaseModel):
     status: str
     note: str | None = Field(default=None, max_length=1000)
     details: dict[str, Any] | None = None
+
+    @field_validator("details")
+    @classmethod
+    def validate_approval(cls, value):
+        if value is not None and "approval" in value:
+            value = {**value, "approval": ApprovalContext.model_validate(value["approval"]).model_dump()}
+        return value
 
 class ServiceRequestApproval(BaseModel):
     action: Literal["approved", "rejected"]

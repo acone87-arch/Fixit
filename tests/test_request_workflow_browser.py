@@ -24,6 +24,7 @@ async def test_pulse_approval_payload_and_dispatcher_result(live, flow):
             await page.locator('#login-password').fill(PASSWORD)
             await page.locator('#login-form button').click()
             await expect(page.locator('#login-screen')).to_be_hidden()
+            await page.locator('#onboarding-continue').click(timeout=15000)
             await page.goto(f'http://127.0.0.1:8765/#requests/{request_id}')
             await page.locator('#request-diagnostic').fill(APPROVAL['diagnostic'])
             await page.locator('#request-work').fill(APPROVAL['work'])

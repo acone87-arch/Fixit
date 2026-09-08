@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import CurrentUser, get_current_user, require_roles
 from app.database import get_db
-from app.models.core import Equipment, EquipmentAttachment, EquipmentType, User, UserRole
+from app.models.core import Equipment, EquipmentAttachment, EquipmentStatus, EquipmentType, User, UserRole
 from app.models.customer import Client, ClientUserAccess, Site
 from app.models.repair import Repair
 from app.models.service_request import ServiceRequest
@@ -262,6 +262,12 @@ async def request_detail(request_id: uuid.UUID, db: AsyncSession = Depends(get_d
 @router.post("/requests", response_model=ServiceRequestDetail, status_code=status.HTTP_201_CREATED)
 async def create_request(payload: ServiceRequestCreate, db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     equipment = await ensure_client_equipment(payload.equipment_id, user, db)
+    await db.refresh(equipment, with_for_update=True)
+    # После ожидания lock повторно проверяем scope по свежему site_id.
+    await ensure_client_equipment(equipment.id, user, db)
+    if equipment.status in {EquipmentStatus.working, EquipmentStatus.needs_repair}:
+        equipment.status = EquipmentStatus.needs_repair
+        equipment.version += 1
     request = ServiceRequest(organization_id=user.organization_id, number=await next_number(db, user.organization_id),
         equipment_id=equipment.id, title=payload.title, description=payload.description, priority=payload.priority, status="new")
     db.add(request); await db.flush()
@@ -273,7 +279,7 @@ async def create_request(payload: ServiceRequestCreate, db: AsyncSession = Depen
 @router.patch("/requests/{request_id}/approval", response_model=ServiceRequestDetail)
 async def approve_request(request_id: uuid.UUID, payload: ServiceRequestApproval, db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     query, _, _ = await _requests_query(user, db)
-    row = (await db.execute(query.where(ServiceRequest.id == request_id).with_for_update())).first()
+    row = (await db.execute(query.where(ServiceRequest.id == request_id).with_for_update(of=ServiceRequest))).first()
     if not row: raise HTTPException(status.HTTP_404_NOT_FOUND, "Заявка не найдена")
     request = row[0]
     await workflow_decide_approval(db, request, user, payload.action == "approved", payload.comment)
