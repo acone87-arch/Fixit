@@ -18,6 +18,7 @@ from app.schemas.service_request import ServiceRequestApproval, ServiceRequestCr
 from app.services.client_portal import client_scope, ensure_client_equipment
 from app.services.service_requests import event, next_number
 from app.services.service_request_workflow import decide_approval as workflow_decide_approval
+from app.services.access_changes import lock_access_changes
 
 router = APIRouter(prefix="/api/client-portal", tags=["client portal"])
 
@@ -50,7 +51,7 @@ async def _access_member_and_client(db, organization_id, user_id, client_id):
         OrganizationMembership.is_active.is_(True),
         OrganizationMembership.role.in_({UserRole.client_admin, UserRole.client_site_user}),
     ))
-    client = await db.scalar(select(Client).where(Client.id == client_id, Client.organization_id == organization_id))
+    client = await db.scalar(select(Client).where(Client.id == client_id, Client.organization_id == organization_id, Client.is_active.is_(True)))
     if not member or not client:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Пользователь или клиент не найден")
     return member, client
@@ -64,7 +65,7 @@ async def _validate_access_scope(db, organization_id, member, client_id, site_id
     if site_id is None:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Выберите объект для менеджера объекта")
     site = await db.scalar(select(Site).where(
-        Site.id == site_id, Site.client_id == client_id, Site.organization_id == organization_id,
+        Site.id == site_id, Site.client_id == client_id, Site.organization_id == organization_id, Site.is_active.is_(True),
     ))
     if not site:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Объект не принадлежит клиенту")
@@ -104,8 +105,19 @@ async def list_access(client_id: uuid.UUID, db: AsyncSession = Depends(get_db),
 @router.post("/access", response_model=ClientAccessOut, status_code=status.HTTP_201_CREATED)
 async def grant_access(payload: ClientAccessCreate, db: AsyncSession = Depends(get_db),
                        user: CurrentUser = Depends(get_current_user)):
+    await lock_access_changes(db, user.organization_id, user)
     await _ensure_team_manager(user, payload.client_id, db)
     member, _ = await _access_member_and_client(db, user.organization_id, payload.user_id, payload.client_id)
+    existing = (await db.scalars(select(ClientUserAccess).where(
+        ClientUserAccess.organization_id == user.organization_id,
+        ClientUserAccess.user_id == payload.user_id,
+    ))).all()
+    if any(item.client_id != payload.client_id for item in existing):
+        raise HTTPException(status.HTTP_409_CONFLICT, "Пользователь уже относится к другому клиенту; используйте согласованное приглашение")
+    if user.role == UserRole.client_admin and not existing:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Нового участника подключайте по приглашению")
+    if any(item.client_id == payload.client_id and item.site_id == payload.site_id for item in existing):
+        raise HTTPException(status.HTTP_409_CONFLICT, "Такой доступ уже назначен; используйте изменение доступа")
     site = await _validate_access_scope(db, user.organization_id, member, payload.client_id, payload.site_id)
     access = ClientUserAccess(organization_id=user.organization_id, user_id=payload.user_id,
                               client_id=payload.client_id, site_id=site.id if site else None)
@@ -120,6 +132,7 @@ async def grant_access(payload: ClientAccessCreate, db: AsyncSession = Depends(g
 @router.patch("/access/{access_id}", response_model=ClientAccessOut)
 async def update_access(access_id: uuid.UUID, payload: ClientAccessUpdate, db: AsyncSession = Depends(get_db),
                         user: CurrentUser = Depends(get_current_user)):
+    await lock_access_changes(db, user.organization_id, user)
     access = await db.scalar(select(ClientUserAccess).where(
         ClientUserAccess.id == access_id, ClientUserAccess.organization_id == user.organization_id,
     ))
@@ -143,6 +156,7 @@ async def update_access(access_id: uuid.UUID, payload: ClientAccessUpdate, db: A
 @router.delete("/access/{access_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_access(access_id: uuid.UUID, db: AsyncSession = Depends(get_db),
                         user: CurrentUser = Depends(get_current_user)):
+    await lock_access_changes(db, user.organization_id, user)
     access = await db.scalar(select(ClientUserAccess).where(
         ClientUserAccess.id == access_id, ClientUserAccess.organization_id == user.organization_id,
     ))
@@ -152,7 +166,8 @@ async def delete_access(access_id: uuid.UUID, db: AsyncSession = Depends(get_db)
     db.add(AuditEvent(
         organization_id=user.organization_id, actor_user_id=user.id, action="client.member_disabled",
         entity_type="client_access", entity_id=str(access.id), details_json={"client_id": str(access.client_id)}))
-    await db.delete(access)
+    # Сохраняем tombstone: pending invite не должен восстановить удалённый scope.
+    access.is_active = False
     await db.commit()
 
 

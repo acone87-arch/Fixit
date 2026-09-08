@@ -156,7 +156,7 @@ async def test_author_delayed_photo_retry_and_revoked_membership(sec):
 async def test_manager_cannot_read_foreign_equipment_or_media(sec,index):
     own=await upload(sec,sec.repairs[index],sec.owner) if index<3 else None
     headers=auth(sec.actors['manager'],sec.org)
-    for url in [f'/api/equipment/{sec.equipment[index].id}',f'/api/repairs/{sec.repairs[index].id}/act.pdf']:
+    for url in [f'/api/equipment/{sec.equipment[index].id}/passport',f'/api/repairs/{sec.repairs[index].id}/act.pdf']:
         r=await sec.http.get(url,headers=headers);assert r.status_code in {403,404},r.text
     if own:
         assert own.status_code==201,own.text
@@ -227,3 +227,104 @@ async def test_deleted_access_cannot_be_restored_by_pending_invite(sec):
     r=await accept(sec,invitation,email=sec.actors['manager'].email)
     assert r.status_code==403,r.text
 
+
+async def test_concurrent_revoke_and_accept_never_restores_member(sec):
+    invitation=await invite(sec)
+    revoke, accepted=await asyncio.gather(
+        sec.http.delete(f'/api/users/{sec.actors["manager"].id}',headers=auth(sec.owner,sec.org)),
+        accept(sec,invitation,email=sec.actors['manager'].email))
+    assert revoke.status_code==204,revoke.text
+    assert accepted.status_code in {200,403},accepted.text
+    assert (await sec.http.get('/api/sites',headers=auth(sec.actors['manager'],sec.org))).status_code==401
+    async with sec.sessions() as db:
+        grants=(await db.scalars(select(ClientUserAccess).where(ClientUserAccess.user_id==sec.actors['manager'].id))).all()
+        assert grants and not any(g.is_active for g in grants)
+
+
+async def test_concurrent_access_delete_and_accept_preserves_revocation(sec):
+    invitation=await invite(sec)
+    async with sec.sessions() as db:
+        key=await db.scalar(select(ClientUserAccess.id).where(ClientUserAccess.user_id==sec.actors['manager'].id))
+    revoke,accepted=await asyncio.gather(
+        sec.http.delete(f'/api/client-portal/access/{key}',headers=auth(sec.owner,sec.org)),
+        accept(sec,invitation,email=sec.actors['manager'].email))
+    assert revoke.status_code==204,revoke.text
+    assert accepted.status_code in {200,403},accepted.text
+    assert (await sec.http.get('/api/sites',headers=auth(sec.actors['manager'],sec.org))).status_code==403
+
+
+async def test_concurrent_owner_deletion_preserves_one_admin(sec):
+    async with sec.sessions() as db:
+        member=await db.scalar(select(OrganizationMembership).where(OrganizationMembership.user_id==sec.actors['tech2'].id))
+        member.role=UserRole.admin;await db.commit()
+    results=await asyncio.gather(
+        sec.http.delete(f'/api/users/{sec.actors["tech2"].id}',headers=auth(sec.owner,sec.org)),
+        sec.http.delete(f'/api/users/{sec.owner.id}',headers=auth(sec.actors['tech2'],sec.org)))
+    assert sorted(r.status_code for r in results) in ([204,401],[204,403]),[r.text for r in results]
+    async with sec.sessions() as db:
+        assert await db.scalar(select(func.count()).select_from(OrganizationMembership).where(
+            OrganizationMembership.organization_id==sec.org.id,OrganizationMembership.is_active.is_(True),
+            OrganizationMembership.role.in_([UserRole.owner,UserRole.admin])))==1
+
+
+async def test_admin_cannot_disable_self_via_patch(sec):
+    r=await sec.http.patch(f'/api/users/{sec.owner.id}',headers=auth(sec.owner,sec.org),json={'is_active':False})
+    assert r.status_code==409,r.text
+    assert (await sec.http.get('/api/users/me',headers=auth(sec.owner,sec.org))).status_code==200
+
+
+async def test_global_account_survives_last_membership_deletion(sec):
+    r=await sec.http.delete(f'/api/users/{sec.tech.id}',headers=auth(sec.owner,sec.org));assert r.status_code==204,r.text
+    async with sec.sessions() as db:
+        assert (await db.get(User,sec.tech.id)).is_active
+    assert (await sec.http.get('/api/users/me',headers=auth(sec.tech,sec.org))).status_code==401
+
+
+@pytest.mark.parametrize('revoked',['client','site'])
+async def test_disabled_client_or_site_revokes_existing_scope(sec,revoked):
+    from app.models.customer import Client, Site
+    async with sec.sessions() as db:
+        row=await db.get(Client,sec.client.id) if revoked=='client' else await db.get(Site,sec.sites[0].id)
+        row.is_active=False;await db.commit()
+    assert (await sec.http.get('/api/sites',headers=auth(sec.actors['manager'],sec.org))).status_code==403
+
+
+async def test_new_internal_user_still_works_and_returns_membership(sec):
+    r=await sec.http.post('/api/users',headers=auth(sec.owner,sec.org),json={
+        'email':'new-staff@example.com','full_name':'Новый техник','password':PASSWORD,'role':'technician'})
+    assert r.status_code==201,r.text
+    assert r.json()['organization_id']==str(sec.org.id) and r.json()['role']=='technician'
+    login=await sec.http.post('/api/auth/login',json={'email':'new-staff@example.com','password':PASSWORD})
+    assert login.status_code==200,login.text
+
+
+async def test_canonical_sync_still_completes_and_retries_for_author(sec):
+    async with sec.sessions() as db:
+        sr=ServiceRequest(organization_id=sec.org.id,number=20,equipment_id=sec.equipment[0].id,
+            title='Новый ремонт',status='in_progress',assigned_technician_id=sec.tech.id)
+        db.add(sr);await db.commit()
+    item=payload(sec,task_id=None,service_request_id=str(sr.id))
+    first=await sync(sec,item);assert first['resolved_as']=='applied',first
+    again=await sync(sec,item);assert again['resolved_as']=='already_synced',again
+    assert (await sync(sec,item,sec.actors['tech2']))['resolved_as']=='failed'
+    async with sec.sessions() as db:
+        assert (await db.get(ServiceRequest,sr.id)).status=='completed'
+        assert await db.scalar(select(func.count()).select_from(Repair).where(Repair.service_request_id==sr.id))==1
+
+
+async def test_legacy_cannot_bypass_canonical_assignment(sec):
+    async with sec.sessions() as db:
+        sr=ServiceRequest(organization_id=sec.org.id,number=20,equipment_id=sec.equipment[0].id,
+            task_id=sec.task.id,title='Переназначенная',status='in_progress',assigned_technician_id=sec.actors['tech2'].id)
+        db.add(sr);await db.commit()
+    result=await sync(sec,payload(sec));assert result['resolved_as']=='failed',result
+
+
+async def test_cross_tenant_stock_reference_is_rejected_before_consumption(sec):
+    # Неполный legacy FK не должен позволять списывать чужую запчасть даже при старой некорректной строке stock.
+    async with sec.sessions() as db:
+        db.add(WarehouseStock(warehouse_id=sec.warehouse.id,part_id=sec.foreign_part.id,quantity=10));await db.commit()
+    result=await sync(sec,payload(sec,parts_used=[{'part_id':str(sec.foreign_part.id),'quantity':1}]))
+    assert result['resolved_as']=='failed',result
+    async with sec.sessions() as db:
+        stock=await db.get(WarehouseStock,(sec.warehouse.id,sec.foreign_part.id));assert stock.quantity==10

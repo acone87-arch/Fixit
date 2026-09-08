@@ -7,10 +7,10 @@
 - Репозиторий: `acone87-arch/Fixit`.
 - Исходный документ: `Fixit_Audit_2026-09-07.md`, независимый аудит от 07.09.2026.
 - Audit SHA: `80ec53e84402b24c3a8bb263d150e7bf7a0dd865`.
-- Последняя сверенная main: `80ec53e84402b24c3a8bb263d150e7bf7a0dd865`.
+- Последняя сверенная main: `87e3044f30a40b6d0cff0306e71f9aee83aca329`.
 - Последняя сверка: 08.09.2026; GitHub Compare `identical`, ahead/behind `0/0`, новых commits `0`, изменённых файлов `0`. GitHub commit lookup отдельно подтвердил HEAD.
 - P0.1 выполнен и проверен в PR [№3](https://github.com/acone87-arch/Fixit/pull/3); проверенный SHA кода: `cde3d81a79b7f29efd17f65bac0538914a75ca1c`. Изменения ещё не в main и не в production.
-- Текущий шаг: **P0.1 принят; остановка до команды на следующий этап**. Ветка `codex/p0-1-onboarding`; доказательства приёмки записаны ниже. Merge/deploy и P0.2 не начаты.
+- Текущий шаг: **P0.2 Security boundaries — в работе по команде пользователя**. Ветка `codex/p0-2-security`, PR №4. Сохранены P0.1 из PR №3 и актуальный main; merge в main/deploy не выполнялись.
 - **FIXIT PILOT READY не подтверждён.**
 
 ### Как читать доказательства
@@ -52,7 +52,7 @@
 | Этап | Статус | Основание / следующий критерий |
 |---|---|---|
 | P0.1 Onboarding | 🟢 выполнено и проверено | 186 Python passed, включая 18 PostgreSQL и 3 browser E2E; пять JS runtime-файлов прошли. PR №3, production не обновлён |
-| P0.2 Security boundaries | 🔴 blocker | Global User, legacy/warehouse scope, Repair media write, legacy sync |
+| P0.2 Security boundaries | 🟡 в работе | HTTP/PostgreSQL воспроизведение: 24 failed, 192 passed; исправления проходят приёмку в PR №4 |
 | P0.3 QR + ServiceRequest | 🔴 blocker | Повтор QR, approval, completed_at, конкурентный retry/номер |
 | P0.4 Technician result | 🔴 blocker | Исходные фото и клиентский результат не доведены; полный E2E не подтверждён |
 | P0.5 Durable offline queue | 🔴 blocker | data_url, atomic queue, ownership, межконтекстные гонки |
@@ -87,7 +87,7 @@ DoD подтверждён на PostgreSQL 16 и Chromium в Actions. 18 PG-сц
 
 ## P0.2 — Security boundaries
 
-**Статус: 🔴 blocker. Исполнение не начато.**
+**Статус: 🟡 в работе.**
 
 **Definition of Done:** Organization A и Client A не могут читать или менять данные Organization B / Client B через основные или legacy API. Отзыв доступа действует сервером; общая учётная запись не позволяет администратору одного tenant отключить другой tenant. Доступ на чтение не даёт права менять ремонт.
 
@@ -359,3 +359,13 @@ Verify: main по-прежнему `80ec53e84402b24c3a8bb263d150e7bf7a0dd865`; c
 Предел приёмки: PG fixture создаёт schema из моделей, не проверяет Alembic upgrade/restore; браузер — Chromium с desktop/mobile viewport, не реальный iOS/Android; права проверены в пределах onboarding, а не всей legacy/media/warehouse поверхности. Полный Invite → QR → Repair → Act → History E2E, миграции, HTTPS upload, backup/restore/rollback остаются соответствующим P0.2–P0.7. **FIXIT PILOT READY всего продукта не объявляется.**
 
 Следующий рекомендованный этап — **P0.2 Security boundaries**: глобальный User и legacy/media/warehouse ACL остаются подтверждёнными препятствиями безопасному пилоту. Начинать только после команды пользователя «Начинай следующий этап». Merge/deploy не выполнялись.
+
+
+### P0.2 — Verify / Reproduce, 08.09.2026
+
+- Текущий main: `87e3044f30a40b6d0cff0306e71f9aee83aca329`; после прошлого `80ec53e` ровно один commit, два файла: `app/routers/customers.py`, `tests/test_client_detail_regression.py`. Dependency назначения техника уже исправлена в main — повторное исправление не выполнялось. Сохранены его многострочная сигнатура и тест, а также проверенные P0.1 membership checks/locking.
+- PR №3 ещё не слит. Изолированная ветка P0.2 содержит его проверенный HEAD `78947c9` и новый main; конфликт одной сигнатуры разрешён с сохранением обоих изменений. Production не менялся.
+- [PR №4](https://github.com/acone87-arch/Fixit/pull/4), воспроизводящий SHA `17784c735db71826501f5d116fb8db69dc02a55d`.
+- [Actions 34189991116](https://github.com/acone87-arch/Fixit/actions/runs/34189991116): **24 failed, 192 passed, 0 skipped**, 142 warnings. Все 24 failures — новые HTTP/PostgreSQL security-регрессии. Подтверждены global User mutation, existing-email присоединение без согласия, клиентское чтение Task/warehouses/parts/stock, клиентская и fleet-tech запись Repair media, бесконтекстный/чужой/cancelled legacy sync, чужой sync retry, NULL Site grant → весь Client, подключение директором чужого Client User и восстановление удалённого access старым invite.
+- Правильные старые Task/Ticket-пакеты и авторская досылка фото сохраняются. Ошибки unknown ticket/foreign part без stock уже откатывались БД; добавляется явная проверка до записи, не выдавать прежний rollback за новую уязвимость.
+- После локальных исправлений: **165 passed, 51 skipped, 4 warnings** (до добавления дополнительных concurrency-регрессий); skipped — PG/browser без локального PostgreSQL. Это не итог приёмки P0.2. Новые tests проверяют одновременный revoke/accept, двух администраторов, canonical sync и старые некорректные связи stock.

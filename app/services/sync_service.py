@@ -1,4 +1,5 @@
 import uuid
+import logging
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -6,7 +7,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_technician_mobile_warehouse_id
-from app.models.core import Equipment, EquipmentStatus, Task
+from app.models.core import Equipment, EquipmentStatus, Task, TaskStatus, Ticket, TicketStatus
+from app.models.warehouse import Part
 from app.models.repair import Repair, RepairPart, SyncOperation, SyncStatus
 from app.schemas.repair import RepairCreate, SyncItemResult
 from app.services.stock_service import InsufficientStockError, decrement_stock
@@ -64,6 +66,12 @@ async def sync_one_repair(db: AsyncSession, technician_id: uuid.UUID, organizati
         SyncOperation.organization_id == organization_id,
     ))
     if existing_op:
+        owned = await db.scalar(select(Repair).where(Repair.id == existing_op.repair_id,
+            Repair.organization_id == organization_id, Repair.technician_id == technician_id,
+            Repair.equipment_id == payload.equipment_id))
+        if (not owned or any(getattr(payload, field) is not None and getattr(payload, field) != getattr(owned, field)
+                for field in ("service_request_id", "task_id", "ticket_id"))):
+            return SyncItemResult(local_uuid=payload.local_uuid, resolved_as="failed", error="Операция не принадлежит этому ремонту и пользователю")
         return SyncItemResult(
             local_uuid=payload.local_uuid,
             server_id=existing_op.repair_id,
@@ -88,6 +96,8 @@ async def sync_one_repair(db: AsyncSession, technician_id: uuid.UUID, organizati
             ticket_id = payload.ticket_id
             service_request_id = payload.service_request_id
             linked_request = None
+            if not any((service_request_id, payload.task_id, ticket_id)):
+                raise _SyncFailure("Требуется назначенная заявка или исторический наряд/обращение")
             if service_request_id:
                 linked_request = await db.scalar(select(ServiceRequest).where(
                     ServiceRequest.id == service_request_id,
@@ -117,7 +127,38 @@ async def sync_one_repair(db: AsyncSession, technician_id: uuid.UUID, organizati
                     raise _SyncFailure("Наряд не найден или не назначен вам")
                 if task.equipment_id != equipment.id:
                     raise _SyncFailure("Наряд относится к другому оборудованию")
+                if task.status not in {TaskStatus.assigned, TaskStatus.in_progress}:
+                    raise _SyncFailure("Исторический наряд закрыт или отменён")
+                if ticket_id and task.ticket_id != ticket_id:
+                    raise _SyncFailure("Обращение не соответствует наряду")
+                if linked_request and linked_request.task_id != task.id:
+                    raise _SyncFailure("Наряд не соответствует заявке")
                 ticket_id = task.ticket_id or ticket_id
+
+            if ticket_id:
+                ticket = await db.scalar(select(Ticket).where(Ticket.id == ticket_id,
+                    Ticket.organization_id == organization_id).with_for_update())
+                if not ticket or ticket.equipment_id != equipment.id:
+                    raise _SyncFailure("Обращение не найдено для этого оборудования")
+                if linked_request and linked_request.ticket_id != ticket.id:
+                    raise _SyncFailure("Обращение не соответствует заявке")
+                # Task является назначением для старых intake без assignee Ticket.
+                if not task and not linked_request and (ticket.assigned_technician_id != technician_id
+                        or ticket.status != TicketStatus.assigned):
+                    raise _SyncFailure("Историческое обращение не назначено вам или закрыто")
+
+            if not linked_request:
+                legacy_query = select(ServiceRequest).where(ServiceRequest.organization_id == organization_id)
+                legacy_query = legacy_query.where(ServiceRequest.task_id == task.id) if task else legacy_query.where(ServiceRequest.ticket_id == ticket_id)
+                legacy_request = await db.scalar(legacy_query.with_for_update())
+                if legacy_request:
+                    validate_canonical_completion(legacy_request, organization_id=organization_id,
+                        technician_id=technician_id, equipment_id=equipment.id)
+
+            for item in payload.parts_used:
+                part = await db.scalar(select(Part.id).where(Part.id == item.part_id, Part.organization_id == organization_id))
+                if not part:
+                    raise _SyncFailure("Запчасть не найдена в организации")
 
             # Для акта без запчастей склад вообще не нужен. Раньше именно это
             # лишнее требование не давало технику закрыть выполненный ремонт.
@@ -193,8 +234,9 @@ async def sync_one_repair(db: AsyncSession, technician_id: uuid.UUID, organizati
 
     except _SyncFailure as exc:
         return SyncItemResult(local_uuid=payload.local_uuid, resolved_as="failed", error=exc.message)
-    except Exception as exc:  # noqa: BLE001 — любая непредвиденная ошибка тоже не
+    except Exception:  # noqa: BLE001 — любая непредвиденная ошибка тоже не
         # должна обрывать обработку остальных элементов пакета 500-м ответом.
-        return SyncItemResult(local_uuid=payload.local_uuid, resolved_as="failed", error=str(exc))
+        logging.getLogger(__name__).exception("Ошибка синхронизации ремонта")
+        return SyncItemResult(local_uuid=payload.local_uuid, resolved_as="failed", error="Не удалось сохранить ремонт. Повторите синхронизацию или обратитесь в сервисную компанию")
 
     return result

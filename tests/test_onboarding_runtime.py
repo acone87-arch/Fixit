@@ -105,7 +105,7 @@ def test_service_technicians_route_receives_db_and_current_user(scenario):
     technician_id = uuid.uuid4()
     app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(
         id=s.user.id, organization_id=s.invite.organization_id, role=UserRole.owner)
-    s.db.scalar.side_effect = [SimpleNamespace(id=s.invite.client_id)]
+    s.db.scalar.side_effect = [SimpleNamespace(is_active=True), s.membership, s.user, SimpleNamespace(id=s.invite.client_id)]
     s.db.scalars.side_effect = [SimpleNamespace(all=lambda: [technician_id]),
                                SimpleNamespace(all=lambda: [])]
     response = s.http.put(f'/api/clients/{s.invite.client_id}/technicians',
@@ -138,7 +138,7 @@ async def test_invite_capability_lifecycle(invalid):
     objects = {'organization': organization, 'client': client, 'site': site, 'inviter': inviter}
     if invalid in objects: objects[invalid].is_active = False
     db = AsyncMock()
-    db.scalar.side_effect = [invitation, None if invalid == 'inviter_membership' else membership]
+    db.scalar.side_effect = [invitation, organization, None if invalid == 'inviter_membership' else membership]
     mapping = {Organization: organization, Client: client, Site: site, User: inviter}
     db.get.side_effect = lambda model, key: mapping[model]
     if invalid:

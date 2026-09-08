@@ -22,6 +22,7 @@ from app.models.organization import AuditEvent, Organization, OrganizationMember
 from app.schemas.customer import ClientInviteCreate, ClientInviteOut, InviteAcceptRequest
 from app.schemas.user import Token
 from app.services.client_portal import client_scope
+from app.services.access_changes import lock_access_changes
 
 router = APIRouter(prefix="/api/client-portal", tags=["client invites"])
 public_router = APIRouter(prefix="/api/join", tags=["client invites"])
@@ -69,6 +70,7 @@ async def _client_or_404(client_id: uuid.UUID, user: CurrentUser, db: AsyncSessi
 
 async def _create_invite(client_id: uuid.UUID, payload: ClientInviteCreate, role: UserRole,
                          user: CurrentUser, db: AsyncSession) -> ClientInviteOut:
+    await lock_access_changes(db, user.organization_id, user)
     await _can_manage_client(user, client_id, db)
     client = await _client_or_404(client_id, user, db)
     if not client.is_active:
@@ -112,6 +114,7 @@ async def list_invites(client_id: uuid.UUID, db: AsyncSession = Depends(get_db),
 
 @router.post("/invites/{invite_id}/revoke", response_model=ClientInviteOut)
 async def revoke_invite(invite_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
+    await lock_access_changes(db, user.organization_id, user)
     invite = await db.scalar(select(ClientInvite).where(ClientInvite.id == invite_id, ClientInvite.organization_id == user.organization_id).with_for_update())
     if not invite: raise HTTPException(status.HTTP_404_NOT_FOUND, "Приглашение не найдено")
     await _can_manage_client(user, invite.client_id, db)
@@ -138,8 +141,13 @@ async def invite_qr(invite_id: uuid.UUID, token: str, db: AsyncSession = Depends
 
 async def _usable_invite(token: str, db: AsyncSession, lock: bool = False) -> ClientInvite:
     query = select(ClientInvite).where(ClientInvite.token_hash == _digest(token))
-    if lock: query = query.with_for_update()
     invite = await db.scalar(query)
+    if lock and invite:
+        try:
+            await lock_access_changes(db, invite.organization_id)
+        except HTTPException as exc:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Приглашение недействительно") from exc
+        await db.refresh(invite, with_for_update=True)
     now = datetime.now(timezone.utc)
     if not invite or invite.status != ClientInviteStatus.pending or invite.expires_at <= now:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Приглашение недействительно, отозвано или истекло")

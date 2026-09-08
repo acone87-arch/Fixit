@@ -15,6 +15,7 @@ from app.models.organization import AuditEvent
 from app.models.service_request import ServiceRequest
 from app.schemas.customer import ClientCreate, ClientOut, ClientUpdate, SiteCreate, SiteOut, SiteUpdate, TechnicianClientAccessUpdate
 from app.services.client_portal import CLIENT_ROLES, client_scope
+from app.services.access_changes import lock_access_changes
 
 router = APIRouter(prefix="/api/clients", tags=["clients"])
 sites_router = APIRouter(prefix="/api/sites", tags=["sites"])
@@ -233,6 +234,7 @@ async def replace_service_technicians(
     db: AsyncSession = Depends(get_db),
     user: CurrentUser = Depends(require_roles(UserRole.owner, UserRole.admin, UserRole.dispatcher)),
 ):
+    await lock_access_changes(db, user.organization_id, user)
     client = await db.scalar(select(Client).where(Client.id == client_id, Client.organization_id == user.organization_id).with_for_update())
     if not client: raise HTTPException(status.HTTP_404_NOT_FOUND, "Клиент не найден")
     technician_ids = set(payload.technician_ids)

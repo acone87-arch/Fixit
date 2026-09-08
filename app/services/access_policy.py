@@ -66,3 +66,12 @@ async def ensure_repair_access(repair: Repair, user: CurrentUser, db: AsyncSessi
                 return repair
         await ensure_equipment_access(repair.equipment_id, user, db)
     return repair
+
+
+async def ensure_repair_write_access(repair: Repair, user: CurrentUser) -> Repair:
+    """Досылать результат может автор, даже после completion и отзыва fleet grant."""
+    if repair.organization_id != user.organization_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Акт ремонта не найден")
+    if user.role in STAFF_ROLES or (user.role == UserRole.technician and repair.technician_id == user.id):
+        return repair
+    raise HTTPException(status.HTTP_403_FORBIDDEN, "Нет права изменять результат ремонта")
