@@ -125,6 +125,7 @@ async def update_user(
     user = await db.scalar(select(User).where(User.id == user_id).with_for_update())
     changes = payload.model_dump(exclude_unset=True)
     active = changes.pop("is_active", None)
+    changes = {field: value for field, value in changes.items() if value != getattr(user, field)}
     if changes and await db.scalar(select(OrganizationMembership.id).where(
         OrganizationMembership.user_id == user_id,
         OrganizationMembership.organization_id != current.organization_id,

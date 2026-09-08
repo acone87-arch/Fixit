@@ -61,8 +61,10 @@ async def list_clients(
         .order_by(Client.name)
     )
     if user.role in CLIENT_ROLES:
-        client_id, _ = await client_scope(user, db)
+        client_id, allowed_site_ids = await client_scope(user, db)
         query = query.where(Client.id == client_id)
+        if allowed_site_ids is not None:
+            query = query.where(Site.id.in_(allowed_site_ids))
     elif user.role == UserRole.technician:
         query = query.where(Client.id.in_(select(TechnicianClientAccess.client_id).where(
             TechnicianClientAccess.organization_id == user.organization_id,

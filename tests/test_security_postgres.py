@@ -10,7 +10,7 @@ from PIL import Image
 from sqlalchemy import func, select
 
 from app.core.security import hash_password
-from app.models.core import Equipment, Task, Ticket, User, UserRole
+from app.models.core import Equipment, EquipmentType, Task, Ticket, User, UserRole
 from app.models.customer import ClientUserAccess, TechnicianClientAccess
 from app.models.organization import Organization, OrganizationMembership
 from app.models.repair import Repair, RepairAttachment, SyncOperation
@@ -28,6 +28,8 @@ async def sec(pg, tmp_path, monkeypatch):
     async with pg.sessions() as db:
         foreign_org = await db.get(Organization, pg.sites[3].organization_id)
         pg.foreign_org = foreign_org
+        foreign_kind=EquipmentType(organization_id=foreign_org.id,name='Чужой тип')
+        db.add(foreign_kind);await db.flush()
         actors = {}
         for name, org, role in [('manager',pg.org,UserRole.client_site_user),
                 ('director',pg.org,UserRole.client_admin),('tech2',pg.org,UserRole.technician),
@@ -42,7 +44,7 @@ async def sec(pg, tmp_path, monkeypatch):
             TechnicianClientAccess(organization_id=pg.org.id,technician_id=actors['tech2'].id,client_id=pg.client.id)])
         equipment=[]
         for i,site in enumerate(pg.sites):
-            eq=Equipment(organization_id=site.organization_id,site_id=site.id,equipment_type_id=pg.kind.id,
+            eq=Equipment(organization_id=site.organization_id,site_id=site.id,equipment_type_id=foreign_kind.id if i==3 else pg.kind.id,
                 name='Equipment '+str(i),serial_number='SEC-'+str(i))
             db.add(eq); equipment.append(eq)
         await db.flush(); pg.equipment=equipment
@@ -95,7 +97,8 @@ async def sync(sec, item, actor=None):
 async def test_shared_user_disable_is_membership_only(sec):
     async with sec.sessions() as db:
         db.add(OrganizationMembership(organization_id=sec.foreign_org.id,user_id=sec.tech.id,role=UserRole.technician));await db.commit()
-    response=await sec.http.patch(f'/api/users/{sec.tech.id}',headers=auth(sec.owner,sec.org),json={'is_active':False})
+    response=await sec.http.patch(f'/api/users/{sec.tech.id}',headers=auth(sec.owner,sec.org),
+        json={'is_active':False,'full_name':sec.tech.full_name,'phone':sec.tech.phone})
     assert response.status_code==200,response.text
     assert response.json()['is_active'] is False
     assert (await sec.http.get('/api/users/me',headers=auth(sec.tech,sec.org))).status_code==401
@@ -328,3 +331,50 @@ async def test_cross_tenant_stock_reference_is_rejected_before_consumption(sec):
     assert result['resolved_as']=='failed',result
     async with sec.sessions() as db:
         stock=await db.get(WarehouseStock,(sec.warehouse.id,sec.foreign_part.id));assert stock.quantity==10
+
+
+@pytest.mark.parametrize('index',[1,2,3])
+async def test_manager_cannot_move_equipment_or_change_foreign_media(sec,index):
+    headers=auth(sec.actors['manager'],sec.org)
+    moved=await sec.http.patch(f'/api/equipment/{sec.equipment[0].id}',headers=headers,json={'site_id':str(sec.sites[index].id)})
+    assert moved.status_code in {403,422},moved.text
+    photo=await sec.http.post(f'/api/equipment/{sec.equipment[index].id}/photo',headers=headers,
+        files={'file':('photo.png',png(),'image/png')})
+    assert photo.status_code in {403,404},photo.text
+    summary=await sec.http.get(f'/api/clients/{sec.sites[index].client_id}/summary',headers=headers)
+    if index>1: assert summary.status_code==404,summary.text
+
+
+async def test_foreign_tenant_media_has_positive_owner_control(sec):
+    foreign_headers=auth(sec.actors['foreign_owner'],sec.foreign_org)
+    response=await sec.http.post(f'/api/repairs/{sec.repairs[3].id}/attachments',headers=foreign_headers,
+        data={'kind':'after','client_id':'foreign-photo'},files={'file':('photo.png',png(),'image/png')})
+    assert response.status_code==201,response.text
+    photo=response.json()['download_url']
+    for path in [photo,f'/api/repairs/{sec.repairs[3].id}/act.pdf',f'/api/equipment/{sec.equipment[3].id}/passport']:
+        own=await sec.http.get(path,headers=foreign_headers);assert own.status_code==200,own.text
+        for actor in [sec.owner,sec.actors['manager'],sec.actors['director'],sec.actors['tech2']]:
+            denied=await sec.http.get(path,headers=auth(actor,sec.org));assert denied.status_code in {403,404},denied.text
+
+
+async def test_client_reads_own_service_act_and_author_photos(sec):
+    uploaded=await upload(sec,sec.repairs[0],sec.tech);assert uploaded.status_code==201,uploaded.text
+    for actor in [sec.actors['manager'],sec.actors['director']]:
+        for path in [uploaded.json()['download_url'],f'/api/repairs/{sec.repairs[0].id}/act.pdf',f'/api/equipment/{sec.equipment[0].id}/passport']:
+            r=await sec.http.get(path,headers=auth(actor,sec.org));assert r.status_code==200,r.text
+
+
+async def test_site_reassignment_does_not_allow_old_pending_invite_to_restore_scope(sec):
+    invitation=await invite(sec)
+    async with sec.sessions() as db:
+        key=await db.scalar(select(ClientUserAccess.id).where(ClientUserAccess.user_id==sec.actors['manager'].id))
+    r=await sec.http.patch(f'/api/client-portal/access/{key}',headers=auth(sec.owner,sec.org),json={'site_id':str(sec.sites[1].id)})
+    assert r.status_code==200,r.text
+    r=await accept(sec,invitation,email=sec.actors['manager'].email)
+    assert r.status_code==403,r.text
+
+
+async def test_manager_client_counts_respect_site_scope(sec):
+    r=await sec.http.get('/api/clients',headers=auth(sec.actors['manager'],sec.org));assert r.status_code==200,r.text
+    assert len(r.json())==1
+    assert r.json()[0]['site_count']==1 and r.json()[0]['equipment_count']==1,r.text

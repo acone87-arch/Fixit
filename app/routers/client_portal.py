@@ -140,9 +140,28 @@ async def update_access(access_id: uuid.UUID, payload: ClientAccessUpdate, db: A
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Доступ не найден")
     await _ensure_team_manager(user, access.client_id, db)
     member, _ = await _access_member_and_client(db, user.organization_id, access.user_id, access.client_id)
+    if payload.is_active is True:
+        conflicting_client = await db.scalar(select(ClientUserAccess.id).where(
+            ClientUserAccess.organization_id == user.organization_id,
+            ClientUserAccess.user_id == access.user_id,
+            ClientUserAccess.client_id != access.client_id,
+            ClientUserAccess.is_active.is_(True),
+        ).limit(1))
+        if conflicting_client:
+            raise HTTPException(status.HTTP_409_CONFLICT, "Пользователь уже подключён к другому клиенту")
     if "site_id" in payload.model_fields_set:
         site = await _validate_access_scope(db, user.organization_id, member, access.client_id, payload.site_id)
+        previous_site_id = access.site_id
         access.site_id = site.id if site else None
+        if previous_site_id != access.site_id:
+            # Сохраняем отзыв прежнего Site, иначе старый invite восстановит его.
+            try:
+                await db.flush()
+            except Exception as exc:
+                await db.rollback()
+                raise HTTPException(status.HTTP_409_CONFLICT, "Такой доступ уже назначен") from exc
+            db.add(ClientUserAccess(organization_id=user.organization_id, user_id=access.user_id,
+                client_id=access.client_id, site_id=previous_site_id, is_active=False))
     if "is_active" in payload.model_fields_set:
         access.is_active = payload.is_active
     try: await db.commit()
