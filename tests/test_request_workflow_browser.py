@@ -95,7 +95,10 @@ async def test_pulse_approval_payload_and_dispatcher_result(live, flow, target):
             await expect(page.locator('#request-work')).to_have_value(APPROVAL['work'])
         except Exception:
             Path('test-results').mkdir(exist_ok=True)
-            await page.screenshot(path=f'test-results/p03-approval-{target}.png', full_page=True)
+            for ci, context in enumerate(browser.contexts):
+                for pi, active_page in enumerate(context.pages):
+                    print('Диагностика приёмки', active_page.url, (await active_page.locator('body').inner_text())[:4000])
+                    await active_page.screenshot(path=f'test-results/p03-approval-{target}-{ci}-{pi}.png', full_page=True)
             raise
         finally:
             await browser.close()

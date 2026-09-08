@@ -1092,6 +1092,8 @@ async function renderPulse(content) {
   const [clients, sites, equipment, requests, users] = await Promise.all([
     api('/clients'), api('/sites'), api('/equipment'), api('/service-requests'), api('/users'), ensureEquipmentTypes(),
   ]);
+  // Ответы dashboard могут прийти уже после открытия заявки на согласование.
+  if (state.route !== 'pulse') return;
   state.clients = clients;
   state.sites = sites;
   const activeRequests = requests.filter((request) => !['completed', 'closed', 'cancelled'].includes(request.status));
