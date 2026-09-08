@@ -42,7 +42,7 @@ async def join(page, invitation, email, password=PASSWORD):
     await page.locator('#join-name').fill('Менеджер приёмки')
     await page.locator('#join-email').fill(email)
     await page.locator('#join-password').fill(password)
-    await page.locator('#join-form button[type=submit]').click()
+    await page.locator('#join-form').get_by_role('button', name='Продолжить', exact=True).click()
 
 
 @pytest.mark.parametrize('mobile', [False, True], ids=['desktop', 'mobile-viewport'])
@@ -102,7 +102,7 @@ async def test_existing_user_director_joins_existing_client_in_browser(live):
             await join(page,invitation,live.existing.email,password='incorrect-password')
             await expect(page.locator('#login-error')).to_contain_text('Неверный пароль')
             await page.locator('#join-password').fill(PASSWORD)
-            await page.locator('#join-form button[type=submit]').click()
+            await page.locator('#join-form').get_by_role('button', name='Продолжить', exact=True).click()
             await page.locator('#onboarding-continue').click(timeout=15000)
             await page.locator('#join-welcome-primary').click()
             await expect(page.locator('#client-detail-panel')).to_contain_text('Другой Site')
