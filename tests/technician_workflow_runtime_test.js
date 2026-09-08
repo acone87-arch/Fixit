@@ -78,3 +78,22 @@ assert.match(techSource, /attachment\.file instanceof Blob/);
 assert.match(workerSource, /await syncPendingAttachmentsFromSW\(token\)/);
 assert.match(workerSource, /await self\.TechDB\.delete\('pendingAttachments', attachment\.id\)/);
 console.log('technician workflow runtime: ok');
+
+// Настоящий async renderer: медленный dashboard не должен затереть открытую заявку.
+(async () => {
+  const pulseSource = source.slice(source.indexOf('async function renderPulse('), source.indexOf('async function renderTechnicianPulse('));
+  let release;
+  const pending = new Promise((resolve) => { release = resolve; });
+  const state = { me: { role: 'owner' }, route: 'pulse' };
+  const content = { innerHTML: '', querySelectorAll: () => [] };
+  const runtime = { state, api: () => pending, ensureEquipmentTypes: () => Promise.resolve(),
+    badge: () => '', esc: String, fmtDate: () => '', Date };
+  vm.runInNewContext(`${pulseSource}; this.render = renderPulse;`, runtime);
+  const rendering = runtime.render(content);
+  state.route = 'requests';
+  content.innerHTML = 'Открытая заявка на согласование';
+  release([]);
+  await rendering;
+  assert.equal(content.innerHTML, 'Открытая заявка на согласование', 'Старый dashboard затёр открытую заявку');
+  console.log('Асинхронный переход Pulse → заявка: пройдено');
+})().catch((error) => { console.error(error); process.exitCode = 1; });

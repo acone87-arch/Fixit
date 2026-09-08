@@ -41,7 +41,8 @@ def test_access_update_and_delete_are_tenant_scoped_and_do_not_delete_user():
     assert ROUTER.count("ClientUserAccess.organization_id == user.organization_id") >= 2
     assert "Client.organization_id == user.organization_id" in ROUTER
     delete_block = ROUTER.split('async def delete_access', 1)[1]
-    assert "await db.delete(access)" in delete_block
+    assert "access.is_active = False" in delete_block
+    assert "await db.delete(access)" not in delete_block
     assert "await db.delete(account)" not in delete_block
     assert "await db.delete(user)" not in delete_block
 

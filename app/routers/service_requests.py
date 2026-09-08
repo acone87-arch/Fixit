@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import CurrentUser, get_current_user, require_roles
 from app.database import get_db
-from app.models.core import Equipment, EquipmentAttachment, EquipmentType, User, UserRole
+from app.models.core import Equipment, EquipmentAttachment, EquipmentStatus, EquipmentType, User, UserRole
 from app.models.customer import Client, Site
 from app.models.organization import OrganizationMembership
 from app.models.repair import Repair, RepairAttachment, RepairPart
@@ -125,9 +125,12 @@ async def create_service_request(
     equipment = await db.scalar(select(Equipment).where(
         Equipment.id == payload.equipment_id,
         Equipment.organization_id == user.organization_id,
-    ))
+    ).with_for_update())
     if not equipment:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Оборудование не найдено в организации")
+    if equipment.status in {EquipmentStatus.working, EquipmentStatus.needs_repair}:
+        equipment.status = EquipmentStatus.needs_repair
+        equipment.version += 1
     technician_id = payload.assigned_technician_id
     request = ServiceRequest(
         organization_id=user.organization_id, number=await next_number(db, user.organization_id),
@@ -252,8 +255,8 @@ async def update_status(request_id: uuid.UUID, payload: ServiceRequestStatusUpda
     if payload.status not in REQUEST_STATUSES: raise HTTPException(422, "Неизвестный статус заявки")
     request = await locked_request(db, request_id, user.organization_id)
     details = payload.details or {}
-    await transition(db, request, user, payload.status, approval_target=details.get("approval_target"),
-                     reason=details.get("reason"), note=payload.note)
+    await transition(db, request, user, payload.status, approval_target=details.get("approval_target", "internal" if details.get("approval") else None),
+                     approval=details.get("approval"), reason=details.get("reason"), note=payload.note)
     await db.commit(); await db.refresh(request)
     result = await serialize(db, request, user.organization_id)
     if request.status == "waiting_approval" and request.approval_target == "internal":

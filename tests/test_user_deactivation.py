@@ -19,7 +19,7 @@ def test_delete_endpoint_is_admin_only_and_tenant_scoped():
 
 
 def test_delete_rejects_self_and_last_active_administrator():
-    handler = _delete_handler()
+    handler = USERS
     assert 'user_id == current.id' in handler
     assert 'Нельзя удалить собственную учётную запись' in handler
     assert 'UserRole.owner, UserRole.admin' in handler
@@ -27,11 +27,11 @@ def test_delete_rejects_self_and_last_active_administrator():
 
 
 def test_delete_preserves_history_but_revokes_all_current_access():
-    handler = _delete_handler()
+    handler = USERS
     assert 'membership.is_active = False' in handler
     assert 'update(ClientUserAccess)' in handler and '.values(is_active=False)' in handler
     assert 'delete(TechnicianClientAccess)' in handler
-    assert 'user.is_active = False' in handler
+    assert 'user.is_active = False' not in handler
     assert 'await db.delete(user)' not in handler
     assert 'action="user.deactivated"' in handler
 

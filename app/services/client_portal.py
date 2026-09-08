@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import CurrentUser
 from app.models.core import Equipment, UserRole
-from app.models.customer import ClientUserAccess, Site
+from app.models.customer import Client, ClientUserAccess, Site
 
 
 CLIENT_ROLES = {UserRole.client_admin, UserRole.client_site_user}
@@ -26,9 +26,21 @@ async def client_scope(user: CurrentUser, db: AsyncSession) -> tuple[uuid.UUID, 
     if len(client_ids) != 1:
         raise HTTPException(status.HTTP_409_CONFLICT, "Выберите одну клиентскую организацию для входа")
     client_id = next(iter(client_ids))
-    if user.role == UserRole.client_admin or any(row.site_id is None for row in rows):
+    client = await db.scalar(select(Client).where(Client.id == client_id,
+        Client.organization_id == user.organization_id, Client.is_active.is_(True)))
+    if not client:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Клиент недоступен")
+    if user.role == UserRole.client_admin:
+        if not any(row.site_id is None for row in rows):
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Не назначен доступ руководителя к клиенту")
         return client_id, None
-    return client_id, {row.site_id for row in rows if row.site_id}
+    if any(row.site_id is None for row in rows):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Менеджеру объекта требуется явный доступ к Site")
+    site_ids = set((await db.scalars(select(Site.id).where(Site.id.in_({r.site_id for r in rows}),
+        Site.organization_id == user.organization_id, Site.client_id == client_id, Site.is_active.is_(True)))).all())
+    if not site_ids:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Нет доступа к активным объектам")
+    return client_id, site_ids
 
 
 async def ensure_client_equipment(equipment_id: uuid.UUID, user: CurrentUser, db: AsyncSession) -> Equipment:

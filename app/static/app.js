@@ -107,7 +107,7 @@ async function maybeShowClientJoinWelcome() {
     const equipment = await api('/client-portal/equipment').catch(() => []);
     const hasEquipment = equipment.length > 0;
     content.insertAdjacentHTML('afterbegin', `<section class="client-join-welcome"><span>ОБЪЕКТ ПОДКЛЮЧЁН</span><h2>${esc(welcome.site_name || 'Ваш объект')}</h2><p>Вы управляете оборудованием и заявками только на этом объекте.</p><div><button class="btn btn-primary" id="join-welcome-primary">${hasEquipment ? 'Открыть оборудование' : 'Добавить оборудование'}</button><button class="btn btn-secondary" id="join-welcome-request">Создать заявку</button><button class="btn btn-ghost" id="join-welcome-qr">Как получить QR</button></div><button class="client-join-dismiss" id="join-welcome-dismiss">Понятно</button></section>`);
-    content.querySelector('#join-welcome-primary').addEventListener('click', async () => { dismissJoinWelcome(); if (hasEquipment) { location.hash = 'equipment'; return; } await ensureCustomers(true); openCreateEquipmentModal(); });
+    content.querySelector('#join-welcome-primary').addEventListener('click', async () => { dismissJoinWelcome(); if (hasEquipment) { location.hash = 'equipment'; return; } await ensureCustomers(true); await openCreateEquipmentModal(); });
     content.querySelector('#join-welcome-request').addEventListener('click', () => { dismissJoinWelcome(); openClientRequestForm(); });
     content.querySelector('#join-welcome-qr').addEventListener('click', () => { dismissJoinWelcome(); toast('Откройте паспорт оборудования и выберите «Скачать QR».', 'info'); });
   } else if (welcome.role === 'client_admin') {
@@ -662,9 +662,16 @@ async function renderClientRequest(content, id) {
   const item = await api(`/client-portal/requests/${id}`);
   const events = item.history.filter((entry) => ['request.created','technician.assigned','technician.arrived','work.started','request.waiting_parts','request.waiting_approval','approval.approved','approval.rejected','repair.completed','service_act.generated'].includes(entry.type));
   const timeline = events.map((entry) => `<div class="client-timeline-item"><i></i><div><strong>${esc(entry.type === 'approval.rejected' ? 'Согласование отклонено' : entry.type === 'approval.approved' ? 'Работы согласованы' : CLIENT_STATUS[entry.details?.to] || entry.message)}</strong>${entry.details?.comment ? `<p>${esc(entry.details.comment)}</p>` : ''}<small>${fmtDate(entry.at)}</small></div></div>`).join('') || '<div class="client-empty">История появится после начала работы.</div>';
-  const approval = item.status === 'waiting_approval' && item.approval_target === 'client' ? `<section class="client-approval"><span>ТРЕБУЕТСЯ СОГЛАСОВАНИЕ</span><h3>Сервис просит подтвердить работы</h3><p>${esc(item.outcome || item.description || 'Откройте историю и фотографии для деталей.')}</p><button class="btn btn-secondary" id="client-reject">Отклонить</button><button class="btn btn-primary" id="client-approve">Согласовать</button></section>` : '';
+  const proposal = [...events].reverse().find((entry) => entry.type === 'request.waiting_approval')?.details?.approval || {};
+  const approvalPhotos = (item.request_attachments || []).filter((photo) => photo.kind === 'approval');
+  const approval = item.status === 'waiting_approval' && item.approval_target === 'client' ? `<section class="client-approval"><span>ТРЕБУЕТСЯ СОГЛАСОВАНИЕ</span><h3>Сервис просит подтвердить работы</h3><p>Диагностика: ${esc(proposal.diagnostic || item.description || 'Не указана')}</p><p>Предлагаемые работы: ${esc(proposal.work || 'Не указаны')}</p><p>Запчасти: ${esc((proposal.parts || []).map((part) => `${part.name} ×${part.quantity}`).join(', ') || 'Не указаны')}</p>${proposal.comment ? `<p>${esc(proposal.comment)}</p>` : ''}<div class="sr-photo-grid">${approvalPhotos.map((photo) => `<button type="button" class="sr-photo-thumb" data-client-approval-photo="${photo.id}"><span>Фото для согласования</span><img alt="Фото для согласования"></button>`).join('')}</div><button class="btn btn-secondary" id="client-reject">Отклонить</button><button class="btn btn-primary" id="client-approve">Согласовать</button></section>` : '';
   content.innerHTML = `<section class="client-request-detail"><button class="sr-back" id="client-back">← К заявкам</button><header><span>SR-${String(item.number).padStart(5,'0')}</span>${clientBadge(item.status)}</header><h1>${esc(item.title || item.description || 'Заявка')}</h1><section><h3>Оборудование</h3><strong>${esc(item.equipment_type || item.equipment_name)}</strong><p>${esc([item.manufacturer,item.model].filter(Boolean).join(' '))} · S/N ${esc(item.serial_number)}</p><small>${esc(item.site_name || '')}</small></section><section><h3>Проблема</h3><p>${esc(item.description || 'Описание не добавлено')}</p></section>${approval}<section><h3>Ход заявки</h3>${timeline}</section></section>`;
   content.querySelector('#client-back').addEventListener('click', () => location.hash = 'requests');
+  content.querySelectorAll('[data-client-approval-photo]').forEach((button) => {
+    const photo = approvalPhotos.find((item) => item.id === button.dataset.clientApprovalPhoto);
+    apiBlob(photo.download_url).then((blob) => { const url = URL.createObjectURL(blob); activeClientPhotoUrls.push(url); button.querySelector('img').src = url; }).catch(() => { button.querySelector('span').textContent = 'Не удалось загрузить фото'; });
+    button.addEventListener('click', () => openProtectedImage(photo.download_url, 'Фото для согласования'));
+  });
   const approve = async (action) => { const comment = action === 'rejected' ? prompt('Причина отказа (обязательно):') : prompt('Комментарий (необязательно):'); if (action === 'rejected' && !comment?.trim()) return; await api(`/client-portal/requests/${id}/approval`, { method: 'PATCH', body: JSON.stringify({ action, comment: comment || null }) }); await renderClientRequest(content, id); };
   content.querySelector('#client-approve')?.addEventListener('click', () => approve('approved'));
   content.querySelector('#client-reject')?.addEventListener('click', () => approve('rejected'));
@@ -676,8 +683,8 @@ async function renderClientEquipment(content) {
   const cards = equipment.length ? equipment.map((item) => `<button class="client-equipment-card" data-client-equipment="${item.id}">${item.primary_photo ? `<img data-client-equipment-photo="${item.id}" alt="Фото оборудования">` : '<div class="client-equipment-placeholder">FIXIT</div>'}<div><strong>${esc([item.manufacturer,item.model].filter(Boolean).join(' ') || item.name)}</strong><span>${esc(item.name)}</span><small>S/N ${esc(item.serial_number)} · ${esc(item.site_name)}</small>${clientBadge(item.status === 'needs_repair' ? 'in_progress' : 'completed')}</div></button>`).join('') : empty;
   const addButton = state.me.role === 'client_site_user' ? '<button class="btn btn-primary" id="client-add-equipment">+ Добавить оборудование</button>' : '';
   content.innerHTML = `<div class="page-header"><div><h1>Оборудование</h1><div class="page-subtitle">Моё оборудование и сервис</div></div>${addButton}</div><input class="client-search" placeholder="Поиск оборудования"><div class="client-equipment-list">${cards}</div>`;
-  content.querySelector('#client-add-equipment')?.addEventListener('click', async () => { await ensureCustomers(true); openCreateEquipmentModal(); });
-  content.querySelector('#client-empty-add-equipment')?.addEventListener('click', async () => { await ensureCustomers(true); openCreateEquipmentModal(); });
+  content.querySelector('#client-add-equipment')?.addEventListener('click', async () => { await ensureCustomers(true); await openCreateEquipmentModal(); });
+  content.querySelector('#client-empty-add-equipment')?.addEventListener('click', async () => { await ensureCustomers(true); await openCreateEquipmentModal(); });
   content.querySelectorAll('[data-client-equipment]').forEach((button) => button.addEventListener('click', () => openClientRequestForm(button.dataset.clientEquipment)));
   content.querySelectorAll('[data-client-equipment-photo]').forEach((image) => apiBlob(`/equipment/${image.dataset.clientEquipmentPhoto}/photo`).then((blob) => { const url = URL.createObjectURL(blob); activeClientPhotoUrls.push(url); image.src = url; }).catch(() => image.remove()));
 }
@@ -753,7 +760,7 @@ function renderServiceRequestDetail(content, item) {
     const rejectionNotice = item.status === 'cancelled' && rejected ? `<section class="sr-rejection"><strong>Согласование отклонено диспетчером</strong>${rejected.details?.comment ? `<span>Причина: ${esc(rejected.details.comment)}</span>` : ''}</section>` : '';
     const approvalPhotos = requestPhotos.filter((attachment) => attachment.kind === 'approval');
     const approvalContext = item.status === 'waiting_approval' ? `<section class="approval-context"><span>Требуется согласование</span><strong>${esc(item.equipment_name || 'Оборудование')}</strong><p>Проблема: ${esc(item.description || 'Не указана')}</p><p>Диагностика: ${esc(approval.diagnostic || 'Не указана')}</p><p>Предлагаемые работы: ${esc(approval.work || 'Не указаны')}</p><p>Запчасти: ${esc((approval.parts || []).map((part) => `${part.name} ×${part.quantity}`).join(', ') || 'Не выбраны')}</p><p>Комментарий мастера: ${esc(approval.comment || 'Не указан')}</p>${approvalPhotos.length ? `<p>Фотографии для согласования: ${approvalPhotos.length}</p><div class="sr-photo-grid sr-approval-photo-grid">${approvalPhotos.map((attachment) => `<button type="button" class="sr-photo-thumb" data-request-photo="${attachment.id}"><span>Для согласования</span><img alt="Фото для согласования"></button>`).join('')}</div>` : '<p>Фотографии не добавлены</p>'}</section>` : '';
-    const approvalActions = item.status === 'waiting_approval' && ['admin', 'dispatcher'].includes(state.me?.role) ? '<button class="btn btn-secondary" id="approval-reject">Отклонить</button><button class="btn btn-primary" id="approval-approve">Согласовать</button>' : '';
+    const approvalActions = item.status === 'waiting_approval' && item.approval_target === 'internal' && ['owner', 'admin', 'dispatcher'].includes(state.me?.role) ? '<button class="btn btn-secondary" id="approval-reject">Отклонить</button><button class="btn btn-primary" id="approval-approve">Согласовать</button>' : '';
     if (activeServiceRequestDetailCleanup) activeServiceRequestDetailCleanup();
     const objectUrls = new Set();
     activeServiceRequestDetailCleanup = () => {
@@ -816,6 +823,7 @@ async function openTechnicianRequestWorkspace(id, loadedRequest = null) {
     draft.usedParts = persistedDraft.usedParts || {};
     draft.photos = (persistedDraft.photos || []).map(normalizeDraftPhoto).filter(Boolean);
   }
+  draft.approvalTarget = persistedDraft?.approvalTarget === 'client' ? 'client' : 'internal';
   let completionLocalUuid = persistedDraft?.completionLocalUuid || null;
   let completionRepairId = persistedDraft?.completionRepairId || null;
   let completionQueued = persistedDraft?.completionQueued || false;
@@ -835,11 +843,12 @@ async function openTechnicianRequestWorkspace(id, loadedRequest = null) {
     draft.diagnostic = content.querySelector('#request-diagnostic')?.value ?? draft.diagnostic;
     draft.work = content.querySelector('#request-work')?.value ?? draft.work;
     draft.comment = content.querySelector('#request-comment')?.value ?? draft.comment;
+    draft.approvalTarget = content.querySelector('#request-approval-target')?.value ?? draft.approvalTarget;
   };
   const persistDraft = async () => {
     if (draftCompleted) return;
     rememberDraft();
-    await RequestDraftStore.put({ key: draftKey, diagnostic: draft.diagnostic, work: draft.work, comment: draft.comment, usedParts: draft.usedParts, photos: draft.photos.filter(hasDraftPhotoFile).map(({ file, approvalAttachmentId }) => ({ blob: file, name: file.name, type: file.type, approvalAttachmentId })), completionLocalUuid, completionRepairId, completionQueued, timestamp: new Date().toISOString() }).catch(() => null);
+    await RequestDraftStore.put({ key: draftKey, diagnostic: draft.diagnostic, work: draft.work, comment: draft.comment, approvalTarget: draft.approvalTarget, usedParts: draft.usedParts, photos: draft.photos.filter(hasDraftPhotoFile).map(({ file, approvalAttachmentId }) => ({ blob: file, name: file.name, type: file.type, approvalAttachmentId })), completionLocalUuid, completionRepairId, completionQueued, timestamp: new Date().toISOString() }).catch(() => null);
   };
   const releasePhotos = () => draft.photos.forEach((photo) => URL.revokeObjectURL(photo.url));
   let workCameraStream = null;
@@ -984,7 +993,7 @@ async function openTechnicianRequestWorkspace(id, loadedRequest = null) {
       : completionQueued && completionSync.fullySynced ? '<div class="tech-request-sync synced">✓ Синхронизировано</div>' : '';
     const waitingBanner = request.status === 'waiting_parts' ? '<div class="tech-request-state-banner"><strong>Ожидаем запчасти</strong><span>Черновик работ сохранён. После поступления запчастей продолжите работу.</span></div>' : request.status === 'waiting_approval' ? '<div class="tech-request-state-banner"><strong>Ожидается согласование</strong><span>После согласования диспетчер вернёт заявку в работу.</span></div>' : '';
     const photoPreview = draft.photos.length ? `<div class="tech-request-photo-grid">${draft.photos.map((photo, index) => `<figure><img src="${esc(photo.url)}" alt="Фото ${index + 1}"><figcaption>Фото ${index + 1}<button type="button" data-photo-remove="${index}" aria-label="Удалить фото ${index + 1}">×</button></figcaption></figure>`).join('')}</div><div class="tech-request-photo-count">Выбрано ${draft.photos.length} из 5</div>` : '<div class="tech-request-empty">Фотографии пока не выбраны</div>';
-    const workArea = isWorkStatus ? `<section class="tech-request-section tech-request-work">${waitingBanner}<h2>Рабочая зона</h2><label>Диагностика<textarea id="request-diagnostic" placeholder="Что обнаружено">${esc(draft.diagnostic)}</textarea></label><label>Выполненные работы<textarea id="request-work" placeholder="Что сделано">${esc(draft.work)}</textarea></label><label>Комментарий<textarea id="request-comment" placeholder="Комментарий для диспетчера">${esc(draft.comment)}</textarea></label><h3>Использованные запчасти</h3>${parts}<h3>Фотографии</h3>${photoPreview}<div class="tech-request-photo-actions"><button type="button" class="tech-request-photo-add" id="request-camera">Добавить фото</button><button type="button" class="btn btn-ghost btn-sm" id="request-gallery-open">Выбрать из галереи</button><input id="request-gallery" type="file" accept="image/*" multiple hidden></div>${request.status === 'in_progress' ? '<div class="tech-request-secondary"><button type="button" id="request-wait-parts">Жду запчасти</button><button type="button" id="request-wait-approval">Жду согласование</button></div>' : ''}</section>` : '';
+    const workArea = isWorkStatus ? `<section class="tech-request-section tech-request-work">${waitingBanner}<h2>Рабочая зона</h2><label>Диагностика<textarea id="request-diagnostic" placeholder="Что обнаружено">${esc(draft.diagnostic)}</textarea></label><label>Выполненные работы<textarea id="request-work" placeholder="Что сделано">${esc(draft.work)}</textarea></label><label>Комментарий<textarea id="request-comment" placeholder="Комментарий для диспетчера">${esc(draft.comment)}</textarea></label><h3>Использованные запчасти</h3>${parts}<h3>Фотографии</h3>${photoPreview}<div class="tech-request-photo-actions"><button type="button" class="tech-request-photo-add" id="request-camera">Добавить фото</button><button type="button" class="btn btn-ghost btn-sm" id="request-gallery-open">Выбрать из галереи</button><input id="request-gallery" type="file" accept="image/*" multiple hidden></div>${request.status === 'in_progress' ? '<div class="tech-request-secondary"><button type="button" id="request-wait-parts">Жду запчасти</button><label>Кто согласует<select id="request-approval-target"><option value="internal">Диспетчер</option><option value="client">Клиент</option></select></label><button type="button" id="request-wait-approval">Жду согласование</button></div>' : ''}</section>` : '';
     const nextAction = statusAction[request.status];
     const action = nextAction
       ? `<button class="btn btn-primary tech-request-main" id="request-next" data-status="${nextAction[0]}">${nextAction[1]}</button>`
@@ -993,6 +1002,11 @@ async function openTechnicianRequestWorkspace(id, loadedRequest = null) {
       : request.status === 'waiting_parts' ? '<button class="btn btn-primary tech-request-main" id="request-resume">Продолжить работу</button>'
       : request.status === 'completed' && completionQueued && !completionSync.fullySynced ? '<button class="btn btn-primary tech-request-main" id="request-retry-sync">Повторить отправку фото</button>' : '';
     content.innerHTML = `<section class="tech-request-workspace"><header class="tech-request-header"><button class="tech-request-back" id="request-back">←</button><div><span>Заявка SR-${String(request.number).padStart(5, '0')}</span><h1>${esc(request.title || request.description || 'Сервисная заявка')}</h1></div>${statusBadge()}</header><div class="tech-request-scroll"><section class="tech-request-meta"><div><small>Приоритет</small><strong>${request.priority === 'urgent' ? 'Срочно' : 'Плановая'}</strong></div><div><small>Создана</small><strong>${fmtDate(request.created_at)}</strong></div></section>${syncNotice}<section class="tech-request-section"><h2>Клиент и объект</h2><strong>${esc(request.client_name || request.site_name || 'Клиент')}</strong><p>${esc(request.site_name || 'Объект не указан')}${request.site_address ? ` · ${esc(request.site_address)}` : ''}</p>${request.contact_name || request.contact_phone ? `<a href="tel:${esc(request.contact_phone || '')}">${esc(request.contact_name || 'Контакт')} · ${esc(request.contact_phone || '')}</a>` : ''}</section><section class="tech-request-section tech-request-equipment"><div><h2>Оборудование</h2><div><button class="btn btn-ghost btn-sm" id="request-equipment-photo">Фото оборудования</button><button class="btn btn-ghost btn-sm" id="request-passport">Открыть паспорт</button></div></div>${equipmentPhotoUrl ? `<img class="tech-request-equipment-photo" src="${equipmentPhotoUrl}" alt="Фото оборудования">` : '<div class="tech-request-equipment-placeholder">FIXIT</div>'}<strong>${esc(request.equipment_type || request.equipment_name)}</strong><p>${esc([request.manufacturer, request.model].filter(Boolean).join(' ') || 'Модель не указана')} · <span class="mono">S/N ${esc(request.serial_number)}</span></p>${badge(EQUIPMENT_STATUS, request.equipment_status || 'working')}</section><section class="tech-request-section"><h2>Проблема</h2><p>${esc(request.description || 'Описание не добавлено')}</p><div class="tech-request-files">${attachments}</div></section>${workArea}<section class="tech-request-section"><h2>История</h2><div class="tech-request-timeline-list">${timeline}</div></section></div><footer>${action}</footer></section>`;
+    const approvalSelect = content.querySelector('#request-approval-target');
+    if (approvalSelect) {
+      approvalSelect.value = draft.approvalTarget;
+      approvalSelect.addEventListener('change', () => persistDraft());
+    }
     content.querySelector('#request-back').addEventListener('click', () => { disposeWorkspace(); activeTechnicianWorkspaceCleanup = null; location.hash = 'requests'; });
     content.querySelector('#request-passport').addEventListener('click', () => openEquipmentPassport(request.equipment_id));
     content.querySelector('#request-equipment-photo')?.addEventListener('click', openEquipmentPhotoPicker);
@@ -1026,6 +1040,7 @@ async function openTechnicianRequestWorkspace(id, loadedRequest = null) {
     content.querySelector('#request-wait-parts')?.addEventListener('click', () => { rememberDraft(); transition('waiting_parts', draft.comment.trim() || null); });
     content.querySelector('#request-wait-approval')?.addEventListener('click', async () => {
       rememberDraft();
+      const approvalTarget = content.querySelector('#request-approval-target')?.value || 'internal';
       const pendingPhotos = draft.photos.filter((photo) => !photo.approvalAttachmentId && hasDraftPhotoFile(photo));
       if (pendingPhotos.length) {
         const uploads = await Promise.allSettled(pendingPhotos.map(async (photo) => {
@@ -1038,7 +1053,7 @@ async function openTechnicianRequestWorkspace(id, loadedRequest = null) {
         await persistDraft();
       }
       const parts = Object.entries(draft.usedParts).filter(([, quantity]) => quantity > 0).map(([partId, quantity]) => ({ name: stock.find((part) => part.part_id === partId)?.name || 'Запчасть', quantity }));
-      transition('waiting_approval', 'Требуется согласование диспетчером', { approval: { diagnostic: draft.diagnostic, work: draft.work, comment: draft.comment, parts, photo_count: draft.photos.length } });
+      await transition('waiting_approval', approvalTarget === 'client' ? 'Требуется согласование клиентом' : 'Требуется согласование диспетчером', { approval_target: approvalTarget, approval: { diagnostic: draft.diagnostic, work: draft.work, comment: draft.comment, parts, photo_count: draft.photos.length } });
     });
     content.querySelectorAll('[data-part-plus]').forEach((button) => button.addEventListener('click', () => { rememberDraft(); const part = stock.find((item) => item.part_id === button.dataset.partPlus); if (!part) return; draft.usedParts[part.part_id] = Math.min(part.quantity, (draft.usedParts[part.part_id] || 0) + 1); draw(); }));
     content.querySelectorAll('[data-part-minus]').forEach((button) => button.addEventListener('click', () => { rememberDraft(); const key = button.dataset.partMinus; draft.usedParts[key] = Math.max(0, (draft.usedParts[key] || 0) - 1); draw(); }));
@@ -1077,6 +1092,8 @@ async function renderPulse(content) {
   const [clients, sites, equipment, requests, users] = await Promise.all([
     api('/clients'), api('/sites'), api('/equipment'), api('/service-requests'), api('/users'), ensureEquipmentTypes(),
   ]);
+  // Ответы dashboard могут прийти уже после открытия заявки на согласование.
+  if (state.route !== 'pulse') return;
   state.clients = clients;
   state.sites = sites;
   const activeRequests = requests.filter((request) => !['completed', 'closed', 'cancelled'].includes(request.status));
@@ -1654,7 +1671,13 @@ async function renderEquipment(content) {
   }
 }
 
-function openCreateEquipmentModal(preselectedClientId = null) {
+async function openCreateEquipmentModal(preselectedClientId = null) {
+  try { await ensureEquipmentTypes(); }
+  catch (error) { return toast(`Не удалось загрузить типы оборудования: ${error.message}`, 'error'); }
+  const canCreateType = ['owner', 'admin', 'dispatcher'].includes(state.me.role);
+  if (!state.equipmentTypes.length && !canCreateType) {
+    return toast('Сервисная компания ещё не добавила типы оборудования. Обратитесь к диспетчеру.', 'error');
+  }
   const typeOptions = state.equipmentTypes.map((t) => `<option value="${t.id}">${esc(t.name)}</option>`).join('');
   const activeSites = state.sites.filter((site) => site.is_active && (!preselectedClientId || site.client_id === preselectedClientId));
   if (!activeSites.length) return toast('Сначала создайте объект обслуживания', 'error');
@@ -1665,7 +1688,7 @@ function openCreateEquipmentModal(preselectedClientId = null) {
   const backdrop = openModal('Новое оборудование', `
     <form id="equipment-form">
       <div class="field"><label>Тип оборудования</label>
-        <select id="f-type" required>${typeOptions}<option value="__new">+ Новый тип…</option></select>
+        <select id="f-type" required>${typeOptions}${canCreateType ? '<option value="__new">+ Новый тип…</option>' : ''}</select>
       </div>
       <div class="field hidden" id="f-newtype-wrap"><label>Название нового типа</label><input id="f-newtype"></div>
       <div class="field-row">
