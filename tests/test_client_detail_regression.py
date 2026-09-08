@@ -92,3 +92,6 @@ def test_client_detail_secondary_failures_do_not_replace_primary_screen():
 def test_owner_frontend_policy_matches_service_technician_endpoints():
     source = Path("app/routers/customers.py").read_text(encoding="utf8")
     assert source.count("require_roles(UserRole.owner, UserRole.admin, UserRole.dispatcher)") >= 2
+    update_endpoint = source.split("async def replace_service_technicians", 1)[1].split("@sites_router.post", 1)[0]
+    assert "db: AsyncSession = Depends(get_db)" in update_endpoint
+    assert "user: CurrentUser = Depends(require_roles(UserRole.owner, UserRole.admin, UserRole.dispatcher))" in update_endpoint

@@ -227,7 +227,12 @@ async def list_service_technicians(client_id: uuid.UUID, db: AsyncSession = Depe
 
 
 @router.put("/{client_id}/technicians")
-async def replace_service_technicians(client_id: uuid.UUID, payload: TechnicianClientAccessUpdate, db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(require_roles(UserRole.owner, UserRole.admin, UserRole.dispatcher))):
+async def replace_service_technicians(
+    client_id: uuid.UUID,
+    payload: TechnicianClientAccessUpdate,
+    db: AsyncSession = Depends(get_db),
+    user: CurrentUser = Depends(require_roles(UserRole.owner, UserRole.admin, UserRole.dispatcher)),
+):
     client = await db.scalar(select(Client).where(Client.id == client_id, Client.organization_id == user.organization_id).with_for_update())
     if not client: raise HTTPException(status.HTTP_404_NOT_FOUND, "Клиент не найден")
     technician_ids = set(payload.technician_ids)
