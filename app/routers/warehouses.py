@@ -16,10 +16,13 @@ parts_router = APIRouter(prefix="/api/parts", tags=["parts"])
 
 
 @router.get("", response_model=list[WarehouseOut])
-async def list_warehouses(db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    return (await db.scalars(select(Warehouse).where(
+async def list_warehouses(db: AsyncSession = Depends(get_db), user=Depends(require_roles(UserRole.admin, UserRole.dispatcher, UserRole.technician))):
+    query = select(Warehouse).where(
         Warehouse.organization_id == user.organization_id
-    ).order_by(Warehouse.name))).all()
+    )
+    if user.role == UserRole.technician:
+        query = query.where(Warehouse.owner_user_id == user.id)
+    return (await db.scalars(query.order_by(Warehouse.name))).all()
 
 
 @router.get("/mine/stock", response_model=list[StockItem])
@@ -53,7 +56,7 @@ async def my_warehouse_stock(
 async def warehouse_stock(
     warehouse_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_roles(UserRole.admin, UserRole.dispatcher, UserRole.technician)),
 ):
     # Техник может смотреть только свой мобильный склад; админ/диспетчер — любой.
     if user.role == UserRole.technician:
@@ -140,7 +143,7 @@ async def transfer_movement(
 
 
 @parts_router.get("", response_model=list[PartOut])
-async def list_parts(db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
+async def list_parts(db: AsyncSession = Depends(get_db), user=Depends(require_roles(UserRole.admin, UserRole.dispatcher, UserRole.technician))):
     return (await db.scalars(select(Part).where(
         Part.organization_id == user.organization_id
     ).order_by(Part.name))).all()
