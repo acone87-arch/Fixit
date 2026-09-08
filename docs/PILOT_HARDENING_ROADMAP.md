@@ -10,7 +10,7 @@
 - Последняя сверенная main: `87e3044f30a40b6d0cff0306e71f9aee83aca329`.
 - Последняя сверка: 08.09.2026; GitHub Compare `identical`, ahead/behind `0/0`, новых commits `0`, изменённых файлов `0`. GitHub commit lookup отдельно подтвердил HEAD.
 - P0.1 выполнен и проверен в PR [№3](https://github.com/acone87-arch/Fixit/pull/3); проверенный SHA кода: `cde3d81a79b7f29efd17f65bac0538914a75ca1c`. Изменения ещё не в main и не в production.
-- Текущий шаг: **P0.2 Security boundaries — в работе по команде пользователя**. Ветка `codex/p0-2-security`, PR №4. Сохранены P0.1 из PR №3 и актуальный main; merge в main/deploy не выполнялись.
+- Текущий шаг: **P0.2 выполнен и проверен; остановка до команды на P0.3**. Ветка `codex/p0-2-security`, PR №4; проверенный SHA кода `8e46ae7dc552bca00535be414d773de125ad714c`. Сохранены P0.1 из PR №3 и актуальный main; merge в main/deploy не выполнялись.
 - **FIXIT PILOT READY не подтверждён.**
 
 ### Как читать доказательства
@@ -52,7 +52,7 @@
 | Этап | Статус | Основание / следующий критерий |
 |---|---|---|
 | P0.1 Onboarding | 🟢 выполнено и проверено | 186 Python passed, включая 18 PostgreSQL и 3 browser E2E; пять JS runtime-файлов прошли. PR №3, production не обновлён |
-| P0.2 Security boundaries | 🟡 в работе | HTTP/PostgreSQL воспроизведение: 24 failed, 192 passed; исправления проходят приёмку в PR №4 |
+| P0.2 Security boundaries | 🟢 выполнено и проверено | 48 PostgreSQL security-сценариев; полный suite 234 passed, 0 skipped; browser P0.1 и 5 JS runtime-файлов проходят. PR №4, production не обновлён |
 | P0.3 QR + ServiceRequest | 🔴 blocker | Повтор QR, approval, completed_at, конкурентный retry/номер |
 | P0.4 Technician result | 🔴 blocker | Исходные фото и клиентский результат не доведены; полный E2E не подтверждён |
 | P0.5 Durable offline queue | 🔴 blocker | data_url, atomic queue, ownership, межконтекстные гонки |
@@ -87,24 +87,24 @@ DoD подтверждён на PostgreSQL 16 и Chromium в Actions. 18 PG-сц
 
 ## P0.2 — Security boundaries
 
-**Статус: 🟡 в работе.**
+**Статус: 🟢 выполнено и проверено в PR №4.**
 
 **Definition of Done:** Organization A и Client A не могут читать или менять данные Organization B / Client B через основные или legacy API. Отзыв доступа действует сервером; общая учётная запись не позволяет администратору одного tenant отключить другой tenant. Доступ на чтение не даёт права менять ремонт.
 
 | ID | Статус | Задача и актуальное основание |
 |---|---|---|
-| SEC-01 | 🔴 blocker | Разделить глобальный User и управление membership: текущий PATCH меняет глобальную активность; existing-email POST присоединяет аккаунт без согласия |
-| SEC-02 | 🔴 blocker | Ограничить client-role чтение `/tasks`, `/warehouses`, stock и внутреннего parts API; tenant-only filter недостаточен для Client/Site |
-| SEC-03 | 🔴 blocker | Разделить Repair media read/write; клиент и fleet-reader не должны дописывать чужой акт; delayed upload автора после completion сохранить |
-| SEC-04 | 🔴 blocker | Закрыть бесконтекстный legacy sync; валидировать tenant/equipment/назначение Task и Ticket; разрешённые старые payload сохранить |
-| SEC-05 | ⬜ не начато | Полная матрица cross-client/cross-tenant ACL, включая фото/PDF, arbitrary IDs, inactive/deleted memberships, pending invites после revoke |
-| SEC-06 | ⬜ не начато | Проверить fail-closed Client/Site grants и multi-client поведение; не менять модель ролей без необходимости |
+| SEC-01 | 🟢 выполнено и проверено | Разделить глобальный User и управление membership: текущий PATCH меняет глобальную активность; existing-email POST присоединяет аккаунт без согласия |
+| SEC-02 | 🟢 выполнено и проверено | Ограничить client-role чтение `/tasks`, `/warehouses`, stock и внутреннего parts API; tenant-only filter недостаточен для Client/Site |
+| SEC-03 | 🟢 выполнено и проверено | Разделить Repair media read/write; клиент и fleet-reader не должны дописывать чужой акт; delayed upload автора после completion сохранить |
+| SEC-04 | 🟢 выполнено и проверено | Закрыть бесконтекстный legacy sync; валидировать tenant/equipment/назначение Task и Ticket; разрешённые старые payload сохранить |
+| SEC-05 | 🟢 выполнено и проверено | Полная матрица cross-client/cross-tenant ACL, включая фото/PDF, arbitrary IDs, inactive/deleted memberships, pending invites после revoke |
+| SEC-06 | 🟢 выполнено и проверено | Проверить fail-closed Client/Site grants и multi-client поведение; не менять модель ролей без необходимости |
 
 **Код:** `app/routers/users.py`, `tasks.py`, `warehouses.py`, `repairs.py`, `invites.py`, `app/services/access_policy.py`, `client_portal.py`, `sync_service.py`, `app/core/deps.py`.
 
 **Доказательства:** HTTP+PG с двумя Organization, двумя Client в одном tenant, несколькими Sites, общим User; чтение и запись каждым role; valid/invalid legacy sync; отзыв и повтор с прежним JWT; авторский post-completion upload. Ownership локальной очереди принадлежит P0.5, совместная регрессия обязательна.
 
-**Миграция:** основные ACL-исправления обычно без неё; ограничения grants/FK — по результату Verify данных. **Риск:** высокий, возможен ошибочный запрет старых клиентов или досылки фото.
+**Миграция:** не требуется; модели и Alembic не менялись. **Совместимость:** авторский retry и delayed photo проверены; старые Task/Ticket принимаются только с действительным назначением. Бесконтекстный пакет возвращает failed и остаётся в существующей очереди. Подробные доказательства и ограничения — в записи приёмки ниже.
 
 ## P0.3 — QR + ServiceRequest
 
@@ -369,3 +369,50 @@ Verify: main по-прежнему `80ec53e84402b24c3a8bb263d150e7bf7a0dd865`; c
 - [Actions 34189991116](https://github.com/acone87-arch/Fixit/actions/runs/34189991116): **24 failed, 192 passed, 0 skipped**, 142 warnings. Все 24 failures — новые HTTP/PostgreSQL security-регрессии. Подтверждены global User mutation, existing-email присоединение без согласия, клиентское чтение Task/warehouses/parts/stock, клиентская и fleet-tech запись Repair media, бесконтекстный/чужой/cancelled legacy sync, чужой sync retry, NULL Site grant → весь Client, подключение директором чужого Client User и восстановление удалённого access старым invite.
 - Правильные старые Task/Ticket-пакеты и авторская досылка фото сохраняются. Ошибки unknown ticket/foreign part без stock уже откатывались БД; добавляется явная проверка до записи, не выдавать прежний rollback за новую уязвимость.
 - После локальных исправлений: **165 passed, 51 skipped, 4 warnings** (до добавления дополнительных concurrency-регрессий); skipped — PG/browser без локального PostgreSQL. Это не итог приёмки P0.2. Новые tests проверяют одновременный revoke/accept, двух администраторов, canonical sync и старые некорректные связи stock.
+
+
+### P0.2 — приёмка завершена, 08.09.2026
+
+**Статус: 🟢 выполнено и проверено в PR; production не обновлён.**
+
+Код: `8e46ae7dc552bca00535be414d773de125ad714c`, [PR №4](https://github.com/acone87-arch/Fixit/pull/4). Повторная сверка main: `87e3044f30a40b6d0cff0306e71f9aee83aca329`, новых изменений после начала этапа нет. Полный аудит повторно не выполнялся.
+
+| Задача | Подтверждённая причина → исправление | Доказательство |
+|---|---|---|
+| SEC-01 | PATCH/DELETE затрагивали глобальный User → отключается membership данного tenant, доступы отзываются; глобальный аккаунт сохраняется. Изменение общего профиля из одного tenant отклоняется, неизменённые поля обычной UI-формы не блокируют переключение доступа | Общий User в двух Organization: A отключён, B продолжает работать; изменение контактов отклонено; последний membership не отключает глобальный User; параллельное удаление администраторов оставляет одного активного |
+| SEC-01 | Existing-email POST выдавал membership без участия владельца → 409, клиент подключается по существующему invite с паролем | Чужая учётная запись не присоединяется; создание нового сотрудника и login сохранены; P0.1 existing-account invite проходит |
+| SEC-02 | Внутренние Task/parts/warehouses/stock имели только tenant filter → клиентские роли получают 403; техник видит свои склады | Site Manager и Director: восемь отрицательных HTTP-сценариев; старый Task read-only сохранён для staff/назначенного техника |
+| SEC-03 | Repair read ACL использовался для upload → отдельная write policy (staff или автор-техник), до проверки upload idempotency | Клиент/fleet-reader читают разрешённое фото, но получают 403 на запись; автор досылает после completed, повтор возвращает прежнее вложение; отключённый membership получает 401 |
+| SEC-04 | Legacy sync не требовал проверенного контекста, Ticket/сочетания ID не проверялись; retry возвращал чужой server_id → tenant/equipment/assignment/state/linked-ID checks, retry проверяет автора и ремонт | Валидные Task/Ticket и canonical completion/retry проходят; чужой автор/tenant, cancelled Task, несовпадающий Ticket и отсутствие контекста отклонены без частичной записи; чужая Part отклонена до списания |
+| SEC-05/06 | NULL Site расширял менеджера до Client; Director мог присоединить пользователя другого Client → fail-closed scopes, активность Client/Site, запрет несогласованного cross-client grant | Свои документы/паспорт читаются; чужие Site/Client/tenant и изменения фото/перенос оборудования отклонены, с положительным контролем владельца чужого tenant |
+| SEC-05/06 | DELETE access терял след отзыва; перенос Site терял прежний scope → сохраняется отключённая запись, pending invite не восстанавливает старый доступ | Revoke/accept, delete-access/accept выполняются конкурентно на PostgreSQL: после отзыва доступ отсутствует; старый invite после переноса Site отклонён |
+| Связанные изменения | Выдача и отзыв прав могли пересечься → блокировка строки Organization на время изменения прав и повторная проверка действующего actor; счётчики клиента учитывают Site scope | Конкурентные PG-сценарии пройдены. Счётчики другого Site больше не видны менеджеру; это небольшое уточнение изоляции, не отдельный архитектурный блокер |
+
+Проверки:
+
+- Первое воспроизведение: [34189991116](https://github.com/acone87-arch/Fixit/actions/runs/34189991116), SHA `17784c7`: **24 failed, 192 passed, 0 skipped**. Исходные failure-сценарии сохранены, не заменены source assertions.
+- Первые исправления: [34190518647](https://github.com/acone87-arch/Fixit/actions/runs/34190518647), SHA `3b92343`: **227 passed, 0 failed, 0 skipped**, 166 предупреждений зависимостей; включая 41 security PG case.
+- Итог кода: [34211731273](https://github.com/acone87-arch/Fixit/actions/runs/34211731273), SHA `8e46ae7dc552bca00535be414d773de125ad714c`: **234 passed, 0 failed, 0 skipped**, 201 DeprecationWarning зависимостей, 150.45 s. Checkout подтвердил точный HEAD; workflow **success**.
+- PostgreSQL integration: **66 passed**, входят в 234: 48 security + 18 onboarding. Маршрут HTTP/JWT → router → service → ORM → PostgreSQL 16, отдельные schemas с синтетическими данными.
+- Browser E2E: **3 passed**, входят в 234; настоящий Pulse/API/PostgreSQL, Chromium desktop/mobile viewport и Director.
+- JS runtime: **все 5 файлов прошли** — onboarding (5 сценариев), Pulse offline engine, technician workflow, offline attachments, guest photo upload.
+- [JUnit artifact 10050201396](https://github.com/acone87-arch/Fixit/actions/runs/34211731273/artifacts/10050201396), срок хранения 7 дней; имена сценариев и тесты сохранены в git.
+- Локальный suite до расширения матрицы: **165 passed, 51 skipped**, 4 warnings; последующий временный venv недоступен после возобновления сессии, поэтому итоговые Python/PG/browser результаты взяты из Actions. Python AST и git diff --check проходят. Сгенерированные изменения tracked pyc восстановлены, в PR не включены.
+
+Изменённые файлы P0.2:
+
+- `app/core/deps.py` — некорректные UUID в JWT отклоняются как credentials error.
+- `app/routers/users.py`, `tasks.py`, `warehouses.py`, `repairs.py`, `client_portal.py`, `invites.py`, `customers.py`.
+- `app/services/access_changes.py` (небольшой общий lock для изменений прав), `access_policy.py`, `client_portal.py`, `sync_service.py`.
+- `tests/test_security_postgres.py` — 48 настоящих PG/API-сценариев; `test_onboarding_runtime.py`, `test_canonical_repair_relationship.py` — session doubles учитывают новые DB checks; `test_user_deactivation.py`, `test_client_access_management.py` — прежние source contracts приведены к membership-only revoke/tombstone, не используются как доказательство приёмки.
+- `tests/test_client_detail_regression.py` — сохранён новый тест текущего main, не самостоятельное исправление P0.2.
+- Этот roadmap. Frontend, SW, модели и миграции на этапе P0.2 не менялись. Использован существующий изолированный PR workflow P0.1; production deployment не запускался.
+
+Пределы и следующий этап:
+
+1. Изменения ещё в PR №4; он включает неслитый P0.1 из PR №3 и текущий main. Порядок интеграции нужно сохранить; main не обновлять автоматически, поскольку push запускает production deploy.
+2. P0.2 подтверждает серверные границы проверенной матрицы. Очередь на другом аккаунте/после перезапуска, полная устойчивость sync и upload races — P0.5; складские количества/движения — P0.6. Schema fixture не подтверждает Alembic upgrade, restore и rollback — P0.7.
+3. Некорректные старые ClientUserAccess (NULL Site у менеджера, другой Client) теперь получают отказ; автоматического расширения прав или массовой правки production-данных нет. Глобально отключённые ранее User также не реактивируются автоматически.
+4. **Следующий этап — P0.3 QR + ServiceRequest.** После закрытия ACL остаются подтверждённые ошибки повторного QR, approval contract/locking, completed_at и retry. Начинать только после команды «Начинай следующий этап».
+
+**FIXIT PILOT READY всего продукта ещё не подтверждён.**
