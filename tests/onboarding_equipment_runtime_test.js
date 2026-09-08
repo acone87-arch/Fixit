@@ -76,5 +76,14 @@ function functionSource(name) {
   const html = fs.readFileSync('app/static/index.html', 'utf8');
   const scriptUrl = html.match(/src="([^"\n]*\/app\.js\?[^"\n]+)"/)[1];
   assert.ok(cached.includes(scriptUrl), 'SW устанавливает ту же версию JS, что HTML');
-  console.log('Onboarding UI/SW runtime: 5 сценариев пройдено');
+  // Уже установленный worker с прежним app.js должен запросить новую версию.
+  worker.URL = URL;
+  worker.self.location = { origin: 'https://pilot.example' };
+  worker.caches.match = async (request) => request.url.endsWith('/static/app.js?v=20260907-1') ? 'старый интерфейс' : undefined;
+  worker.fetch = async () => 'обновлённый интерфейс';
+  let assetResponse;
+  events.fetch({ request: {method: 'GET', mode: 'cors', url: 'https://pilot.example' + scriptUrl},
+    respondWith(promise) { assetResponse = promise; }});
+  assert.equal(await assetResponse, 'обновлённый интерфейс', 'Установленная PWA получила старый app.js');
+  console.log('Onboarding UI/SW runtime: 6 сценариев пройдено');
 })().catch(error => { console.error(error); process.exitCode = 1; });

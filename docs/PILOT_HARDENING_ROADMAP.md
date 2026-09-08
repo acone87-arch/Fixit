@@ -10,7 +10,7 @@
 - Последняя сверенная main: `87e3044f30a40b6d0cff0306e71f9aee83aca329`.
 - Последняя сверка: 08.09.2026; GitHub Compare `identical`, ahead/behind `0/0`, новых commits `0`, изменённых файлов `0`. GitHub commit lookup отдельно подтвердил HEAD.
 - P0.1 выполнен и проверен в PR [№3](https://github.com/acone87-arch/Fixit/pull/3); проверенный SHA кода: `cde3d81a79b7f29efd17f65bac0538914a75ca1c`. Изменения ещё не в main и не в production.
-- Текущий шаг: **P0.3 в работе: QR, согласование и completion/retry**. Ветка `codex/p0-3-workflow`, PR №5; предыдущий проверенный SHA кода P0.2 `8e46ae7dc552bca00535be414d773de125ad714c`. Сохранены P0.1/P0.2 и актуальный main; merge в main/deploy не выполнялись.
+- Текущий шаг: **P0.3 выполнен и проверен; остановка до команды на P0.4**. Ветка `codex/p0-3-workflow`, PR №5; проверенный SHA кода P0.3 `9ed18bb664c6fd82a024624ed83ce6e56ea8c489`. Сохранены P0.1/P0.2 и актуальный main; merge в main/deploy не выполнялись.
 - **FIXIT PILOT READY не подтверждён.**
 
 ### Как читать доказательства
@@ -53,7 +53,7 @@
 |---|---|---|
 | P0.1 Onboarding | 🟢 выполнено и проверено | 186 Python passed, включая 18 PostgreSQL и 3 browser E2E; пять JS runtime-файлов прошли. PR №3, production не обновлён |
 | P0.2 Security boundaries | 🟢 выполнено и проверено | 48 PostgreSQL security-сценариев; полный suite 234 passed, 0 skipped; browser P0.1 и 5 JS runtime-файлов проходят. PR №4, production не обновлён |
-| P0.3 QR + ServiceRequest | 🟡 в работе | Дефекты воспроизведены через PostgreSQL; исправления проходят приёмку в PR №5 |
+| P0.3 QR + ServiceRequest | 🟢 выполнено и проверено | 266 passed, 0 skipped: новые 28 PG workflow, 2 migration и 2 browser; все пять JS runtime-файлов прошли. PR №5, production не обновлён |
 | P0.4 Technician result | 🔴 blocker | Исходные фото и клиентский результат не доведены; полный E2E не подтверждён |
 | P0.5 Durable offline queue | 🔴 blocker | data_url, atomic queue, ownership, межконтекстные гонки |
 | P0.6 Warehouse integrity | 🔴 blocker | Отрицательное количество, mobile warehouse, связь движения с Repair |
@@ -108,7 +108,7 @@ DoD подтверждён на PostgreSQL 16 и Chromium в Actions. 18 PG-сц
 
 ## P0.3 — QR + ServiceRequest
 
-**Статус: 🟡 в работе. Приёмка исправлений в PR №5.**
+**Статус: 🟢 выполнено и проверено. Приёмка в PR №5; production не обновлялся.**
 
 **Definition of Done:** повтор QR не падает и не создаёт некорректных дублей; одна бизнес-поломка проходит существующий ServiceRequest workflow. Approval и completion работают, время завершения фиксируется, повтор sync возвращает согласованный результат без нового canonical Repair.
 
@@ -117,7 +117,7 @@ DoD подтверждён на PostgreSQL 16 и Chromium в Actions. 18 PG-сц
 | SR-01 | 🟢 выполнено и проверено | Повтор QR использует существующую ServiceRequest, в том числе без Ticket; 201 вместо NameError |
 | SR-02 | 🟢 выполнено и проверено | QR/staff/client intake используют общий transaction advisory lock для номера; конкурентные HTTP-запросы проходят |
 | SR-03 | 🟢 выполнено и проверено | Receipt сохраняет ключ повтора после completion; другой Equipment получает 409 без чужого ID. Guest partial/photo retry и legacy NULL client_id проверены, исправление их поведения не требовалось |
-| SR-04 | 🟠 исправлено, но не полностью подтверждено | Target и валидированный approval snapshot сохраняются; прежний Pulse payload поддержан. Первый browser internal прошёл, клиентский UI с предложением/фото проходит финальную приёмку |
+| SR-04 | 🟢 выполнено и проверено | Оба target, сохранённый proposal, клиентские фото и owner/internal решение проходят в Chromium. Получатель переживает добавление фото/reload, поздний dashboard не затирает заявку; прежний Pulse payload поддержан |
 | SR-05 | 🟢 выполнено и проверено | FOR UPDATE OF ServiceRequest: client approve/reject, cross-site deny и конкурентные решения проходят на PostgreSQL |
 | SR-06 | 🟢 выполнено и проверено | Сервер ставит completed_at при canonical completion; retry не меняет дату. Старые неоднозначные даты не заполнены |
 | SR-07 | 🟢 выполнено и проверено | Повторная проверка SyncOperation после Equipment lock возвращает already_synced с проверкой ownership; один Repair и одно completion event |
@@ -439,3 +439,56 @@ Verify: main по-прежнему `80ec53e84402b24c3a8bb263d150e7bf7a0dd865`; c
 - Прогон дополнения [34245383893](https://github.com/acone87-arch/Fixit/actions/runs/34245383893), SHA `786f3b8`: **1 failed, 265 passed, 0 skipped**, 489 предупреждений. Найден UI regression: добавление фото перерисовывало select и сбрасывало client target в internal. Исправлено сохранением target в существующем RequestDraftStore и восстановлением при draw/reload; browser test сохраняет именно выявившую сбой последовательность. Дополнительно UI внутренних решений приведён к серверным ролям: owner/admin/dispatcher, только internal target; owner проходит реальную браузерную форму согласования.
 
 - Проверка `621600e`, [34246292589](https://github.com/acone87-arch/Fixit/actions/runs/34246292589): **1 failed, 265 passed**, 506 предупреждений; клиентский browser с фото и recipient persistence прошёл. Внутренний browser не обнаружил открытую карточку. Найдена гонка dashboard → request: поздний renderPulse затирал уже открытый раздел. Новый JS runtime-тест исполнил настоящий async renderer с задержанными ответами и воспроизвёл перезапись; после проверки актуального маршрута тест проходит. Браузерная регрессия сохраняет быстрый переход; ожидание окончания dashboard не добавляется.
+
+- Проверка доставки UI в установленную PWA: app.js продолжал использовать прежний URL `v=20260907-1`, который root worker отдаёт cache-first. Реальный fetch handler в JS runtime воспроизвёл получение старого интерфейса. Синхронно обновлены URL app.js в index/SHELL и имя shell cache; test с сохранённым старым кешем теперь получает новую версию. IndexedDB/очередь/старые кеши не удаляются. Полный offline cold-start не объявляется подтверждённым.
+
+
+### 08.09.2026 — P0.3: итог приёмки
+
+**Статус: 🟢 выполнено и проверено.** Блоки P0.4–P0.7 не объявляются готовыми.
+
+- Проверенный код: `9ed18bb664c6fd82a024624ed83ce6e56ea8c489`; [Actions 34274688219](https://github.com/acone87-arch/Fixit/actions/runs/34274688219), job `102224679630`, **success**. Checkout подтвердил точный SHA.
+- **266 passed, 0 failed, 0 skipped**, 511 предупреждений зависимостей, 259.96 s. Внутри общего числа: 96 PostgreSQL cases (18 onboarding + 48 security + 28 workflow + 2 migration) и 5 Chromium E2E (3 onboarding + 2 approval). Остальные 165 — существующий Python suite.
+- Новый P0.3: 28 HTTP/PG сценариев; 2 migration cases; 2 настоящих Chromium сценария. Это части 266, а не дополнительные к общему числу тесты.
+- Все пять JS runtime-файлов прошли. Добавлены фактический async-render regression и проверка cache-first fetch со старым app.js; последняя воспроизвела stale UI локально и прошла после согласованного изменения URL HTML/SHELL. Финальный commit включает эту смену версии и журнал; его Actions status проверяется отдельно.
+- Regression failures сохранены в истории: исходные 15/20 failures, сброс recipient после photo и гонка dashboard. Ничего не скрыто через skip/xfail или замену на source assertion.
+
+**Что подтверждено:**
+
+1. QR повторяет активную/завершённую заявку по сохранённому ключу, не раскрывает другую Equipment; одновременно отправленный ключ из разных tenant изолирован. Legacy Ticket key работает.
+2. Все три intake маршрута безопасно получают номера на PostgreSQL. Guest photo partial/retry/legacy NULL, лимит, валидация изображения и чужой QR проверены.
+3. Внутреннее и клиентское согласование имеют сохранённый контекст, правильный recipient/role/scope и PostgreSQL lock. Два конкурирующих решения дают один успех и один 409. В UI client видит proposal/photo и принимает решение, owner проходит внутреннюю форму; technician draft восстанавливается.
+4. Completion выполняется только из допустимого workflow через canonical Repair. completed_at фиксируется; конкурентный retry возвращает already_synced, дополнительный canonical Repair не создаётся; запрос с новым UUID не затирает уже принятый результат. Другие активные SR и конфликт Equipment version сохраняют состояние оборудования.
+5. Миграция 0014 проходит upgrade/downgrade/upgrade с существующими Equipment/ServiceRequest и rollback незавершённой транзакции.
+
+**Изменённые файлы P0.3** (от базы `a369aa7`, без повторного перечисления файлов P0.1/P0.2):
+
+- `app/models/service_request.py`
+- `app/schemas/service_request.py`
+- `app/routers/tickets.py`
+- `app/routers/service_requests.py`
+- `app/routers/client_portal.py`
+- `app/services/service_requests.py`
+- `app/services/service_request_workflow.py`
+- `app/services/sync_service.py`
+- `app/static/app.js`
+- `app/static/index.html`
+- `app/static/sw.js`
+- `alembic/versions/20260908_0014_guest_request_receipts.py`
+- `tests/test_request_workflow_postgres.py`
+- `tests/test_request_receipts_migration_postgres.py`
+- `tests/test_request_workflow_browser.py`
+- `tests/test_canonical_repair_relationship.py`
+- `tests/test_guest_photo_retry.py`
+- `tests/technician_workflow_runtime_test.js`
+- `tests/onboarding_equipment_runtime_test.js`
+- `docs/PILOT_HARDENING_ROADMAP.md`
+
+**Остаточные ограничения:**
+
+- Исторические completed_at не восстановлены из неоднозначных данных; при необходимости сверять с надёжным событием/результатом отдельно. Для новых completion дата подтверждена.
+- До выпуска нужна миграция 0014. Старый код не читает receipts, поэтому rollback требует остановки QR intake до возврата поддерживающей версии; после новых submissions таблицу не удалять. Runbook/restore/полный Alembic chain/HTTPS и выпуск — P0.7.
+- Chromium viewport не равен приёмке реального Android/iOS. Durable queue, account switch, cold-start и полный ремонт с деталями/актом/историей остаются P0.4–P0.7.
+- Последняя сверка main: `87e3044f30a40b6d0cff0306e71f9aee83aca329`, identical. P0.1–P0.3 находятся в draft PR; main и production не изменялись.
+
+**Следующий этап: P0.4 — Technician result.** Проверить полный ремонт с исходными фото, работами, деталями, фото результата, актом и одной записью истории, доступной клиенту. Существующие исправления workflow и ACL служат базой; начинать только по следующей команде пользователя.
