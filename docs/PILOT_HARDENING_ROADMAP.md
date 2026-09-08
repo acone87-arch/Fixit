@@ -8,9 +8,9 @@
 - Исходный документ: `Fixit_Audit_2026-09-07.md`, независимый аудит от 07.09.2026.
 - Audit SHA: `80ec53e84402b24c3a8bb263d150e7bf7a0dd865`.
 - Последняя сверенная main: `80ec53e84402b24c3a8bb263d150e7bf7a0dd865`.
-- Последняя сверка: 07.09.2026; GitHub Compare `identical`, ahead/behind `0/0`, новых commits `0`, изменённых файлов `0`. GitHub commit lookup отдельно подтвердил HEAD.
-- Инициализация завершена; в P0.1 внесены локальные исправления и регрессии. Commit/push/deploy не выполнялись; SHA исправления пока нет (изменения рабочего дерева).
-- Текущий шаг: **приёмка P0.1 в изолированном GitHub Actions**. Пользователь разрешил GitHub; подготовлена ветка `codex/p0-1-onboarding`, PR и результаты запуска будут записаны ниже. Merge/deploy и P0.2 не начаты.
+- Последняя сверка: 08.09.2026; GitHub Compare `identical`, ahead/behind `0/0`, новых commits `0`, изменённых файлов `0`. GitHub commit lookup отдельно подтвердил HEAD.
+- P0.1 выполнен и проверен в PR [№3](https://github.com/acone87-arch/Fixit/pull/3); проверенный SHA кода: `cde3d81a79b7f29efd17f65bac0538914a75ca1c`. Изменения ещё не в main и не в production.
+- Текущий шаг: **P0.1 принят; остановка до команды на следующий этап**. Ветка `codex/p0-1-onboarding`; доказательства приёмки записаны ниже. Merge/deploy и P0.2 не начаты.
 - **FIXIT PILOT READY не подтверждён.**
 
 ### Как читать доказательства
@@ -51,7 +51,7 @@
 
 | Этап | Статус | Основание / следующий критерий |
 |---|---|---|
-| P0.1 Onboarding | 🟠 исправлено, но не полностью подтверждено | Локальные исправления и 22 Python runtime-проверки готовы; 15 PG scenarios skipped, browser E2E не выполнен |
+| P0.1 Onboarding | 🟢 выполнено и проверено | 186 Python passed, включая 18 PostgreSQL и 3 browser E2E; пять JS runtime-файлов прошли. PR №3, production не обновлён |
 | P0.2 Security boundaries | 🔴 blocker | Global User, legacy/warehouse scope, Repair media write, legacy sync |
 | P0.3 QR + ServiceRequest | 🔴 blocker | Повтор QR, approval, completed_at, конкурентный retry/номер |
 | P0.4 Technician result | 🔴 blocker | Исходные фото и клиентский результат не доведены; полный E2E не подтверждён |
@@ -61,21 +61,21 @@
 
 ## P0.1 — Onboarding
 
-**Статус: 🟠 исправлено, но не полностью подтверждено.**
+**Статус: 🟢 выполнено и проверено.**
 
-Исправления локальные; отсутствуют доказательства PG/browser DoD. Точные результаты и ограничения — в записи P0.1 журнала ниже.
+DoD подтверждён на PostgreSQL 16 и Chromium в Actions. 18 PG-сценариев и 3 browser E2E прошли без пропусков; точные результаты, SHA и ограничения — в записи приёмки от 08.09.2026 ниже.
 
 **Definition of Done:** приглашённый Site Manager самостоятельно принимает invite и входит, видит только назначенный Site, создаёт Equipment с существующим типом; сервисная компания назначает техника клиенту, и тот получает корректный доступ. Director подключается к уже существующему Client без дубликата. Проверены новый/существующий User, expiry/reuse/revoke и недопустимые роли.
 
 | ID | Статус | Задача и актуальное основание |
 |---|---|---|
-| ONB-01 | 🟠 исправлено, но не полностью подтверждено | Исправить accept: `target_role` после ORM — str, audit events читают `.value`; AttributeError воспроизведён аудитом |
-| ONB-02 | 🟠 исправлено, но не полностью подтверждено | Исправить `replace_service_technicians`: пользователь попадает в параметр db, параметр user отсутствует; HTTP-ошибка воспроизведена |
-| ONB-03 | 🟠 исправлено, но не полностью подтверждено | Подготовить Equipment Types для свежего Site Manager: клиентская кнопка вызывает ensureCustomers, но не ensureEquipmentTypes; не предлагать недоступное создание типа |
-| ONB-04 | 🟠 исправлено, но не полностью подтверждено | Подтвердить новым PG/HTTP тестом новый User и существующий User с верным/неверным паролем, атомарность accept |
-| ONB-05 | 🟠 исправлено, но не полностью подтверждено | Подтвердить expiry, повтор использования, revoke, inactive User/org/site/client, неправильную роль, конкурирующее принятие; согласовать отзыв с P0.2 |
-| ONB-06 | 🟠 исправлено, но не полностью подтверждено | Site Manager: свой/чужой Site и Client, первое Equipment; Director: тот же Client и его Sites без расширения в чужой Client |
-| ONB-07 | 🟠 исправлено, но не полностью подтверждено | Назначить/отозвать TechnicianClientAccess; активность membership; доступ к парку отдельно от права менять назначенную заявку |
+| ONB-01 | 🟢 выполнено и проверено | Исправить accept: `target_role` после ORM — str, audit events читают `.value`; AttributeError воспроизведён аудитом |
+| ONB-02 | 🟢 выполнено и проверено | Исправить `replace_service_technicians`: пользователь попадает в параметр db, параметр user отсутствует; HTTP-ошибка воспроизведена |
+| ONB-03 | 🟢 выполнено и проверено | Подготовить Equipment Types для свежего Site Manager: клиентская кнопка вызывает ensureCustomers, но не ensureEquipmentTypes; не предлагать недоступное создание типа |
+| ONB-04 | 🟢 выполнено и проверено | Подтвердить новым PG/HTTP тестом новый User и существующий User с верным/неверным паролем, атомарность accept |
+| ONB-05 | 🟢 выполнено и проверено | Подтвердить expiry, повтор использования, revoke, inactive User/org/site/client, неправильную роль, конкурирующее принятие; согласовать отзыв с P0.2 |
+| ONB-06 | 🟢 выполнено и проверено | Site Manager: свой/чужой Site и Client, первое Equipment; Director: тот же Client и его Sites без расширения в чужой Client |
+| ONB-07 | 🟢 выполнено и проверено | Назначить/отозвать TechnicianClientAccess; активность membership; доступ к парку отдельно от права менять назначенную заявку |
 
 **Код:** `app/routers/invites.py:156–203`, `app/models/customer.py`, `app/routers/customers.py:229–242`, `app/routers/equipment.py`, `app/services/client_portal.py`, `app/services/access_policy.py`, `app/static/app.js:673–680,1552` и клиентский join UI.
 
@@ -331,3 +331,31 @@ PG fixture создаёт уникальную schema в явно заданно
 - Browser: свежий Site Manager в desktop/mobile viewport → Equipment → паспорт → доступ техника; existing User с неверным/верным паролем → Director существующего Client. API/auth/SW не мокируются. Mobile viewport не равен испытанию реального Android/iOS.
 - PG: 18 scenarios; expected полный suite 165 прежних/runtime + 18 PG + 3 browser. Числа здесь — план, не результат; до завершения Actions остаётся 🟠.
 - Связанные файлы: `.github/workflows/pilot-onboarding.yml`, `tests/test_onboarding_browser.py`, `tests/test_onboarding_postgres.py`. Миграция не добавлена.
+
+
+### P0.1 — завершение приёмки, 08.09.2026
+
+**Статус: 🟢 выполнено и проверено в PR; изменения не выпущены в production.**
+
+Verify: main по-прежнему `80ec53e84402b24c3a8bb263d150e7bf7a0dd865`; compare identical, 0 новых commits/файлов. Повторный аудит не проводился, проверены только результаты P0.1.
+
+Первый удалённый прогон [34151182871](https://github.com/acone87-arch/Fixit/actions/runs/34151182871), SHA `bea8916dcc750935011aadcccd607566fe56bfd4`: **183 passed, 3 failed, 0 skipped**, JS-шаг skipped из-за предыдущей ошибки. Все 18 PostgreSQL-сценариев прошли. Три браузерных теста искали `button[type=submit]`, хотя у реальной кнопки «Продолжить» нет явного атрибута type (submit действует по умолчанию). Причина в тестовом селекторе, не в бизнес-коде. В `tests/test_onboarding_browser.py` использован поиск кнопки по доступной роли/имени в join-form; сценарий и проверки не ослаблены.
+
+Подтверждающий прогон: [34186674204](https://github.com/acone87-arch/Fixit/actions/runs/34186674204), SHA `cde3d81a79b7f29efd17f65bac0538914a75ca1c`. Checkout в логе подтвердил именно этот HEAD PR. Workflow завершился **success**.
+
+| Проверка | Фактический результат |
+|---|---|
+| Полный Python suite, Python 3.12 | **186 passed, 0 failed, 0 skipped**, 92 DeprecationWarning зависимостей, 42.90 s |
+| PostgreSQL 16, HTTP → router → service → ORM | **18 passed**, входят в 186; новый/существующий User, lifecycle invite, scopes, grant/revoke, конкурентное принятие и назначения |
+| Chromium → настоящий Pulse/API/PostgreSQL | **3 passed**, входят в 186; Site Manager desktop и mobile viewport → первое Equipment → паспорт → доступ техника; existing User → Director существующего Client |
+| JS runtime | **5 файлов прошли**: onboarding (5 сценариев), Pulse offline engine, technician workflow, offline attachment sync, guest photo upload |
+| Артефакт | `pilot-onboarding-cde3d81a79b7f29efd17f65bac0538914a75ca1c`, JUnit XML, [artifact 10040767694](https://github.com/acone87-arch/Fixit/actions/runs/34186674204/artifacts/10040767694), хранение 7 дней |
+| Локальная проверка этой итерации | Onboarding JS: 5 сценариев пройдено; git diff --check passed. Повтор Python локально не запустился: прежний временный venv уже отсутствует; результат Python подтверждён Actions |
+
+Доказательства закрывают ONB-01–07: исправлены enum conversion и DI TechnicianClientAccess; клиентская форма загружает существующие Equipment Types; проверены новый и существующий аккаунт, неверный пароль, запрет подмены роли/Site, истечение/повтор/отзыв invite и отключение сущностей/доступов; Director использует прежний Client; concurrent accept не дублирует grant/account; техника можно назначить и отозвать, inactive membership не получает доступ. Исправления и история исходных воспроизведений сохранены выше.
+
+В этой итерации изменены только `tests/test_onboarding_browser.py` и этот roadmap. Бизнес-код сверх ранее опубликованного P0.1 не менялся. Миграция: **нет**. PR: [№3](https://github.com/acone87-arch/Fixit/pull/3).
+
+Предел приёмки: PG fixture создаёт schema из моделей, не проверяет Alembic upgrade/restore; браузер — Chromium с desktop/mobile viewport, не реальный iOS/Android; права проверены в пределах onboarding, а не всей legacy/media/warehouse поверхности. Полный Invite → QR → Repair → Act → History E2E, миграции, HTTPS upload, backup/restore/rollback остаются соответствующим P0.2–P0.7. **FIXIT PILOT READY всего продукта не объявляется.**
+
+Следующий рекомендованный этап — **P0.2 Security boundaries**: глобальный User и legacy/media/warehouse ACL остаются подтверждёнными препятствиями безопасному пилоту. Начинать только после команды пользователя «Начинай следующий этап». Merge/deploy не выполнялись.
