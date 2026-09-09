@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const http = require('node:http');
 const { chromium } = require('playwright');
-const engine = () => fs.readFileSync('app/static/offline/engine.js');
+const engine = () => fs.readFileSync(process.env.FIXIT_QUEUE_ENGINE || 'app/static/offline/engine.js');
 const token = (sub = 'alice', org = 'org-a', exp = Math.floor(Date.now()/1000)+3600) => `e30.${Buffer.from(JSON.stringify({sub,org,exp})).toString('base64url')}.test`;
 const server = http.createServer((req,res) => {
   if(req.url.startsWith('/sw.js')) {res.statusCode=404;return res.end();}
@@ -42,6 +42,12 @@ async function mock(page, {lost=false, attachmentStatus=201}={}) {
   },{lost,attachmentStatus});
 }
 const tests = {
+  async 'colliding legacy photo id never overwrites another repairs data'(page) {
+    await page.evaluate(()=>FixitOffline.enqueueRepair({local_uuid:'first'},[{id:'same',file:new Blob(['original'])}]));
+    await assert.rejects(()=>page.evaluate(()=>FixitOffline.enqueueRepair({local_uuid:'second'},[{id:'same',file:new Blob(['replacement'])}])));
+    const preserved=await page.evaluate(async()=>({repairs:(await FixitOffline.db.getAll('pendingRepairs')).length,photo:await (await FixitOffline.db.getAll('pendingAttachments'))[0].file.text()}));
+    assert.deepEqual(preserved,{repairs:1,photo:'original'});
+  },
   async 'repeat enqueue cannot duplicate photos or overwrite a queued repair'(page) {
     await enqueue(page); await enqueue(page);
     assert.equal(await page.evaluate(async()=> (await FixitOffline.db.getAll('pendingAttachments')).length),1);
@@ -161,5 +167,7 @@ const tests = {
 (async()=>{
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));origin=`http://127.0.0.1:${server.address().port}`;
   browser=await chromium.launch({executablePath:process.env.FIXIT_CHROMIUM_PATH || undefined});
-  for(const [name,test] of Object.entries(tests)) {try{await fixture(test);console.log('PASS',name);}catch(e){failures++;console.error('FAIL',name,e);}}
+  const selected=Object.entries(tests).filter(([name])=>!process.env.FIXIT_QUEUE_CASE || name.includes(process.env.FIXIT_QUEUE_CASE));
+  assert.ok(selected.length,'No queue scenarios selected');
+  for(const [name,test] of selected) {try{await fixture(test);console.log('PASS',name);}catch(e){failures++;console.error('FAIL',name,e);}}
 })().catch(e=>{failures++;console.error(e);}).finally(async()=>{await browser?.close();server.close();process.exitCode=failures?1:0;});

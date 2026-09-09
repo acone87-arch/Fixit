@@ -10,7 +10,7 @@
 - Последняя сверенная main: `87e3044f30a40b6d0cff0306e71f9aee83aca329`.
 - Последняя сверка: 08.09.2026; GitHub Compare `identical`, ahead/behind `0/0`, новых commits `0`, изменённых файлов `0`. GitHub commit lookup отдельно подтвердил HEAD.
 - P0.1 выполнен и проверен в PR [№3](https://github.com/acone87-arch/Fixit/pull/3); проверенный SHA кода: `cde3d81a79b7f29efd17f65bac0538914a75ca1c`. Изменения ещё не в main и не в production.
-- Текущий шаг: **P0.4 выполнен и проверен; остановка до команды на P0.5**. Ветка `codex/p0-4-technician-result`, PR №6; база P0.3 `e53412dd61ad6a92c546d15fae9b629cd479d5a7`. Сохранены P0.1/P0.2 и актуальный main; merge в main/deploy не выполнялись.
+- Текущий шаг: **P0.5 — финальная приёмка и разрешённая пользователем выкладка P0.1–P0.5**. Рабочая ветка `codex/p0-5-durable-offline-queue`, draft PR №7. Ниже сохранена исходная база P0.4: Ветка `codex/p0-4-technician-result`, PR №6; база P0.3 `e53412dd61ad6a92c546d15fae9b629cd479d5a7`. Сохранены P0.1/P0.2 и актуальный main; merge в main/deploy не выполнялись.
 - **FIXIT PILOT READY не подтверждён.**
 
 ### Как читать доказательства
@@ -55,7 +55,7 @@
 | P0.2 Security boundaries | 🟢 выполнено и проверено | 48 PostgreSQL security-сценариев; полный suite 234 passed, 0 skipped; browser P0.1 и 5 JS runtime-файлов проходят. PR №4, production не обновлён |
 | P0.3 QR + ServiceRequest | 🟢 выполнено и проверено | 266 passed, 0 skipped: новые 28 PG workflow, 2 migration и 2 browser; все пять JS runtime-файлов прошли. PR №5, production не обновлён |
 | P0.4 Technician result | 🟢 выполнено и проверено | 276 passed; 6 новых PG cases, 4 Chromium cases; полный результат, акт, история и ACL подтверждены в PR №6 |
-| P0.5 Durable offline queue | 🔴 blocker | data_url, atomic queue, ownership, межконтекстные гонки |
+| P0.5 Durable offline queue | 🟡 финальная приёмка | 279 Python/PG/browser и 14 IDB/SW cases прошли; дополнительный collision regression и release harness ожидают итогового CI |
 | P0.6 Warehouse integrity | 🔴 blocker | Отрицательное количество, mobile warehouse, связь движения с Repair |
 | P0.7 Production acceptance | ⬜ не начато | PG/browser E2E, HTTPS upload, backup restore и rollback предстоит доказать |
 
@@ -153,7 +153,7 @@ DoD подтверждён на PostgreSQL 16 и Chromium в Actions. 18 PG-сц
 
 ## P0.5 — Durable offline queue
 
-**Статус: 🔴 blocker. Исполнение не начато.**
+**Статус: 🟡 в работе; функциональная приёмка прошла, финальный CI и разрешённая выкладка ожидаются.**
 
 **Definition of Done:** уже введённый ремонт и фотографии переживают временную потерю сети/ответа и перезапуск, не отправляются от другого аккаунта; после восстановления сети корректно связаны с Repair. Сохранённые данные не уничтожаются автоматически при logout/ошибке.
 
@@ -176,7 +176,7 @@ DoD подтверждён на PostgreSQL 16 и Chromium в Actions. 18 PG-сц
 
 ## P0.6 — Warehouse integrity
 
-**Статус: 🔴 blocker. Исполнение не начато.**
+**Статус: 🟡 в работе; функциональная приёмка прошла, финальный CI и разрешённая выкладка ожидаются.**
 
 **Definition of Done:** использованная деталь корректно уменьшает остаток, движение связано с Repair; повтор запроса, ошибка и конкурирующий расход не портят склад. Новый техник получает постоянный мобильный склад и может пройти приёмку/перемещение/списание.
 
@@ -590,3 +590,5 @@ Verify: main по-прежнему `80ec53e84402b24c3a8bb263d150e7bf7a0dd865`; c
 - Перед миграцией скрипт сохраняет pg_dump, uploads, конфигурацию, прошлый SHA и Docker image; кратко останавливает API для согласованности архива; проверяет список архивов. При ошибке миграции/health восстанавливает прежний image, без downgrade/удаления данных. Проверки Linux shell на синтетических командах добавлены в CI. Это не заменяет полный restore drill P0.7.
 - Небольшое дополнение: отсутствие IndexedDB больше не объявляется успешным сохранением черновика.
 - Финальный CI с подготовкой выкладки ожидается. Production пока не обновлён.
+
+- Дополнительный OFF-02 regression: повтор legacy attachment ID перезаписывал сохранённое фото другого ремонта. Отдельный Chromium case на `45b13c5` падает с `Missing expected rejection`; после проверки ID в той же IDB transaction сохраняется original photo и второй repair не записывается. Полный локальный queue suite: **15 passed**. Требуется финальный CI обновлённого кода.

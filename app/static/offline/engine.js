@@ -204,6 +204,18 @@
         return; // Immutable retry, including retry after acknowledgement.
       }
       await transaction(['pendingRepairs', 'pendingAttachments'], 'readwrite', tx => {
+        // A legacy client supplies its own photo IDs. Refuse a collision instead
+        // of overwriting another repair's only durable copy of that photo.
+        const attachmentIds = new Set();
+        const attachmentsStore = tx.objectStore('pendingAttachments');
+        const existingAttachments = attachmentsStore.getAll();
+        existingAttachments.onsuccess = () => {
+          for (const item of existingAttachments.result) attachmentIds.add(item.id);
+          for (const photo of photos) {
+            if (photo.id && attachmentIds.has(photo.id)) { tx.abort(); return; }
+            if (photo.id) attachmentIds.add(photo.id);
+          }
+        };
         tx.objectStore('pendingRepairs').put({ ...repair, local_uuid, queue_owner, queue_error: null });
         photos.forEach((photo, index) => tx.objectStore('pendingAttachments').put({
           ...photo, id: photo.id || `${local_uuid}:${index}:${uuid()}`, local_uuid,
