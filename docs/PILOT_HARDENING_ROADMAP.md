@@ -10,7 +10,7 @@
 - Последняя сверенная main: `87e3044f30a40b6d0cff0306e71f9aee83aca329`.
 - Последняя сверка: 08.09.2026; GitHub Compare `identical`, ahead/behind `0/0`, новых commits `0`, изменённых файлов `0`. GitHub commit lookup отдельно подтвердил HEAD.
 - P0.1 выполнен и проверен в PR [№3](https://github.com/acone87-arch/Fixit/pull/3); проверенный SHA кода: `cde3d81a79b7f29efd17f65bac0538914a75ca1c`. Изменения ещё не в main и не в production.
-- Текущий шаг: **P0.3 выполнен и проверен; остановка до команды на P0.4**. Ветка `codex/p0-3-workflow`, PR №5; проверенный SHA кода P0.3 `9ed18bb664c6fd82a024624ed83ce6e56ea8c489`. Сохранены P0.1/P0.2 и актуальный main; merge в main/deploy не выполнялись.
+- Текущий шаг: **P0.4 в работе по команде пользователя от 09.09.2026**. Ветка `codex/p0-3-workflow`, PR №5; проверенный SHA кода P0.3 `9ed18bb664c6fd82a024624ed83ce6e56ea8c489`. Сохранены P0.1/P0.2 и актуальный main; merge в main/deploy не выполнялись.
 - **FIXIT PILOT READY не подтверждён.**
 
 ### Как читать доказательства
@@ -54,7 +54,7 @@
 | P0.1 Onboarding | 🟢 выполнено и проверено | 186 Python passed, включая 18 PostgreSQL и 3 browser E2E; пять JS runtime-файлов прошли. PR №3, production не обновлён |
 | P0.2 Security boundaries | 🟢 выполнено и проверено | 48 PostgreSQL security-сценариев; полный suite 234 passed, 0 skipped; browser P0.1 и 5 JS runtime-файлов проходят. PR №4, production не обновлён |
 | P0.3 QR + ServiceRequest | 🟢 выполнено и проверено | 266 passed, 0 skipped: новые 28 PG workflow, 2 migration и 2 browser; все пять JS runtime-файлов прошли. PR №5, production не обновлён |
-| P0.4 Technician result | 🔴 blocker | Исходные фото и клиентский результат не доведены; полный E2E не подтверждён |
+| P0.4 Technician result | 🟡 в работе | Исходные фото и клиентский результат не доведены; полный E2E не подтверждён |
 | P0.5 Durable offline queue | 🔴 blocker | data_url, atomic queue, ownership, межконтекстные гонки |
 | P0.6 Warehouse integrity | 🔴 blocker | Отрицательное количество, mobile warehouse, связь движения с Repair |
 | P0.7 Production acceptance | ⬜ не начато | PG/browser E2E, HTTPS upload, backup restore и rollback предстоит доказать |
@@ -132,7 +132,7 @@ DoD подтверждён на PostgreSQL 16 и Chromium в Actions. 18 PG-сц
 
 ## P0.4 — Technician result
 
-**Статус: 🔴 blocker. Исполнение не начато.**
+**Статус: 🟡 в работе. Verify/Reproduce.**
 
 **Definition of Done:** одна ServiceRequest создаёт один полный canonical Repair и одну понятную запись истории: проблема, исходные фото, диагностика, работы, детали, фото результата, статус и результат. Техник проходит назначение → начало → approval при необходимости → completion; акт и результат доступны нужному клиенту.
 
@@ -495,3 +495,12 @@ Verify: main по-прежнему `80ec53e84402b24c3a8bb263d150e7bf7a0dd865`; c
 - Последняя сверка main: `87e3044f30a40b6d0cff0306e71f9aee83aca329`, identical. P0.1–P0.3 находятся в draft PR; main и production не изменялись.
 
 **Следующий этап: P0.4 — Technician result.** Проверить полный ремонт с исходными фото, работами, деталями, фото результата, актом и одной записью истории, доступной клиенту. Существующие исправления workflow и ACL служат базой; начинать только по следующей команде пользователя.
+
+
+### 09.09.2026 — P0.4: начало и воспроизведение
+
+- Main по-прежнему `87e3044f30a40b6d0cff0306e71f9aee83aca329`, изменений после последней сверки нет. База этапа: `e53412dd61ad6a92c546d15fae9b629cd479d5a7`, окончательный P0.3 CI [34276392491](https://github.com/acone87-arch/Fixit/actions/runs/34276392491): 266 passed, 0 skipped и 5 JS runtime файлов.
+- Ветка P0.4: `codex/p0-4-technician-result`, зависит от несмерженных P0.1–P0.3. Main/deploy не затрагиваются.
+- Подтверждено по коду: workspace использует Repair attachments вместо исходных фото; клиент не видит outcome/parts/result photos; клиентская equipment-card открывает форму заявки; legacy Repair с task/ticket подавляется в истории без canonical записи; пустой description допускается сервером; длинная диагностика Pulse передаётся в VARCHAR(100); conflict не показан в detail/UI.
+- Reproduce: добавлены HTTP/PG и Chromium regression cases с полным результатом, запчастями, фото, PDF, повтором, конфликтом версии и legacy историей. Зелёный статус требует runtime приёмки после исправления.
+- P0.6 остаётся владельцем общего stock hardening, включая StockMovement.repair_id и concurrent consumption. Здесь проверяется штатное списание/повтор в составе результата.
