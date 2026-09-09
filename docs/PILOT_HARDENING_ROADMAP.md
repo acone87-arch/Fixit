@@ -10,7 +10,7 @@
 - Последняя сверенная main: `87e3044f30a40b6d0cff0306e71f9aee83aca329`.
 - Последняя сверка: 08.09.2026; GitHub Compare `identical`, ahead/behind `0/0`, новых commits `0`, изменённых файлов `0`. GitHub commit lookup отдельно подтвердил HEAD.
 - P0.1 выполнен и проверен в PR [№3](https://github.com/acone87-arch/Fixit/pull/3); проверенный SHA кода: `cde3d81a79b7f29efd17f65bac0538914a75ca1c`. Изменения ещё не в main и не в production.
-- Текущий шаг: **P0.4 в работе по команде пользователя от 09.09.2026**. Ветка `codex/p0-4-technician-result`, PR №6; база P0.3 `e53412dd61ad6a92c546d15fae9b629cd479d5a7`. Сохранены P0.1/P0.2 и актуальный main; merge в main/deploy не выполнялись.
+- Текущий шаг: **P0.4 выполнен и проверен; остановка до команды на P0.5**. Ветка `codex/p0-4-technician-result`, PR №6; база P0.3 `e53412dd61ad6a92c546d15fae9b629cd479d5a7`. Сохранены P0.1/P0.2 и актуальный main; merge в main/deploy не выполнялись.
 - **FIXIT PILOT READY не подтверждён.**
 
 ### Как читать доказательства
@@ -54,7 +54,7 @@
 | P0.1 Onboarding | 🟢 выполнено и проверено | 186 Python passed, включая 18 PostgreSQL и 3 browser E2E; пять JS runtime-файлов прошли. PR №3, production не обновлён |
 | P0.2 Security boundaries | 🟢 выполнено и проверено | 48 PostgreSQL security-сценариев; полный suite 234 passed, 0 skipped; browser P0.1 и 5 JS runtime-файлов проходят. PR №4, production не обновлён |
 | P0.3 QR + ServiceRequest | 🟢 выполнено и проверено | 266 passed, 0 skipped: новые 28 PG workflow, 2 migration и 2 browser; все пять JS runtime-файлов прошли. PR №5, production не обновлён |
-| P0.4 Technician result | 🟡 в работе | Исходные фото и клиентский результат не доведены; полный E2E не подтверждён |
+| P0.4 Technician result | 🟢 выполнено и проверено | 276 passed; 6 новых PG cases, 4 Chromium cases; полный результат, акт, история и ACL подтверждены в PR №6 |
 | P0.5 Durable offline queue | 🔴 blocker | data_url, atomic queue, ownership, межконтекстные гонки |
 | P0.6 Warehouse integrity | 🔴 blocker | Отрицательное количество, mobile warehouse, связь движения с Repair |
 | P0.7 Production acceptance | ⬜ не начато | PG/browser E2E, HTTPS upload, backup restore и rollback предстоит доказать |
@@ -132,23 +132,24 @@ DoD подтверждён на PostgreSQL 16 и Chromium в Actions. 18 PG-сц
 
 ## P0.4 — Technician result
 
-**Статус: 🟡 в работе. Verify/Reproduce.**
+**Статус: 🟢 выполнено и проверено.**
 
 **Definition of Done:** одна ServiceRequest создаёт один полный canonical Repair и одну понятную запись истории: проблема, исходные фото, диагностика, работы, детали, фото результата, статус и результат. Техник проходит назначение → начало → approval при необходимости → completion; акт и результат доступны нужному клиенту.
 
 | ID | Статус | Задача и актуальное основание |
 |---|---|---|
-| RES-01 | 🔴 blocker | Показать исходные request_attachments технику: workspace сейчас показывает Repair attachments |
-| RES-02 | 🔴 blocker | Довести клиентский просмотр результата/работ/деталей/фото и вход в паспорт: карточка client equipment сейчас открывает новую заявку |
-| RES-03 | 🔴 blocker | Устранить пропадание legacy Repair в агрегированной истории при task/ticket mapping без canonical link; неоднозначные связи не назначать произвольно |
-| RES-04 | ⬜ не начато | Проверить полный путь с деталями и фото, генерацией акта, одной строкой истории, корректным доступом техника к историческому результату |
-| RES-05 | ⬜ не начато | Проверить обязательность результата на сервере, Equipment.version conflict и отображение состояния; акт должен соответствовать доступному результату |
+| RES-01 | 🟢 выполнено и проверено | Исходные request photos показаны отдельно от Repair photos; Chromium загрузил и открыл гостевое фото |
+| RES-02 | 🟢 выполнено и проверено | Client equipment открывает паспорт; клиент читает работы/детали/фото/конфликт и скачивает PDF из результата; modal закрывается при переходе к заявке |
+| RES-03 | 🟢 выполнено и проверено | Legacy Repair больше не теряется из-за task/ticket provenance; неоднозначная связь не назначает произвольный Repair. PG проверил несколько кандидатов и совместимость единственного кандидата |
+| RES-04 | 🟢 выполнено и проверено | Назначение → начало → детали/фото → waiting_parts/resume → client approval → completion → reload → акт/история. HTTP/PG подтверждают retry, media и доступ техника/клиента/директора |
+| RES-05 | 🟢 выполнено и проверено | Пустой canonical результат отклоняется до списания; длинная диагностика сохраняется в description; conflict виден в UI; PDF соответствует полному тексту и деталям |
+
 
 **Код:** Pulse technician/client UI, `app/routers/equipment.py`, `service_requests.py`, `client_portal.py`, `repairs.py`, `app/services/service_act_pdf.py`, serializers/access policy.
 
 **Доказательства:** browser → API → PG, контроль числа canonical Repair/history entries; сравнение UI/JSON/PDF результата; legacy fixtures; другой клиент получает отказ. Подпись и юридически неизменяемый snapshot акта не добавлять автоматически в пилотный scope: отдельно фиксировать ограничение динамического PDF.
 
-**Миграция:** не определена; только доказанная необходимость согласования legacy данных. **Риск:** средний/высокий — представление истории и границы read/write. Зависимости: P0.1–P0.3; окончательная приёмка с P0.5/P0.6.
+**Миграция P0.4:** не нужна; изменения совместимы с текущими таблицами, исторические данные не переписываются. **Риск:** средний/высокий — представление истории и границы read/write. Зависимости: P0.1–P0.3; окончательная приёмка с P0.5/P0.6.
 
 ## P0.5 — Durable offline queue
 
@@ -521,3 +522,45 @@ Verify: main по-прежнему `80ec53e84402b24c3a8bb263d150e7bf7a0dd865`; c
 
 - SHA `1dc65f6a1a9789a0b02995f7b9b1c277ea4c0ca9`, [Actions 34308981094](https://github.com/acone87-arch/Fixit/actions/runs/34308981094): **1 failed, 275 passed**, 711 предупреждений. Чтение результата/PDF/фото и ACL, legacy cases, клиентский переход из паспорта и скачивание акта прошли. Оставшийся browser failure: поздний renderTechnicianPulse перезаписал открытую заявку сразу после login. Это отдельный renderer от исправленного в P0.3 staff renderPulse.
 - Гонка техника воспроизведена отдельно исполнением настоящего JS renderer с отложенным API promise: assertion падает до исправления и проходит после проверки текущего route перед отрисовкой. Browser не замедляется искусственными sleep и не обходит UI. Требуется новый полный CI.
+
+
+### 09.09.2026 — P0.4: итог приёмки
+
+**Статус: 🟢 выполнено и проверено.** Проверенный код `dc11ae847906da101912bbf66ea7daa086f29d22`, [Actions 34327733745](https://github.com/acone87-arch/Fixit/actions/runs/34327733745), job `102388793429`: **success**.
+
+- **276 passed, 0 failed, 0 skipped**, 737 предупреждений зависимостей, 236.54 s. Включены 102 PostgreSQL cases (96 ранее + 6 P0.4), 9 Chromium cases (5 ранее + 4 P0.4) и 165 остальных Python tests. Эти числа не прибавляются повторно к 276.
+- Все **5 JS runtime-файлов** прошли; добавлен реальный renderer regression гонки техника. 9 исходных failures, промежуточные 5/1 failures и причины сохранены выше. Никаких skip/xfail для скрытия ошибок нет.
+- Runtime подтвердил полный результат с длинной диагностикой, работами, деталью, фото, ожиданием деталей и клиентским согласованием, reload и completion. API/PG подтвердил единственный Repair/RepairPart, повтор без повторного списания, одну canonical history entry и соответствие текста PDF полному результату.
+- Site Manager, Director, техник и сервис читают разрешённый результат/фото/PDF. Другой Site, Client и Organization получают отказ. Автор читает собственный результат после отзыва fleet grant; деактивированная membership запрещает доступ.
+- Обычный результат завершает заявку и переводит Equipment в working; version conflict сохраняет Repair и исходное состояние Equipment, возвращает признак conflict и показывает его в клиентском UI.
+- Legacy Task/Ticket/API/static-tech/старые offline данные не удалялись. Исторический результат сохранён явно; неоднозначная старая связь не превращается в canonical ownership.
+- Финальный коммит обновляет только этот журнал; его HEAD и CI фиксируются отдельно в PR №6, чтобы документ не ссылался на ещё не существующий собственный SHA.
+
+**Изменённые файлы P0.4** относительно `e53412d`:
+
+- `app/routers/equipment.py`
+- `app/routers/service_requests.py`
+- `app/schemas/service_request.py`
+- `app/services/sync_service.py`
+- `app/services/service_act_pdf.py`
+- `app/static/app.js`
+- `app/static/index.html`
+- `app/static/sw.js`
+- `tests/test_technician_result_postgres.py`
+- `tests/test_technician_result_browser.py`
+- `tests/technician_workflow_runtime_test.js`
+- `tests/test_equipment_service_history.py`
+- `tests/test_saas_foundation.py`
+- `requirements-dev.txt`
+- `docs/PILOT_HARDENING_ROADMAP.md`
+
+**Миграция:** новая миграция P0.4 не нужна. Для выпуска совокупной ветки остаётся обязательной миграция 0014 из P0.3; её production rollout/rollback ещё не принят.
+
+**Остаточные ограничения:**
+
+- PDF формируется динамически из Repair и текущих реквизитов Equipment/Client; криптографически подписанный/неизменяемый snapshot не реализовывался и не заявляется.
+- Штатное списание и повтор результата проверены; общий складской hardening, в том числе StockMovement → Repair и конкурентные расходования, остаётся P0.6.
+- Полная сохранность offline очереди при account switch, SW/page race, потере ответа/перезапуске — P0.5. Chromium не заменяет реальную приёмку Android/iOS, production backup/restore и всего пилота — P0.7.
+- Main повторно сверена: `87e3044f30a40b6d0cff0306e71f9aee83aca329`, identical. PR №6 draft, включает зависимости P0.1–P0.3. Merge/deploy не выполнялись; FIXIT PILOT READY ещё не объявляется.
+
+**Следующий этап: P0.5 — Durable offline queue.** Защитить уже введённый результат и фото при потере сети/ответа/перезапуске и смене аккаунта, с проверками настоящего IndexedDB и конкурентных page/SW sync. Начинать только после команды пользователя.
