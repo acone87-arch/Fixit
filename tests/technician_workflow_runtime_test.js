@@ -97,3 +97,21 @@ console.log('technician workflow runtime: ok');
   assert.equal(content.innerHTML, 'Открытая заявка на согласование', 'Старый dashboard затёр открытую заявку');
   console.log('Асинхронный переход Pulse → заявка: пройдено');
 })().catch((error) => { console.error(error); process.exitCode = 1; });
+
+// P0.4: та же гонка в отдельном экране техника, реальные отложенные API promises.
+(async () => {
+  const renderer = source.slice(source.indexOf('async function renderTechnicianPulse('), source.indexOf('async function ensureCustomers('));
+  let release;
+  const pending = new Promise((resolve) => { release = resolve; });
+  const state = { me: { role: 'technician' }, route: 'pulse' };
+  const content = { innerHTML: '', querySelectorAll: () => [] };
+  const runtime = { state, api: () => pending, ensureEquipmentTypes: () => Promise.resolve(), esc: String };
+  vm.runInNewContext(`${renderer}; this.render = renderTechnicianPulse;`, runtime);
+  const rendering = runtime.render(content);
+  state.route = 'requests';
+  content.innerHTML = 'Назначенная заявка: Выехал';
+  release([]);
+  await rendering;
+  assert.equal(content.innerHTML, 'Назначенная заявка: Выехал', 'Главный экран техника затёр заявку');
+  console.log('Асинхронный переход техника Pulse → заявка: пройдено');
+})().catch((error) => { console.error(error); process.exitCode = 1; });

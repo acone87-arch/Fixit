@@ -1187,6 +1187,7 @@ async function renderTechnicianPulse(content) {
   const [requests, equipment] = await Promise.all([
     api('/service-requests'), api('/equipment'), ensureEquipmentTypes(),
   ]);
+  if (state.route !== 'pulse') return;
   const active = requests.filter((item) => !['completed', 'closed', 'cancelled'].includes(item.status));
   const inProgress = requests.filter((item) => ['on_the_way', 'arrived', 'in_progress'].includes(item.status));
   const queued = requests.filter((item) => ['new', 'assigned', 'waiting_parts', 'waiting_approval'].includes(item.status));
