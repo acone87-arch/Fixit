@@ -285,7 +285,7 @@ async function optimizePhoto(file, maxSide = 1920) {
 }
 
 const RequestDraftStore = (() => {
-  if (!window.indexedDB) return { get: async () => null, put: async () => null, remove: async () => null };
+  if (!window.indexedDB) return { get: async () => null, put: async () => { throw new Error('Хранилище браузера недоступно'); }, remove: async () => null };
   const dbPromise = new Promise((resolve, reject) => {
     const request = window.indexedDB.open('fixit-request-drafts', 1);
     request.onupgradeneeded = () => { if (!request.result.objectStoreNames.contains('drafts')) request.result.createObjectStore('drafts', { keyPath: 'key' }); };
