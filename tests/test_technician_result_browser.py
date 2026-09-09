@@ -63,6 +63,7 @@ async def test_client_opens_passport_and_complete_result(live, result_flow, conf
             await page.locator('[data-passport-tab="history"]').click()
             await expect(page.locator('.equipment-history-card')).to_have_count(1)
             await page.locator('[data-history-request]').click()
+            await expect(page.locator('.modal-backdrop')).to_have_count(0)
             await expect(page.locator('.request-result')).to_contain_text(WORK)
             if conflict:
                 await expect(page.locator('.request-result')).to_contain_text('Требуется проверка состояния оборудования')
@@ -95,6 +96,18 @@ async def test_pulse_long_diagnosis_parts_photo_completion_and_reload(live, resu
             await page.locator(f'[data-part-plus="{f.part.id}"]').click()
             await page.locator('#request-gallery').set_input_files({'name': 'result.png', 'mimeType': 'image/png', 'buffer': photo_bytes()})
             await expect(page.locator('.tech-request-photo-count')).to_contain_text('Выбрано 1')
+            await page.locator('#request-wait-parts').click()
+            await page.locator('#request-resume').click()
+            await page.locator('#request-approval-target').select_option('client')
+            await page.locator('#request-wait-approval').click()
+            await expect(page.locator('.tech-request-state-banner')).to_contain_text('Ожидается согласование')
+            approved = await f.http.patch(f'/api/client-portal/requests/{request_id}/approval', headers=f.manager_headers,
+                json={'action': 'approved', 'comment': 'Работы и деталь согласованы'})
+            assert approved.status_code == 200, approved.text
+            await page.reload()
+            await expect(page.locator('#request-diagnostic')).to_have_value(DIAGNOSTIC)
+            await expect(page.locator('#request-work')).to_have_value(WORK)
+            await expect(page.locator(f'#part-{f.part.id}')).to_have_text('1')
             async with page.expect_response(lambda r: r.url.endswith('/api/v1/sync/repairs') and r.request.method == 'POST') as pending:
                 await page.locator('#request-complete').click()
             response = await pending.value
@@ -109,8 +122,8 @@ async def test_pulse_long_diagnosis_parts_photo_completion_and_reload(live, resu
             repair_id = payload['results'][0]['server_id']
             act = await f.http.get(f'/api/repairs/{repair_id}/act.pdf', headers=f.manager_headers)
             assert act.status_code == 200
-            text = '\n'.join(page.extract_text() for page in PdfReader(BytesIO(act.content)).pages)
-            assert WORK in text and 'PILOT-VALVE' in text
+            text = ' '.join(' '.join(page.extract_text() for page in PdfReader(BytesIO(act.content)).pages).split())
+            assert DIAGNOSTIC.strip() in text and WORK in text and 'PILOT-VALVE' in text
             detail = await f.http.get(f'/api/client-portal/requests/{request_id}', headers=f.manager_headers)
             assert DIAGNOSTIC.strip() in detail.json()['outcome']
             assert len(detail.json()['attachments']) == 1

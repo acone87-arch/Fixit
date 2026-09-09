@@ -674,7 +674,10 @@ function bindRequestResult(content, rememberUrl) {
     }).catch(() => { button.querySelector('span').textContent = 'Не удалось загрузить фото'; });
     button.addEventListener('click', () => openProtectedImage(path, 'Фото ремонта'));
   });
-  content.querySelectorAll('[data-result-act]').forEach((button) => button.addEventListener('click', () => downloadAct(button.dataset.resultAct)));
+  content.querySelectorAll('[data-result-act]').forEach((button) => button.addEventListener('click', async () => {
+    try { downloadBlob(await apiBlob(`/repairs/${button.dataset.resultAct}/act.pdf`), 'service-act.pdf'); }
+    catch (error) { toast(error.message, 'error'); }
+  }));
   content.querySelectorAll('[data-result-document]').forEach((button) => button.addEventListener('click', async () => {
     try { downloadBlob(await apiBlob(`/repairs/attachments/${button.dataset.resultDocument}`), button.textContent.trim()); }
     catch (error) { toast(error.message, 'error'); }
@@ -1017,7 +1020,7 @@ async function openTechnicianRequestWorkspace(id, loadedRequest = null) {
       : completionQueued && completionSync.fullySynced ? '<div class="tech-request-sync synced">✓ Синхронизировано</div>' : '';
     const waitingBanner = request.status === 'waiting_parts' ? '<div class="tech-request-state-banner"><strong>Ожидаем запчасти</strong><span>Черновик работ сохранён. После поступления запчастей продолжите работу.</span></div>' : request.status === 'waiting_approval' ? '<div class="tech-request-state-banner"><strong>Ожидается согласование</strong><span>После согласования диспетчер вернёт заявку в работу.</span></div>' : '';
     const photoPreview = draft.photos.length ? `<div class="tech-request-photo-grid">${draft.photos.map((photo, index) => `<figure><img src="${esc(photo.url)}" alt="Фото ${index + 1}"><figcaption>Фото ${index + 1}<button type="button" data-photo-remove="${index}" aria-label="Удалить фото ${index + 1}">×</button></figcaption></figure>`).join('')}</div><div class="tech-request-photo-count">Выбрано ${draft.photos.length} из 5</div>` : '<div class="tech-request-empty">Фотографии пока не выбраны</div>';
-    const workArea = isWorkStatus ? `<section class="tech-request-section tech-request-work">${waitingBanner}<h2>Рабочая зона</h2><label>Диагностика<textarea id="request-diagnostic" placeholder="Что обнаружено">${esc(draft.diagnostic)}</textarea></label><label>Выполненные работы<textarea id="request-work" placeholder="Что сделано">${esc(draft.work)}</textarea></label><label>Комментарий<textarea id="request-comment" placeholder="Комментарий для диспетчера">${esc(draft.comment)}</textarea></label><h3>Использованные запчасти</h3>${parts}<h3>Фотографии</h3>${photoPreview}<div class="tech-request-photo-actions"><button type="button" class="tech-request-photo-add" id="request-camera">Добавить фото</button><button type="button" class="btn btn-ghost btn-sm" id="request-gallery-open">Выбрать из галереи</button><input id="request-gallery" type="file" accept="image/*" multiple hidden></div>${request.status === 'in_progress' ? '<div class="tech-request-secondary"><button type="button" id="request-wait-parts">Жду запчасти</button><label>Кто согласует<select id="request-approval-target"><option value="internal">Диспетчер</option><option value="client">Клиент</option></select></label><button type="button" id="request-wait-approval">Жду согласование</button></div>' : ''}</section>` : '';
+    const workArea = isWorkStatus ? `<section class="tech-request-section tech-request-work">${waitingBanner}<h2>Рабочая зона</h2><label>Диагностика<textarea id="request-diagnostic" placeholder="Что обнаружено">${esc(draft.diagnostic)}</textarea></label><label>Выполненные работы<textarea id="request-work" placeholder="Что сделано">${esc(draft.work)}</textarea></label><label>Комментарий к результату<textarea id="request-comment" placeholder="Комментарий, видимый клиенту">${esc(draft.comment)}</textarea></label><h3>Использованные запчасти</h3>${parts}<h3>Фотографии</h3>${photoPreview}<div class="tech-request-photo-actions"><button type="button" class="tech-request-photo-add" id="request-camera">Добавить фото</button><button type="button" class="btn btn-ghost btn-sm" id="request-gallery-open">Выбрать из галереи</button><input id="request-gallery" type="file" accept="image/*" multiple hidden></div>${request.status === 'in_progress' ? '<div class="tech-request-secondary"><button type="button" id="request-wait-parts">Жду запчасти</button><label>Кто согласует<select id="request-approval-target"><option value="internal">Диспетчер</option><option value="client">Клиент</option></select></label><button type="button" id="request-wait-approval">Жду согласование</button></div>' : ''}</section>` : '';
     const nextAction = statusAction[request.status];
     const action = nextAction
       ? `<button class="btn btn-primary tech-request-main" id="request-next" data-status="${nextAction[0]}">${nextAction[1]}</button>`
@@ -1916,11 +1919,11 @@ async function openEquipmentPassport(id) {
       backdrop.querySelectorAll('[data-passport-panel]').forEach((panel) => panel.classList.toggle('hidden', panel.dataset.passportPanel !== tab.dataset.passportTab));
     }));
     backdrop.querySelectorAll('[data-history-request]').forEach((card) => {
-      const open = () => navigateToServiceRequest(card.dataset.historyRequest);
+      const open = () => { closeModal(); navigateToServiceRequest(card.dataset.historyRequest); };
       card.addEventListener('click', (event) => { if (!event.target.closest('[data-history-photo-url]')) open(); });
       card.addEventListener('keydown', (event) => { if (!event.target.closest('[data-history-photo-url]') && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); open(); } });
     });
-    backdrop.querySelector('#passport-primary-request')?.addEventListener('click', () => navigateToServiceRequest(passport.active_request.id));
+    backdrop.querySelector('#passport-primary-request')?.addEventListener('click', () => { closeModal(); navigateToServiceRequest(passport.active_request.id); });
     backdrop.querySelector('#passport-create-request')?.addEventListener('click', () => { if (isClient) { closeModal(); openClientRequestForm(passport.id); } else openCreateServiceRequestForEquipment(passport); });
     backdrop.querySelector('#passport-manage')?.addEventListener('click', () => openEquipmentManageModal(passport));
     backdrop.querySelector('#passport-archive')?.addEventListener('click', async () => {

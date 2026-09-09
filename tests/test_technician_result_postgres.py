@@ -98,8 +98,8 @@ async def test_complete_result_retry_media_act_history_and_scope(result_flow, co
         Image.open(BytesIO(media.content)).verify()
         act = await f.http.get(f'/api/repairs/{repair_id}/act.pdf', headers=headers)
         assert act.status_code == 200, act.text
-        text = '\n'.join(page.extract_text() for page in PdfReader(BytesIO(act.content)).pages)
-        assert WORK in text and 'PILOT-VALVE' in text and 'Клапан' in text
+        text = ' '.join(' '.join(page.extract_text() for page in PdfReader(BytesIO(act.content)).pages).split())
+        assert DIAGNOSTIC.strip() in text and WORK in text and 'PILOT-VALVE' in text and 'Клапан' in text
         assert 'QR-0' in text and 'Техник' in text
         passport = await f.http.get(f'/api/equipment/{f.equipment[0].id}/passport', headers=headers)
         assert passport.status_code == 200, passport.text
