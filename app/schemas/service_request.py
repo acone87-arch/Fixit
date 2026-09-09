@@ -86,6 +86,7 @@ class ServiceRequestDetail(BaseModel):
     attachments: list[dict] = []
     request_attachments: list[dict] = []
     primary_photo: dict | None = None
+    repair_sync_status: str | None = None
 
 
 # Keep imports in integrations backward-compatible while endpoints use explicit DTOs.

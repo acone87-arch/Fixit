@@ -47,7 +47,7 @@ def test_legacy_records_are_not_duplicated_when_mapped_to_a_canonical_request():
     source = (ROOT / "routers" / "equipment.py").read_text(encoding="utf8")
     assert "if task.id not in request_by_task" in source
     assert "if ticket.id not in request_by_ticket" in source
-    assert "if repair.service_request_id or repair.task_id in request_by_task or repair.ticket_id in request_by_ticket" in source
+    assert "if repair.service_request_id in request_by_id" in source
 
 
 def test_history_cards_are_whole_request_navigation_targets_with_thumbnail_urls():

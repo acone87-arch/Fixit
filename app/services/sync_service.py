@@ -129,6 +129,8 @@ async def sync_one_repair(db: AsyncSession, technician_id: uuid.UUID, organizati
                 ))
                 if existing_repair:
                     raise _SyncFailure("Для заявки уже оформлен сервисный акт")
+                if not payload.description.strip():
+                    raise _SyncFailure("Опишите выполненные работы")
 
             if payload.task_id:
                 task = await db.scalar(
@@ -212,7 +214,7 @@ async def sync_one_repair(db: AsyncSession, technician_id: uuid.UUID, organizati
                 client_signer_name=payload.client_signer_name,
                 client_signed_at=payload.client_signed_at,
                 started_at=payload.started_at,
-                closed_at=payload.closed_at,
+                closed_at=payload.closed_at or datetime.now(timezone.utc),
                 sync_status=SyncStatus.conflict if conflict else SyncStatus.synced,
                 device_updated_at=payload.device_updated_at,
             )

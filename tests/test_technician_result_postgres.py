@@ -2,6 +2,7 @@
 import uuid
 from datetime import datetime, timezone
 from io import BytesIO
+from types import SimpleNamespace
 
 import pytest
 import pytest_asyncio
@@ -14,7 +15,7 @@ from app.models.organization import OrganizationMembership
 from app.models.repair import Repair, RepairPart, SyncOperation
 from app.models.service_request import ServiceRequest
 from app.models.warehouse import Part, Warehouse, WarehouseStock, WarehouseType
-from test_onboarding_postgres import pg, auth
+from test_onboarding_postgres import pg, auth, invite, accept
 from test_request_workflow_postgres import flow, new_request, start, repair_body, sync, qr
 
 pytestmark = pytest.mark.asyncio
@@ -77,11 +78,14 @@ async def test_complete_result_retry_media_act_history_and_scope(result_flow, co
         parts_used=[{'part_id': str(f.part.id), 'quantity': 2}])
     result = await sync(f, body)
     assert result['resolved_as'] == ('applied_with_conflict' if conflict else 'applied'), result
+    director = await accept(f, await invite(f, kind='director'), email='director@example.com')
+    assert director.status_code == 200, director.text
+    director_headers = {'Authorization': 'Bearer ' + director.json()['access_token']}
     repair_id = result['server_id']
     assert (await sync(f, body))['resolved_as'] == 'already_synced'
     photo = await upload_result(f, repair_id)
     assert (await upload_result(f, repair_id))['id'] == photo['id']
-    for headers in [auth(f.owner, f.org), auth(f.tech, f.org), f.manager_headers]:
+    for headers in [auth(f.owner, f.org), auth(f.tech, f.org), f.manager_headers, director_headers]:
         detail = await f.http.get(f'/api/service-requests/{request_id}', headers=headers)
         assert detail.status_code == 200, detail.text
         data = detail.json()
@@ -103,7 +107,7 @@ async def test_complete_result_retry_media_act_history_and_scope(result_flow, co
         assert len(history) == 1 and history[0]['service_request_id'] == request_id
         assert history[0]['work_summary'] == DESCRIPTION and history[0]['has_service_act']
         assert history[0]['photos'][0]['id'] == photo['id']
-    # Другая Site/Client/Organization не получает ни результат, ни PDF, ни фото.
+    # Другой Site не получает ни результат, ни PDF, ни фото.
     async with f.sessions() as db:
         manager_id = (await db.scalar(select(User).where(User.email == 'manager@example.com'))).id
         from app.models.customer import ClientUserAccess
@@ -114,6 +118,17 @@ async def test_complete_result_retry_media_act_history_and_scope(result_flow, co
                 f'/api/repairs/{repair_id}/act.pdf', photo['download_url']]:
         denied = await f.http.get(url, headers=f.manager_headers)
         assert denied.status_code in {403, 404}, denied.text
+    async with f.sessions() as db:
+        access = await db.scalar(select(ClientUserAccess).where(ClientUserAccess.user_id == manager_id))
+        access.site_id = f.sites[2].id; access.client_id = f.other.id
+        db.add(OrganizationMembership(organization_id=f.sites[3].organization_id, user_id=f.owner.id, role=UserRole.owner))
+        await db.commit()
+    foreign_headers = auth(f.owner, SimpleNamespace(id=f.sites[3].organization_id))
+    for headers in [f.manager_headers, foreign_headers]:
+        for url in [f'/api/service-requests/{request_id}', f'/api/equipment/{f.equipment[0].id}/passport',
+                    f'/api/repairs/{repair_id}/act.pdf', photo['download_url']]:
+            denied = await f.http.get(url, headers=headers)
+            assert denied.status_code in {403, 404}, denied.text
     async with f.sessions() as db:
         assert await db.scalar(select(func.count()).select_from(Repair)) == 1
         assert await db.scalar(select(func.count()).select_from(RepairPart)) == 1
@@ -126,6 +141,12 @@ async def test_complete_result_retry_media_act_history_and_scope(result_flow, co
     # Автор читает свой результат после отзыва fleet grant, пока membership активен.
     assert (await f.http.get(f'/api/repairs/{repair_id}/act.pdf', headers=auth(f.tech, f.org))).status_code == 200
     assert (await f.http.get(photo['download_url'], headers=auth(f.tech, f.org))).status_code == 200
+    async with f.sessions() as db:
+        membership = await db.scalar(select(OrganizationMembership).where(
+            OrganizationMembership.organization_id == f.org.id, OrganizationMembership.user_id == f.tech.id))
+        membership.is_active = False; await db.commit()
+    for url in [f'/api/service-requests/{request_id}', f'/api/repairs/{repair_id}/act.pdf', photo['download_url']]:
+        assert (await f.http.get(url, headers=auth(f.tech, f.org))).status_code in {401, 403, 404}
 
 
 @pytest.mark.parametrize('link', ['task', 'ticket'])
@@ -150,3 +171,10 @@ async def test_legacy_results_do_not_disappear_or_get_arbitrary_canonical_owner(
         assert entry is not None and entry['work_summary'] == repair.description
         assert entry['legacy'] and entry['service_request_id'] is None
     assert sum(item['service_request_id'] == str(request_id) for item in history) == 1
+
+    detail = await f.http.get(f'/api/client-portal/requests/{request_id}', headers=f.manager_headers)
+    assert detail.status_code == 200 and detail.json()['repair_id'] is None
+    async with f.sessions() as db:
+        await db.delete(await db.get(Repair, repairs[1].id)); await db.commit()
+    detail = await f.http.get(f'/api/client-portal/requests/{request_id}', headers=f.manager_headers)
+    assert detail.status_code == 200 and detail.json()['repair_id'] == str(repairs[0].id)

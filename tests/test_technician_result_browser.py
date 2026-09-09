@@ -44,12 +44,13 @@ async def test_technician_sees_original_guest_photo(live, result_flow):
             await browser.close()
 
 
-async def test_client_opens_passport_and_complete_result(live, result_flow):
+@pytest.mark.parametrize('conflict', [False, True])
+async def test_client_opens_passport_and_complete_result(live, result_flow, conflict):
     from playwright.async_api import async_playwright, expect
     f = result_flow
     request_id = await new_request(f); await start(f, request_id)
-    result = await sync(f, repair_body(f, request_id, description=DESCRIPTION))
-    assert result['resolved_as'] == 'applied', result
+    result = await sync(f, repair_body(f, request_id, description=DESCRIPTION, base_equipment_version=f.equipment[0].version - int(conflict)))
+    assert result['resolved_as'] == ('applied_with_conflict' if conflict else 'applied'), result
     await upload_result(f, result['server_id'])
     async with async_playwright() as p:
         browser = await p.chromium.launch()
@@ -63,6 +64,8 @@ async def test_client_opens_passport_and_complete_result(live, result_flow):
             await expect(page.locator('.equipment-history-card')).to_have_count(1)
             await page.locator('[data-history-request]').click()
             await expect(page.locator('.request-result')).to_contain_text(WORK)
+            if conflict:
+                await expect(page.locator('.request-result')).to_contain_text('Требуется проверка состояния оборудования')
             await page.wait_for_function("document.querySelector('[data-result-photo] img')?.naturalWidth > 0")
             async with page.expect_download() as download:
                 await page.locator('[data-result-act]').click()

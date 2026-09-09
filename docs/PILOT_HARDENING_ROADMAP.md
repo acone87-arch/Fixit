@@ -10,7 +10,7 @@
 - Последняя сверенная main: `87e3044f30a40b6d0cff0306e71f9aee83aca329`.
 - Последняя сверка: 08.09.2026; GitHub Compare `identical`, ahead/behind `0/0`, новых commits `0`, изменённых файлов `0`. GitHub commit lookup отдельно подтвердил HEAD.
 - P0.1 выполнен и проверен в PR [№3](https://github.com/acone87-arch/Fixit/pull/3); проверенный SHA кода: `cde3d81a79b7f29efd17f65bac0538914a75ca1c`. Изменения ещё не в main и не в production.
-- Текущий шаг: **P0.4 в работе по команде пользователя от 09.09.2026**. Ветка `codex/p0-3-workflow`, PR №5; проверенный SHA кода P0.3 `9ed18bb664c6fd82a024624ed83ce6e56ea8c489`. Сохранены P0.1/P0.2 и актуальный main; merge в main/deploy не выполнялись.
+- Текущий шаг: **P0.4 в работе по команде пользователя от 09.09.2026**. Ветка `codex/p0-4-technician-result`, PR №6; база P0.3 `e53412dd61ad6a92c546d15fae9b629cd479d5a7`. Сохранены P0.1/P0.2 и актуальный main; merge в main/deploy не выполнялись.
 - **FIXIT PILOT READY не подтверждён.**
 
 ### Как читать доказательства
@@ -504,3 +504,13 @@ Verify: main по-прежнему `80ec53e84402b24c3a8bb263d150e7bf7a0dd865`; c
 - Подтверждено по коду: workspace использует Repair attachments вместо исходных фото; клиент не видит outcome/parts/result photos; клиентская equipment-card открывает форму заявки; legacy Repair с task/ticket подавляется в истории без canonical записи; пустой description допускается сервером; длинная диагностика Pulse передаётся в VARCHAR(100); conflict не показан в detail/UI.
 - Reproduce: добавлены HTTP/PG и Chromium regression cases с полным результатом, запчастями, фото, PDF, повтором, конфликтом версии и legacy историей. Зелёный статус требует runtime приёмки после исправления.
 - P0.6 остаётся владельцем общего stock hardening, включая StockMovement.repair_id и concurrent consumption. Здесь проверяется штатное списание/повтор в составе результата.
+
+### 09.09.2026 — P0.4: доказанное воспроизведение и исправление
+
+- Test-only SHA `6bd5172d654fa1156a7f5f79d35489e479bada6d`, [Actions 34308068783](https://github.com/acone87-arch/Fixit/actions/runs/34308068783): **9 failed, 266 passed**, 616 предупреждений. Все failures — новые P0.4 cases. Chromium дошёл до sync и PostgreSQL подтвердил `value too long for type character varying(100)`; пустой результат реально принимался со списанием. Фото/паспорт клиента/legacy история воспроизведены отдельно.
+- Исправлено: общий блок сохранённого результата для ролей, исходные request photos технику; клиент открывает паспорт и не получает staff actions; blank canonical description отклоняется до списания; отсутствующая closed_at получает серверную дату; conflict видим в detail и UI.
+- Полная диагностика Pulse остаётся в Repair.description без сокращения. В legacy fault_type отправляется только краткая метка до 100 символов — это ограничение существующей колонки, не ограничение текста результата. Миграция не нужна.
+- Legacy Repair без canonical link сохраняется отдельной исторической записью. Serializer использует старую связь только при единственном кандидате того же Equipment; при неоднозначности не выбирает произвольный результат. Данные/старые очереди не удаляются.
+- Версии app.js в HTML/SHELL и shell cache обновлены. Добавлен pypdf только в dev-зависимости для проверки текста настоящего PDF.
+- Локально: **165 passed, 111 skipped**, 4 предупреждения; пропуски — PG/browser без runtime. Все 5 JS runtime-файлов прошли. Два старых source assertions приведены к новому отображению; доказательство исправлений дают новые HTTP/PG/Chromium тесты, а не проверки текста исходников.
+- Ожидается полный CI исправленного HEAD. Этап пока не объявлен завершённым.
