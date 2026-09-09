@@ -5,19 +5,20 @@
 // даже если вкладка/приложение закрыты (см. п.3.2 ТЗ: "отложенная отправка").
 // ============================================================
 
-const CACHE_NAME = 'fixit-tech-shell-v11';
+const CACHE_NAME = 'fixit-tech-shell-v12';
 const SHELL_FILES = [
+  '/static/offline/engine.js?v=20260909-5',
   '/tech/',
   '/tech/index.html',
   '/tech/styles.css',
-  '/tech/app.js?v=20260904-1',
-  '/tech/db.js?v=20260828-8',
+  '/tech/app.js?v=20260909-5',
+  '/tech/db.js?v=20260909-5',
   '/tech/manifest.json',
   '/tech/icon-192.png',
   '/tech/icon-512.png',
 ];
 
-self.importScripts('/tech/db.js');
+self.importScripts('/static/offline/engine.js?v=20260909-5');
 
 function createUuid() {
   if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
@@ -36,8 +37,7 @@ self.addEventListener('install', (event) => {
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k))))
-      .then(() => self.clients.claim())
+    self.clients.claim()
   );
 });
 
@@ -68,60 +68,5 @@ self.addEventListener('sync', (event) => {
 });
 
 async function syncPendingRepairsFromSW() {
-  const token = await self.TechDB.kvGet('token');
-  if (!token) return;
-  const pending = await self.TechDB.getAll('pendingRepairs');
-
-  try {
-    if (pending.length) {
-      let deviceId = await self.TechDB.kvGet('deviceId');
-      if (!deviceId) { deviceId = createUuid(); await self.TechDB.kvSet('deviceId', deviceId); }
-      const res = await fetch('/api/v1/sync/repairs', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ device_id: deviceId, repairs: pending.map(({ _equipmentName, ...rest }) => rest) }),
-      });
-      if (!res.ok) return; // оба набора остаются в очереди, попробуем позже
-      const data = await res.json();
-      for (const r of data.results) {
-        if (r.resolved_as !== 'failed') {
-          const attachments = await self.TechDB.getAll('pendingAttachments');
-          for (const attachment of attachments.filter((item) => item.local_uuid === r.local_uuid)) {
-            attachment.repair_id = r.server_id;
-            await self.TechDB.put('pendingAttachments', attachment);
-          }
-          await self.TechDB.delete('pendingRepairs', r.local_uuid);
-        }
-      }
-    }
-    await syncPendingAttachmentsFromSW(token);
-  } catch (_) {
-    // Нет сети прямо сейчас — Background Sync API сам повторит попытку позже.
-  }
-}
-
-async function syncPendingAttachmentsFromSW(token) {
-  const attachments = await self.TechDB.getAll('pendingAttachments');
-  for (const attachment of attachments) {
-    if (!attachment.repair_id) continue;
-    try {
-      let blob = attachment.file instanceof Blob ? attachment.file : null;
-      if (!blob && attachment.data_url) {
-        const source = await fetch(attachment.data_url);
-        if (!source.ok) throw new Error('attachment data is unavailable');
-        blob = await source.blob();
-      }
-      if (!(blob instanceof Blob) || !blob.size) throw new Error('attachment is empty');
-      const form = new FormData();
-      form.append('kind', attachment.kind || 'after');
-      form.append('file', blob, attachment.file_name || `${attachment.kind || 'attachment'}.jpg`);
-      const response = await fetch(`/api/repairs/${attachment.repair_id}/attachments`, {
-        method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: form,
-      });
-      if (!response.ok) throw new Error('upload failed');
-      await self.TechDB.delete('pendingAttachments', attachment.id);
-    } catch (_) {
-      // Delete only a confirmed upload. The next Background Sync will retry this item.
-    }
-  }
+  return self.FixitOffline.sync();
 }

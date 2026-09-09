@@ -51,6 +51,8 @@ jobs:
         run: |
           pip install -r requirements-dev.txt playwright==1.55.0
           python -m playwright install --with-deps chromium
+          npm ci --prefix tests --ignore-scripts
+          npx --prefix tests playwright install --with-deps chromium
       - name: Python, PostgreSQL и браузерная приёмка
         run: pytest -q --junitxml=test-results/pilot.xml
       - name: JS runtime
@@ -60,6 +62,8 @@ jobs:
           node tests/technician_workflow_runtime_test.js
           node tests/offline_attachment_sync_runtime_test.js
           node tests/guest_photo_upload_runtime_test.js
+      - name: Durable queue — настоящий IndexedDB и SW
+        run: node tests/durable_queue_browser_test.js
       - name: Сохранить результаты приёмки
         if: always()
         uses: actions/upload-artifact@v4

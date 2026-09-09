@@ -131,26 +131,8 @@ async function uploadAttachment(repairId, attachment) {
   return res.json();
 }
 
-async function syncPendingAttachments(resultsById = new Map()) {
-  if (!navigator.onLine) return;
-  const attachments = await TechDB.getAll('pendingAttachments');
-  for (const attachment of attachments) {
-    const result = resultsById.get(attachment.local_uuid);
-    if (!attachment.repair_id && result?.server_id) {
-      attachment.repair_id = result.server_id;
-      await TechDB.put('pendingAttachments', attachment);
-    }
-    if (!attachment.repair_id) continue;
-    try {
-      await uploadAttachment(attachment.repair_id, attachment);
-      await TechDB.delete('pendingAttachments', attachment.id);
-    } catch (e) {
-      // Ремонт уже закрыт, поэтому фотография останется в локальной очереди и
-      // будет повторена при следующем выходе приложения в онлайн.
-      toast(`Фото акта пока не отправлено: ${e.message}`, 'info');
-      break;
-    }
-  }
+async function syncPendingAttachments() {
+  return self.FixitOffline.sync({ token: state.token, onError: error => toast(error.message, 'error') });
 }
 
 async function getDeviceId() {
@@ -174,7 +156,7 @@ async function renderConnStrip() {
   let color, text;
   if (state.syncing) { color = 'var(--amber)'; text = 'Синхронизация…'; strip.classList.add('syncing'); }
   else { strip.classList.remove('syncing');
-    if (state.online) { color = 'var(--good)'; text = pending ? `Онлайн · отправляем ${pending}` : 'Онлайн · синхронизировано'; }
+    if (state.online) { color = 'var(--good)'; text = pending ? `Онлайн · ${pending} записей ожидают отправки` : 'Онлайн · синхронизировано'; }
     else { color = 'var(--idle)'; text = `Офлайн${pending ? ` · ${pending} изм. ожидают отправки` : ''}`; }
   }
   dot.style.background = color;
@@ -182,39 +164,11 @@ async function renderConnStrip() {
 }
 
 async function syncPendingRepairs() {
-  const resultsById = new Map();
-  if (!navigator.onLine) return resultsById;
-  const pending = await TechDB.getAll('pendingRepairs');
   state.syncing = true; renderConnStrip();
   try {
-    if (pending.length) {
-      const device_id = await getDeviceId();
-      const payload = pending.map(({ _equipmentName, ...rest }) => rest);
-      const res = await apiFetch('/v1/sync/repairs', { method: 'POST', body: JSON.stringify({ device_id, repairs: payload }) });
-      for (const r of res.results) {
-        resultsById.set(r.local_uuid, r);
-        if (r.resolved_as === 'failed') {
-          toast(`Не удалось отправить ремонт: ${r.error}`, 'error');
-        } else {
-          const attachments = await TechDB.getAll('pendingAttachments');
-          for (const attachment of attachments.filter((item) => item.local_uuid === r.local_uuid)) {
-            attachment.repair_id = r.server_id;
-            await TechDB.put('pendingAttachments', attachment);
-          }
-          await TechDB.delete('pendingRepairs', r.local_uuid);
-          if (r.resolved_as === 'applied_with_conflict') {
-            toast('Ремонт отправлен, но оборудование менялось без вас — диспетчер проверит вручную', 'info');
-          }
-        }
-      }
-    }
-    await syncPendingAttachments(resultsById);
-    if ((await TechDB.getAll('pendingAttachments')).length) registerBackgroundSync();
-  } catch (e) {
-    toast('Не удалось синхронизировать: ' + e.message, 'error');
-  }
-  state.syncing = false; renderConnStrip();
-  return resultsById;
+    const summary = await self.FixitOffline.sync({ token: state.token, deviceId: await getDeviceId(), onError: error => toast(error.message, 'error') });
+    return summary.results;
+  } finally { state.syncing = false; renderConnStrip(); }
 }
 
 async function registerBackgroundSync() {
@@ -515,10 +469,9 @@ async function renderActScreen(screen) {
       base_equipment_version: eq.version,
       parts_used,
     };
-    await TechDB.put('pendingRepairs', payload);
-    for (const attachment of [...media.before, ...media.after, ...(media.signature ? [media.signature] : [])]) {
-      await TechDB.put('pendingAttachments', { ...attachment, local_uuid: payload.local_uuid, repair_id: null });
-    }
+    try {
+      await self.FixitOffline.enqueueRepair(payload, [...media.before, ...media.after, ...(media.signature ? [media.signature] : [])]);
+    } catch (error) { toast(`Акт не сохранён: ${error.message}. Не закрывайте страницу.`, 'error'); return; }
     savedPayload = payload;
 
     // Оптимистично уменьшаем локальный кэш остатков — для немедленной обратной связи в UI,
@@ -681,7 +634,7 @@ function showLogin() {
 }
 
 async function logout() {
-  await TechDB.kvDelete('token');
+  await self.FixitOffline.logout();
   await TechDB.kvDelete('me');
   state.token = null; state.me = null;
   showLogin();
@@ -691,6 +644,7 @@ async function boot() {
   const token = await TechDB.kvGet('token');
   if (!token) return showLogin();
   state.token = token;
+  await self.FixitOffline.configure({ token });
   state.me = await TechDB.kvGet('me');
   if (!state.me && navigator.onLine) {
     try { state.me = await apiFetch('/users/me'); await TechDB.kvSet('me', state.me); }
@@ -713,7 +667,7 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
   try {
     const res = await apiFetch('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) });
     state.token = res.access_token;
-    await TechDB.kvSet('token', state.token);
+    await self.FixitOffline.configure({ token: state.token });
     const me = await apiFetch('/users/me');
     if (me.role !== 'technician') throw new Error('Это приложение только для техников — для остальных ролей используйте веб-панель');
     await TechDB.kvSet('me', me);

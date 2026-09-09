@@ -564,3 +564,19 @@ Verify: main по-прежнему `80ec53e84402b24c3a8bb263d150e7bf7a0dd865`; c
 - Main повторно сверена: `87e3044f30a40b6d0cff0306e71f9aee83aca329`, identical. PR №6 draft, включает зависимости P0.1–P0.3. Merge/deploy не выполнялись; FIXIT PILOT READY ещё не объявляется.
 
 **Следующий этап: P0.5 — Durable offline queue.** Защитить уже введённый результат и фото при потере сети/ответа/перезапуске и смене аккаунта, с проверками настоящего IndexedDB и конкурентных page/SW sync. Начинать только после команды пользователя.
+
+
+### 09.09.2026 — P0.5: воспроизведение и исправления в работе
+
+- Пользователь разрешил начать P0.5 и после приёмки выложить совокупные P0.1–P0.5 на сервер. До приёмки deployment не выполняется.
+- База: `638d07624984968dc8985a2fba236f7f7af3ef1b`, P0.4 PR №6. Main повторно сверена: `87e3044f30a40b6d0cff0306e71f9aee83aca329`, изменений нет.
+- Отдельная рабочая копия/ветка `codex/p0-5-durable-offline-queue`; исходная локальная папка с незакоммиченными файлами не изменялась.
+- Настоящий Chromium до исправления: 7 failed, 1 passed. Воспроизведены пропуск data_url, чужой token после account switch, частичный repair после abort/quota, автоматическая отправка unowned history, отсутствие durable error и 3 отправки при SW + двух вкладках. Lost response/restart с сохранением ID уже работал.
+- Исправления: общая v2 IDB реализация Pulse/legacy/SW; запись repair+photos и receipt+link+delete атомарны, await transaction completion; owner user/org; Web Locks между контекстами; stable photo client_id; локальное декодирование data_url; durable ошибки и ручной retry/foreground recovery. Черновик сохраняется при вводе и сообщает об ошибке записи.
+- Сервер: row lock Repair до receipt lookup вложения, чтобы concurrent retry возвращал одну запись вместо UniqueViolation после записи второго файла. Новая миграция не требуется; общая миграция 0014 остаётся обязательной.
+- Legacy записи без ownership не присваиваются следующему вошедшему пользователю. Сохраняются без удаления; в «Ещё → Очередь отправки» доступны экспорт (включая Blob/data_url) и объяснение восстановления через администратора после проверки владельца. Старые origin, IDB stores и shell caches не удаляются.
+- Локальный Python: 165 passed, 114 skipped (нет PG runtime). Первый прогон имел 14 failures: 12 из-за неуказанного ALLOWED_HOSTS в локальной среде, 1 старый source assertion версии SW и 1 fake-session без execute после добавления row lock. Причины исправлены; тесты не отключались. Пять JS runtime-файлов прошли; IDB mock заменён fake-indexeddb, реальные браузерные проверки отдельные.
+- Начальные 8 Chromium queue cases после исправления прошли. Дополнены проверки duplicate enqueue, abort acknowledgement, stale tab/logout, JWT expiry, экспорт и foreground recovery; окончательная приёмка ещё ожидается.
+- Ограничения: Web Locks требуют современного браузера и secure context. Если API недоступен, небезопасная отправка не запускается. Реальные Android/iOS и полный cold-start не заявляются подтверждёнными.
+
+**Статус: 🟡 в работе. Не объявлять FIXIT PILOT READY; P0.6/P0.7 не выполнялись.**

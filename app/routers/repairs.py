@@ -58,6 +58,10 @@ async def upload_attachment(
 ):
     repair = await _repair_for_user(repair_id, db, user)
     await ensure_repair_write_access(repair, user)
+    # Serialize receipts for the same Repair across devices/old workers too.
+    # The unique constraint alone rejects a concurrent retry with a 500 after
+    # writing its file. Lock before receipt lookup and retain it through commit.
+    await db.execute(select(Repair.id).where(Repair.id == repair.id).with_for_update())
     if kind not in ALLOWED_KINDS:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Неизвестный тип вложения")
     client_id = (client_id or "").strip()[:120] or None

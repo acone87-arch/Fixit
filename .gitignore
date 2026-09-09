@@ -12,3 +12,6 @@ __pycache__/
 *.sqlite3
 .vscode/
 .idea/
+node_modules/
+.npm-cache/
+.p05-*.py

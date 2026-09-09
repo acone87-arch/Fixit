@@ -45,8 +45,8 @@ function urlBase64ToUint8Array(value) {
 async function registerPulseWorker() {
   if (!('serviceWorker' in navigator)) return null;
   const registrations = await navigator.serviceWorker.getRegistrations();
-  await Promise.all(registrations.filter((item) => new URL(item.active?.scriptURL || item.waiting?.scriptURL || item.installing?.scriptURL || '', location.origin).pathname === '/static/offline/sw.js').map((item) => item.unregister()));
-  return navigator.serviceWorker.register('/sw.js?v=20260905-1', { scope: '/' });
+  await Promise.all(registrations.map(item => item.update().catch(() => null)));
+  return navigator.serviceWorker.register('/sw.js?v=20260909-5', { scope: '/' });
 }
 
 async function enablePush() {
@@ -292,9 +292,16 @@ const RequestDraftStore = (() => {
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
-  const run = async (mode, action) => new Promise(async (resolve, reject) => {
-    try { const store = (await dbPromise).transaction('drafts', mode).objectStore('drafts'); const request = action(store); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); } catch (error) { reject(error); }
-  });
+  const run = async (mode, action) => {
+    const database = await dbPromise;
+    return new Promise((resolve, reject) => {
+      const tx = database.transaction('drafts', mode);
+      const request = action(tx.objectStore('drafts'));
+      tx.oncomplete = () => resolve(request.result);
+      tx.onabort = () => reject(tx.error || new Error('Сохранение черновика отменено'));
+      tx.onerror = () => reject(tx.error || request.error);
+    });
+  };
   return { get: (key) => run('readonly', (store) => store.get(key)), put: (draft) => run('readwrite', (store) => store.put(draft)), remove: (key) => run('readwrite', (store) => store.delete(key)) };
 })();
 
@@ -494,6 +501,7 @@ function renderMobileNav(items) {
   moreMenu.innerHTML = `<div class="more-menu-head"><span>Разделы</span><button id="more-close-btn">Закрыть</button></div>${pwaControls()}${items
     .filter(([route]) => !['pulse', 'requests', 'equipment'].includes(route))
     .map(([route, label]) => `<button data-more-route="${route}">${esc(label)}<span>→</span></button>`).join('')}
+    <button id="more-offline-btn">Очередь отправки<span>→</span></button>
     <button id="more-logout-btn" class="more-logout">Выйти<span>↗</span></button>`;
   document.querySelectorAll('[data-mobile-route]').forEach((button) => button.addEventListener('click', () => {
     const route = button.dataset.mobileRoute;
@@ -507,6 +515,7 @@ function renderMobileNav(items) {
   }));
   moreMenu.querySelector('#more-close-btn').addEventListener('click', () => moreMenu.classList.add('hidden'));
   moreMenu.querySelector('#more-logout-btn').addEventListener('click', logout);
+  moreMenu.querySelector('#more-offline-btn').addEventListener('click', () => { moreMenu.classList.add('hidden'); openOfflineQueue(); });
   moreMenu.querySelector('.pwa-install-btn')?.addEventListener('click', async () => {
     const result = await requestPwaInstall();
     if (result !== 'accepted') localStorage.setItem('fixit-install-dismissed', '1');
@@ -515,6 +524,21 @@ function renderMobileNav(items) {
   moreMenu.querySelector('.pwa-dismiss-btn')?.addEventListener('click', () => { localStorage.setItem('fixit-install-dismissed', '1'); renderNav(); });
   moreMenu.querySelector('.pwa-push-btn')?.addEventListener('click', enablePush);
   document.getElementById('mobile-profile-btn').onclick = () => moreMenu.classList.toggle('hidden');
+}
+
+async function openOfflineQueue() {
+  const status = await window.FixitOffline.queueStatus();
+  const modal = openModal('Очередь отправки', `<p>${status.repairPending ? 'Ремонт ожидает отправки.' : 'Ремонты отправлены.'} Фото в очереди: ${status.attachmentsPending}.</p>${status.errors.map(error => `<p>${esc(error)}</p>`).join('')}<p>Для повторной отправки войдите тем же аккаунтом и восстановите связь. Ошибки доступа или данных требуют исправления причины.</p>${status.unownedCount ? `<p>Сохранено старых записей без сведений о владельце: ${status.unownedCount}. Они не отправляются автоматически. Сохраните архив и передайте его администратору для восстановления после проверки владельца.</p>` : ''}`, `<button class="btn btn-primary" id="queue-retry">Повторить отправку</button>${status.unownedCount ? '<button class="btn btn-secondary" id="queue-export">Сохранить старую очередь</button>' : ''}`);
+  modal.querySelector('#queue-retry').onclick = async () => {
+    const button = modal.querySelector('#queue-retry'); button.disabled = true;
+    try { const summary = await window.FixitOffline.sync({ token: state.token }); if (summary.status.errors.length) toast(summary.status.errors[0], 'error'); closeModal(); await openOfflineQueue(); }
+    finally { button.disabled = false; }
+  };
+  modal.querySelector('#queue-export')?.addEventListener('click', async () => {
+    const url = URL.createObjectURL(await window.FixitOffline.exportUnowned());
+    const link = document.createElement('a'); link.href = url; link.download = 'fixit-old-queue.json'; link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  });
 }
 
 function openQrQuickAction() {
@@ -874,9 +898,10 @@ async function openTechnicianRequestWorkspace(id, loadedRequest = null) {
     draft.approvalTarget = content.querySelector('#request-approval-target')?.value ?? draft.approvalTarget;
   };
   const persistDraft = async () => {
-    if (draftCompleted) return;
+    if (draftCompleted) return true;
     rememberDraft();
-    await RequestDraftStore.put({ key: draftKey, diagnostic: draft.diagnostic, work: draft.work, comment: draft.comment, approvalTarget: draft.approvalTarget, usedParts: draft.usedParts, photos: draft.photos.filter(hasDraftPhotoFile).map(({ file, approvalAttachmentId }) => ({ blob: file, name: file.name, type: file.type, approvalAttachmentId })), completionLocalUuid, completionRepairId, completionQueued, timestamp: new Date().toISOString() }).catch(() => null);
+    try { await RequestDraftStore.put({ key: draftKey, diagnostic: draft.diagnostic, work: draft.work, comment: draft.comment, approvalTarget: draft.approvalTarget, usedParts: draft.usedParts, photos: draft.photos.filter(hasDraftPhotoFile).map(({ file, approvalAttachmentId }) => ({ blob: file, name: file.name, type: file.type, approvalAttachmentId })), completionLocalUuid, completionRepairId, completionQueued, timestamp: new Date().toISOString() }); return true; }
+    catch (error) { toast(`Черновик не сохранён: ${error.message}. Освободите место и повторите; не закрывайте страницу.`, 'error'); return false; }
   };
   const releasePhotos = () => draft.photos.forEach((photo) => URL.revokeObjectURL(photo.url));
   let workCameraStream = null;
@@ -969,7 +994,7 @@ async function openTechnicianRequestWorkspace(id, loadedRequest = null) {
     const started = request.history.find((item) => item.type === 'work.started')?.at || new Date().toISOString();
     try {
       completionLocalUuid ||= window.FixitOffline?.uuid?.() || createUuid();
-      await persistDraft();
+      if (!await persistDraft()) return;
       if (!window.FixitOffline) throw new Error('Офлайн-движок недоступен; обновите приложение');
       const payload = { local_uuid: completionLocalUuid, equipment_id: request.equipment_id, service_request_id: request.id, fault_type: draft.diagnostic.trim().slice(0, 100) || null, description: [draft.diagnostic.trim() && `Диагностика: ${draft.diagnostic.trim()}`, `Работы: ${draft.work.trim()}`, draft.comment.trim() && `Комментарий: ${draft.comment.trim()}`].filter(Boolean).join('\n'), labor_minutes: 0, client_signer_name: null, client_signed_at: null, started_at: started, closed_at: new Date().toISOString(), device_updated_at: new Date().toISOString(), base_equipment_version: request.equipment_version || 1, parts_used };
       if (!completionQueued) {
@@ -1016,7 +1041,7 @@ async function openTechnicianRequestWorkspace(id, loadedRequest = null) {
     const parts = stock.length ? stock.map((part) => `<div class="tech-request-part"><span><b>${esc(part.name)}</b><small>${esc(part.article)} · остаток ${part.quantity}</small></span><div><button type="button" data-part-minus="${part.part_id}">−</button><b id="part-${part.part_id}">${draft.usedParts[part.part_id] || 0}</b><button type="button" data-part-plus="${part.part_id}" ${(draft.usedParts[part.part_id] || 0) >= part.quantity ? 'disabled' : ''}>+</button></div></div>`).join('') : '<div class="tech-request-empty">На мобильном складе нет доступных запчастей</div>';
     const isWorkStatus = workStatuses.has(request.status);
     const syncNotice = completionQueued && !completionSync.fullySynced
-      ? `<div class="tech-request-sync ${completionSync.repairPending ? 'pending' : 'attachments'}">${completionSync.repairPending ? '⟳ Работа сохранена на устройстве и будет отправлена автоматически' : `⟳ Работа завершена · ${completionSync.attachmentsPending} фото ожидают отправки`}</div>`
+      ? `<div class="tech-request-sync ${completionSync.repairPending ? 'pending' : 'attachments'}">${completionSync.repairPending ? '⟳ Работа сохранена на устройстве и ожидает отправки' : `⟳ Работа завершена · ${completionSync.attachmentsPending} фото ожидают отправки`}</div>`
       : completionQueued && completionSync.fullySynced ? '<div class="tech-request-sync synced">✓ Синхронизировано</div>' : '';
     const waitingBanner = request.status === 'waiting_parts' ? '<div class="tech-request-state-banner"><strong>Ожидаем запчасти</strong><span>Черновик работ сохранён. После поступления запчастей продолжите работу.</span></div>' : request.status === 'waiting_approval' ? '<div class="tech-request-state-banner"><strong>Ожидается согласование</strong><span>После согласования диспетчер вернёт заявку в работу.</span></div>' : '';
     const photoPreview = draft.photos.length ? `<div class="tech-request-photo-grid">${draft.photos.map((photo, index) => `<figure><img src="${esc(photo.url)}" alt="Фото ${index + 1}"><figcaption>Фото ${index + 1}<button type="button" data-photo-remove="${index}" aria-label="Удалить фото ${index + 1}">×</button></figcaption></figure>`).join('')}</div><div class="tech-request-photo-count">Выбрано ${draft.photos.length} из 5</div>` : '<div class="tech-request-empty">Фотографии пока не выбраны</div>';
@@ -1028,7 +1053,7 @@ async function openTechnicianRequestWorkspace(id, loadedRequest = null) {
       : request.status === 'in_progress' ? '<button class="btn btn-primary tech-request-main" id="request-complete">Завершить работу</button>'
       : request.status === 'waiting_parts' ? '<button class="btn btn-primary tech-request-main" id="request-resume">Продолжить работу</button>'
       : request.status === 'completed' && completionQueued && !completionSync.fullySynced ? '<button class="btn btn-primary tech-request-main" id="request-retry-sync">Повторить отправку фото</button>' : '';
-    content.innerHTML = `<section class="tech-request-workspace"><header class="tech-request-header"><button class="tech-request-back" id="request-back">←</button><div><span>Заявка SR-${String(request.number).padStart(5, '0')}</span><h1>${esc(request.title || request.description || 'Сервисная заявка')}</h1></div>${statusBadge()}</header><div class="tech-request-scroll"><section class="tech-request-meta"><div><small>Приоритет</small><strong>${request.priority === 'urgent' ? 'Срочно' : 'Плановая'}</strong></div><div><small>Создана</small><strong>${fmtDate(request.created_at)}</strong></div></section>${syncNotice}<section class="tech-request-section"><h2>Клиент и объект</h2><strong>${esc(request.client_name || request.site_name || 'Клиент')}</strong><p>${esc(request.site_name || 'Объект не указан')}${request.site_address ? ` · ${esc(request.site_address)}` : ''}</p>${request.contact_name || request.contact_phone ? `<a href="tel:${esc(request.contact_phone || '')}">${esc(request.contact_name || 'Контакт')} · ${esc(request.contact_phone || '')}</a>` : ''}</section><section class="tech-request-section tech-request-equipment"><div><h2>Оборудование</h2><div><button class="btn btn-ghost btn-sm" id="request-equipment-photo">Фото оборудования</button><button class="btn btn-ghost btn-sm" id="request-passport">Открыть паспорт</button></div></div>${equipmentPhotoUrl ? `<img class="tech-request-equipment-photo" src="${equipmentPhotoUrl}" alt="Фото оборудования">` : '<div class="tech-request-equipment-placeholder">FIXIT</div>'}<strong>${esc(request.equipment_type || request.equipment_name)}</strong><p>${esc([request.manufacturer, request.model].filter(Boolean).join(' ') || 'Модель не указана')} · <span class="mono">S/N ${esc(request.serial_number)}</span></p>${badge(EQUIPMENT_STATUS, request.equipment_status || 'working')}</section><section class="tech-request-section"><h2>Проблема</h2><p>${esc(request.description || 'Описание не добавлено')}</p><div class="tech-request-files">${attachments}</div></section>${workArea}${requestResultHtml(request)}<section class="tech-request-section"><h2>История</h2><div class="tech-request-timeline-list">${timeline}</div></section></div><footer>${action}</footer></section>`;
+    content.innerHTML = `<section class="tech-request-workspace"><header class="tech-request-header"><button class="tech-request-back" id="request-back">←</button><div><span>Заявка SR-${String(request.number).padStart(5, '0')}</span><h1>${esc(request.title || request.description || 'Сервисная заявка')}</h1></div>${statusBadge()}</header><div class="tech-request-scroll"><section class="tech-request-meta"><div><small>Приоритет</small><strong>${request.priority === 'urgent' ? 'Срочно' : 'Плановая'}</strong></div><div><small>Создана</small><strong>${fmtDate(request.created_at)}</strong></div></section>${syncNotice}${completionSync.errors?.length ? `<div class="tech-request-sync pending">${completionSync.errors.map(esc).join('<br>')}<br>Данные сохранены. После устранения причины повторите отправку.</div>` : ''}<section class="tech-request-section"><h2>Клиент и объект</h2><strong>${esc(request.client_name || request.site_name || 'Клиент')}</strong><p>${esc(request.site_name || 'Объект не указан')}${request.site_address ? ` · ${esc(request.site_address)}` : ''}</p>${request.contact_name || request.contact_phone ? `<a href="tel:${esc(request.contact_phone || '')}">${esc(request.contact_name || 'Контакт')} · ${esc(request.contact_phone || '')}</a>` : ''}</section><section class="tech-request-section tech-request-equipment"><div><h2>Оборудование</h2><div><button class="btn btn-ghost btn-sm" id="request-equipment-photo">Фото оборудования</button><button class="btn btn-ghost btn-sm" id="request-passport">Открыть паспорт</button></div></div>${equipmentPhotoUrl ? `<img class="tech-request-equipment-photo" src="${equipmentPhotoUrl}" alt="Фото оборудования">` : '<div class="tech-request-equipment-placeholder">FIXIT</div>'}<strong>${esc(request.equipment_type || request.equipment_name)}</strong><p>${esc([request.manufacturer, request.model].filter(Boolean).join(' ') || 'Модель не указана')} · <span class="mono">S/N ${esc(request.serial_number)}</span></p>${badge(EQUIPMENT_STATUS, request.equipment_status || 'working')}</section><section class="tech-request-section"><h2>Проблема</h2><p>${esc(request.description || 'Описание не добавлено')}</p><div class="tech-request-files">${attachments}</div></section>${workArea}${requestResultHtml(request)}<section class="tech-request-section"><h2>История</h2><div class="tech-request-timeline-list">${timeline}</div></section></div><footer>${action}</footer></section>`;
     const approvalSelect = content.querySelector('#request-approval-target');
     if (approvalSelect) {
       approvalSelect.value = draft.approvalTarget;
@@ -1059,7 +1084,7 @@ async function openTechnicianRequestWorkspace(id, loadedRequest = null) {
         completionSync = await refreshCompletionSync();
         if (!completionSync.repairPending) await refreshCompletedRequest();
         if (completionSync.fullySynced) { draftCompleted = true; await RequestDraftStore.remove(draftKey).catch(() => null); toast('Ремонт и фотографии синхронизированы'); }
-        else toast(completionSync.repairPending ? 'Работа всё ещё ожидает отправки' : `${completionSync.attachmentsPending} фото ожидают отправки`, 'info');
+        else toast(completionSync.errors?.[0] || (completionSync.repairPending ? 'Работа всё ещё ожидает отправки' : `${completionSync.attachmentsPending} фото ожидают отправки`), 'info');
         draw();
       } catch (error) { toast(error.message || 'Не удалось синхронизировать фото', 'error'); }
       finally { completionInFlight = false; }
@@ -1082,13 +1107,14 @@ async function openTechnicianRequestWorkspace(id, loadedRequest = null) {
       const parts = Object.entries(draft.usedParts).filter(([, quantity]) => quantity > 0).map(([partId, quantity]) => ({ name: stock.find((part) => part.part_id === partId)?.name || 'Запчасть', quantity }));
       await transition('waiting_approval', approvalTarget === 'client' ? 'Требуется согласование клиентом' : 'Требуется согласование диспетчером', { approval_target: approvalTarget, approval: { diagnostic: draft.diagnostic, work: draft.work, comment: draft.comment, parts, photo_count: draft.photos.length } });
     });
-    content.querySelectorAll('[data-part-plus]').forEach((button) => button.addEventListener('click', () => { rememberDraft(); const part = stock.find((item) => item.part_id === button.dataset.partPlus); if (!part) return; draft.usedParts[part.part_id] = Math.min(part.quantity, (draft.usedParts[part.part_id] || 0) + 1); draw(); }));
-    content.querySelectorAll('[data-part-minus]').forEach((button) => button.addEventListener('click', () => { rememberDraft(); const key = button.dataset.partMinus; draft.usedParts[key] = Math.max(0, (draft.usedParts[key] || 0) - 1); draw(); }));
+    content.querySelectorAll('[data-part-plus]').forEach((button) => button.addEventListener('click', () => { rememberDraft(); const part = stock.find((item) => item.part_id === button.dataset.partPlus); if (!part) return; draft.usedParts[part.part_id] = Math.min(part.quantity, (draft.usedParts[part.part_id] || 0) + 1); void persistDraft(); draw(); }));
+    content.querySelectorAll('[data-part-minus]').forEach((button) => button.addEventListener('click', () => { rememberDraft(); const key = button.dataset.partMinus; draft.usedParts[key] = Math.max(0, (draft.usedParts[key] || 0) - 1); void persistDraft(); draw(); }));
     content.querySelectorAll('[data-photo-remove]').forEach((button) => button.addEventListener('click', async () => { const index = Number(button.dataset.photoRemove); const [photo] = draft.photos.splice(index, 1); if (photo) URL.revokeObjectURL(photo.url); await persistDraft(); draw(); }));
     content.querySelector('#request-camera')?.addEventListener('click', openWorkCamera);
     content.querySelector('#request-gallery-open')?.addEventListener('click', () => content.querySelector('#request-gallery').click());
     content.querySelector('#request-gallery')?.addEventListener('change', async (event) => { await addDraftFiles(event.target.files); event.target.value = ''; });
     content.querySelector('#request-complete')?.addEventListener('click', completeWithOfflineQueue);
+    content.querySelectorAll('#request-diagnostic, #request-work, #request-comment').forEach(input => input.addEventListener('input', () => { void persistDraft(); }));
   };
   const onOfflineSync = async () => {
     if (!completionLocalUuid) return;
@@ -2192,12 +2218,13 @@ function openCreateUserModal() {
 // Авторизация и запуск
 // ============================================================
 
-function logout() {
+async function logout() {
   void removePushSubscription(state.token);
+  activeTechnicianWorkspaceCleanup?.(); activeTechnicianWorkspaceCleanup = null;
+  await window.FixitOffline?.logout?.().catch(() => null);
   state.token = null;
   state.me = null;
   localStorage.removeItem('token');
-  window.FixitOffline?.db?.kvDelete?.('token').catch(() => null);
   document.getElementById('app').classList.add('hidden');
   document.getElementById('login-screen').classList.remove('hidden');
 }
@@ -2210,7 +2237,7 @@ async function boot() {
   try {
     state.me = await api('/users/me');
     await registerPulseWorker();
-    window.FixitOffline?.configure?.({ token: state.token });
+    await window.FixitOffline?.configure?.({ token: state.token });
     window.FixitOffline?.sync?.({ token: state.token, deviceId: 'fixit-pulse' });
     document.getElementById('login-screen').classList.add('hidden');
     document.getElementById('app').classList.remove('hidden');

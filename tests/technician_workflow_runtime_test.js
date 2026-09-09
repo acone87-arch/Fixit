@@ -61,7 +61,7 @@ assert.match(source, /FixitOffline\.enqueueRepair\(payload, draft\.photos/);
 assert.match(source, /id="request-retry-sync"/);
 assert.match(source, /Работа завершена · \$\{completionSync\.attachmentsPending\} фото ожидают отправки/);
 assert.match(source, /FixitOffline\?\.configure\?\.\(\{ token: state\.token \}\)/);
-assert.match(source, /FixitOffline\?\.db\?\.kvDelete\?\.\('token'\)/);
+assert.match(source, /FixitOffline\?\.logout\?\.\(\)/);
 assert.match(source, /Фото оборудования/);
 assert.match(source, /equipment-history-photos/);
 const passportSource = source.slice(source.indexOf('async function openEquipmentPassport'));
@@ -75,8 +75,8 @@ const techSource = fs.readFileSync('app/static-tech/app.js', 'utf8');
 const workerSource = fs.readFileSync('app/static-tech/sw.js', 'utf8');
 assert.doesNotMatch(techSource, /if \(!pending\.length\) return resultsById/);
 assert.match(techSource, /attachment\.file instanceof Blob/);
-assert.match(workerSource, /await syncPendingAttachmentsFromSW\(token\)/);
-assert.match(workerSource, /await self\.TechDB\.delete\('pendingAttachments', attachment\.id\)/);
+assert.match(workerSource, /return self\.FixitOffline\.sync\(\)/);
+assert.match(workerSource, /importScripts\('\/static\/offline\/engine\.js/);
 console.log('technician workflow runtime: ok');
 
 // Настоящий async renderer: медленный dashboard не должен затереть открытую заявку.

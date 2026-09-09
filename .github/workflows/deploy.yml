@@ -22,7 +22,9 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install test dependencies
-        run: pip install -r requirements.txt -r requirements-dev.txt
+        run: |
+          pip install -r requirements.txt -r requirements-dev.txt
+          npm ci --prefix tests --ignore-scripts
       - name: Run Python regression tests
         env:
           PYTHONPATH: .
