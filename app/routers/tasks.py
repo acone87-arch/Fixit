@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import case, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import get_current_user
+from app.core.deps import require_roles
 from app.database import get_db
 from app.models.core import Task, TaskStatus, User, UserRole
 from app.schemas.equipment import TaskOut
@@ -18,7 +18,7 @@ router = APIRouter(prefix="/api/tasks", tags=["tasks (legacy read-only)"])
 
 
 @router.get("", response_model=list[TaskOut], deprecated=True)
-async def list_tasks(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+async def list_tasks(db: AsyncSession = Depends(get_db), user: User = Depends(require_roles(UserRole.admin, UserRole.dispatcher, UserRole.technician))):
     """Return historical tasks only; use /api/service-requests for live work."""
     closed_last = case((Task.status.in_((TaskStatus.closed, TaskStatus.cancelled)), 1), else_=0)
     query = select(Task).where(Task.organization_id == user.organization_id).order_by(closed_last, Task.created_at.desc())

@@ -450,9 +450,11 @@ async def get_passport(equipment_id: uuid.UUID, db: AsyncSession = Depends(get_d
             history.append(EquipmentServiceHistoryEntry(id=f"ticket:{ticket.id}", status="legacy",
                 occurred_at=ticket.created_at, title="Обращение через QR",
                 problem=ticket.comment or ", ".join(ticket.symptom_tags or []), legacy=True))
-    # A legacy repair is retained only if no canonical request claims it.
+    # Only an actual canonical link suppresses a separate repair entry.
+    # Task/Ticket provenance alone can match several repairs; never hide them
+    # or arbitrarily assign one of them to a canonical request.
     for repair, technician_name in repair_rows:
-        if repair.service_request_id or repair.task_id in request_by_task or repair.ticket_id in request_by_ticket:
+        if repair.service_request_id in request_by_id:
             continue
         history.append(EquipmentServiceHistoryEntry(id=f"repair:{repair.id}", status="legacy",
             occurred_at=repair.closed_at or repair.created_at, completed_at=repair.closed_at,
