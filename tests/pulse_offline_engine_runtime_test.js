@@ -3,39 +3,15 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const { webcrypto } = require('node:crypto');
 
-function memoryIndexedDb() {
-  const stores = new Map();
-  const request = (value) => {
-    const result = {};
-    queueMicrotask(() => { result.result = value; result.onsuccess?.(); });
-    return result;
-  };
-  const database = {
-    objectStoreNames: { contains: (name) => stores.has(name) },
-    createObjectStore(name, options = {}) { stores.set(name, { keyPath: options.keyPath, values: new Map() }); },
-    transaction(name) {
-      const store = stores.get(name);
-      return { objectStore: () => ({
-        getAll: () => request([...store.values.values()]),
-        get: (key) => request(store.values.get(key)),
-        put: (value, key) => { store.values.set(store.keyPath ? value[store.keyPath] : key, value); return request(key); },
-        delete: (key) => { store.values.delete(key); return request(undefined); },
-      }) };
-    },
-  };
-  return { open: () => {
-    const result = {};
-    queueMicrotask(() => { result.result = database; result.onupgradeneeded?.(); result.onsuccess?.(); });
-    return result;
-  } };
-}
+const { IDBFactory } = require('fake-indexeddb');
+const testToken = `e30.${Buffer.from(JSON.stringify({sub:'tech',org:'org'})).toString('base64url')}.test`;
 
 async function loadEngine(fetch) {
   const errors = [];
-  const context = { Blob, FormData, Promise, Map, Uint8Array, crypto: webcrypto, indexedDB: memoryIndexedDb(), navigator: { onLine: true }, fetch, console: { error: (...args) => errors.push(args) }, self: null };
+  const context = { Blob, FormData, Promise, Map, Uint8Array, atob, btoa, AbortController, setTimeout, clearTimeout, crypto: webcrypto, indexedDB: new IDBFactory(), navigator: { onLine: true, locks: { request: async (_name, action) => action() } }, fetch, console: { error: (...args) => errors.push(args) }, self: null };
   context.self = context;
   vm.runInNewContext(fs.readFileSync('app/static/offline/engine.js', 'utf8'), context);
-  await context.FixitOffline.configure({ token: 'test-token' });
+  await context.FixitOffline.configure({ token: testToken });
   return { offline: context.FixitOffline, errors };
 }
 
@@ -78,7 +54,7 @@ async function loadEngine(fetch) {
   assert.equal(complete.status.fullySynced, true, 'only successful uploads leave the queue');
   assert.equal(repairCalls, 1, 'retry uploads photos without duplicating Repair');
   assert.equal(attachmentCalls, 4);
-  assert.equal(await offline.db.kvGet('token'), 'test-token', 'background sync can read its token from IndexedDB');
+  assert.equal(await offline.db.kvGet('token'), testToken, 'background sync can read its token from IndexedDB');
   await offline.db.kvDelete('token');
   assert.equal(await offline.db.kvGet('token'), undefined, 'logout clears durable offline credential');
   console.log('pulse offline engine runtime: ok');

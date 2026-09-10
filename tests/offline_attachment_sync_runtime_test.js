@@ -1,6 +1,8 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
+const { IDBFactory } = require('fake-indexeddb');
+const { webcrypto } = require('node:crypto');
 
 const source = fs.readFileSync('app/static-tech/app.js', 'utf8');
 const between = (start, end) => source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)));
@@ -14,9 +16,9 @@ async function runSync(attachments, failingIds = []) {
   const notices = [];
   const errors = [];
   const context = {
-    Blob, FormData, Promise, Map, console: { error: (...args) => errors.push(args) },
-    navigator: { onLine: true },
-    state: { token: 'token', syncing: false },
+    Blob, FormData, Promise, Map, Uint8Array, atob, btoa, AbortController, setTimeout, clearTimeout, crypto: webcrypto, indexedDB: new IDBFactory(), console: { error: (...args) => errors.push(args) },
+    navigator: { onLine: true, locks: { request: async (_name, action) => action() } },
+    state: { token: `e30.${Buffer.from(JSON.stringify({sub:'tech',org:'org'})).toString('base64url')}.test`, syncing: false },
     toast: (message) => notices.push(message), renderConnStrip: () => {}, registerBackgroundSync: async () => {},
     getDeviceId: async () => 'device-1', apiFetch: async () => ({ results: [] }),
     TechDB: {
@@ -31,9 +33,13 @@ async function runSync(attachments, failingIds = []) {
       return failingIds.includes(id) ? { ok: false, status: 403, json: async () => ({ detail: 'Оборудование не назначено вам для обслуживания' }) } : { ok: true, status: 201, json: async () => ({ id: 'uploaded' }) };
     },
   };
+  context.self = context;
+  vm.runInNewContext(fs.readFileSync('app/static/offline/engine.js', 'utf8'), context);
+  await context.FixitOffline.configure({token: context.state.token});
+  for (const item of attachments) await context.FixitOffline.db.put('pendingAttachments', {...item, queue_owner: {user:'tech',org:'org'}});
   vm.runInNewContext(`${uploadSource}\n${attachmentSyncSource}\n${repairSyncSource}\nthis.run = syncPendingRepairs;`, context);
   await context.run();
-  return { data, uploaded, notices, errors };
+  return { data: new Map((await context.FixitOffline.db.getAll('pendingAttachments')).map(item => [item.id,item])), uploaded, notices, errors };
 }
 
 (async () => {

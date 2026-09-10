@@ -1,6 +1,7 @@
 """Regression contract for the compact Equipment Passport service history."""
 from datetime import datetime, timezone
 from pathlib import Path
+import re
 import uuid
 
 from app.schemas.equipment import EquipmentServiceHistoryEntry
@@ -46,7 +47,7 @@ def test_legacy_records_are_not_duplicated_when_mapped_to_a_canonical_request():
     source = (ROOT / "routers" / "equipment.py").read_text(encoding="utf8")
     assert "if task.id not in request_by_task" in source
     assert "if ticket.id not in request_by_ticket" in source
-    assert "if repair.service_request_id or repair.task_id in request_by_task or repair.ticket_id in request_by_ticket" in source
+    assert "if repair.service_request_id in request_by_id" in source
 
 
 def test_history_cards_are_whole_request_navigation_targets_with_thumbnail_urls():
@@ -83,8 +84,11 @@ def test_history_card_keeps_technician_out_of_header_and_omits_identical_problem
 
 def test_passport_asset_versions_change_together_for_browser_cache_busting():
     index = (ROOT / "static" / "index.html").read_text(encoding="utf8")
-    assert "/static/styles.css?v=20260905-2" in index
-    assert "/static/app.js?v=20260905-2" in index
+    worker = (ROOT / "static" / "sw.js").read_text(encoding="utf8")
+    for asset in ("styles.css", "app.js"):
+        urls = re.findall(r'/static/' + re.escape(asset) + r'\?v=\d{8}-\d+', index)
+        assert len(urls) == 1
+        assert f"'{urls[0]}'" in worker
 
 
 def test_protected_media_urls_do_not_receive_a_second_api_prefix():

@@ -18,7 +18,7 @@ from app.models.service_request import ServiceRequest
 from app.schemas.repair import RepairAttachmentOut
 from app.services.service_requests import event
 from app.services.client_portal import CLIENT_ROLES, ensure_client_equipment
-from app.services.access_policy import ensure_repair_access
+from app.services.access_policy import ensure_repair_access, ensure_repair_write_access
 from app.services.media import image_response, normalize_image
 from app.services.service_act_pdf import build_service_act
 
@@ -57,6 +57,11 @@ async def upload_attachment(
     user: CurrentUser = Depends(get_current_user),
 ):
     repair = await _repair_for_user(repair_id, db, user)
+    await ensure_repair_write_access(repair, user)
+    # Serialize receipts for the same Repair across devices/old workers too.
+    # The unique constraint alone rejects a concurrent retry with a 500 after
+    # writing its file. Lock before receipt lookup and retain it through commit.
+    await db.execute(select(Repair.id).where(Repair.id == repair.id).with_for_update())
     if kind not in ALLOWED_KINDS:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Неизвестный тип вложения")
     client_id = (client_id or "").strip()[:120] or None

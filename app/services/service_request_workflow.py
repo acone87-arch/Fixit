@@ -75,7 +75,7 @@ def _forbidden(message: str) -> None:
 async def transition(
     db: AsyncSession, request: ServiceRequest, actor: CurrentUser, target: str, *,
     technician_id: uuid.UUID | None = None, approval_target: str | None = None,
-    reason: str | None = None, note: str | None = None, completion_repair_id: uuid.UUID | None = None,
+    reason: str | None = None, note: str | None = None, approval: dict | None = None, completion_repair_id: uuid.UUID | None = None,
 ) -> ServiceRequest:
     """Apply one allowed lifecycle edge and append exactly one state event."""
     if request.organization_id != actor.organization_id:
@@ -116,13 +116,15 @@ async def transition(
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Укажите причину отмены")
 
     request.status = target
-    if target == "cancelled":
+    if target in TERMINAL:
         request.completed_at = datetime.now(timezone.utc)
     details = {"from": source, "to": target, "transitioned_at": datetime.now(timezone.utc).isoformat()}
     if technician_id:
         details["technician_id"] = str(technician_id)
     if approval_target:
         details["approval_target"] = approval_target
+    if target == "waiting_approval" and approval is not None:
+        details["approval"] = approval
     if reason or note:
         details["reason"] = reason or note
     if completion_repair_id:

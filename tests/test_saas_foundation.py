@@ -162,5 +162,5 @@ def test_technician_workspace_renders_saved_repair_images_as_thumbnails():
     source = (Path(__file__).parents[1] / "app" / "static" / "app.js").read_text(encoding="utf-8")
     assert "tech-request-saved-photo-grid" in source
     assert "data-repair-photo" in source
-    assert "apiBlob(`/repairs/attachments/${attachment.id}`)" in source
+    assert "const path = `/repairs/attachments/${button.dataset.resultPhoto}`" in source
     assert "openProtectedImage(`/repairs/attachments/${attachment.id}`" in source

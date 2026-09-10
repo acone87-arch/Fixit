@@ -44,7 +44,8 @@ def test_pwa_uses_one_root_scoped_worker_without_losing_offline_sync():
     engine = (ROOT / "app/static/offline/engine.js").read_text(encoding="utf-8")
     worker = (ROOT / "app/static/sw.js").read_text(encoding="utf-8")
     app = (ROOT / "app/static/app.js").read_text(encoding="utf-8")
-    assert "register('/sw.js?v=20260905-1', { scope: '/' })" in engine
+    import re
+    assert re.search(r"register\('/sw.js\?v=[^']+', \{ scope: '/' \}\)", engine)
     assert "fixit-sync-repairs" in worker and "FixitOffline.sync" in worker
     assert "fixit-tech-db" in engine and "pendingRepairs" in engine and "pendingAttachments" in engine
     assert "beforeinstallprompt" in app and "Notification.requestPermission()" in app
