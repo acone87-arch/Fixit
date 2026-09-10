@@ -8,9 +8,9 @@
 - Исходный документ: `Fixit_Audit_2026-09-07.md`, независимый аудит от 07.09.2026.
 - Audit SHA: `80ec53e84402b24c3a8bb263d150e7bf7a0dd865`.
 - Последняя сверенная main: `87e3044f30a40b6d0cff0306e71f9aee83aca329`.
-- Последняя сверка: 08.09.2026; GitHub Compare `identical`, ahead/behind `0/0`, новых commits `0`, изменённых файлов `0`. GitHub commit lookup отдельно подтвердил HEAD.
-- P0.1 выполнен и проверен в PR [№3](https://github.com/acone87-arch/Fixit/pull/3); проверенный SHA кода: `cde3d81a79b7f29efd17f65bac0538914a75ca1c`. Изменения ещё не в main и не в production.
-- Текущий шаг: **P0.5 — финальная приёмка и разрешённая пользователем выкладка P0.1–P0.5**. Рабочая ветка `codex/p0-5-durable-offline-queue`, draft PR №7. Ниже сохранена исходная база P0.4: Ветка `codex/p0-4-technician-result`, PR №6; база P0.3 `e53412dd61ad6a92c546d15fae9b629cd479d5a7`. Сохранены P0.1/P0.2 и актуальный main; merge в main/deploy не выполнялись.
+- Последняя сверка: 10.09.2026; GitHub Compare `identical`, ahead/behind `0/0`, новых commits `0`, изменённых файлов `0`.
+- P0.1 выполнен и проверен в PR [№3](https://github.com/acone87-arch/Fixit/pull/3); проверенный SHA кода: `cde3d81a79b7f29efd17f65bac0538914a75ca1c`. P0.1–P0.5 выложены совокупной release-веткой; main не изменена.
+- Текущий шаг: **P0.5 завершён; P0.1–P0.5 выложены и проверены на сервере. Остановка перед P0.6.** Рабочая ветка `codex/p0-5-durable-offline-queue`, draft [PR №7](https://github.com/acone87-arch/Fixit/pull/7). Проверенный и развёрнутый SHA кода `90d9421a03ddea2d6d30e65377b992a3d42ac4ed`; исходная база P0.4 `638d07624984968dc8985a2fba236f7f7af3ef1b`, draft PR №6. Merge в main не выполнялся. Исторические записи ниже описывают состояние на дату соответствующего этапа.
 - **FIXIT PILOT READY не подтверждён.**
 
 ### Как читать доказательства
@@ -55,7 +55,7 @@
 | P0.2 Security boundaries | 🟢 выполнено и проверено | 48 PostgreSQL security-сценариев; полный suite 234 passed, 0 skipped; browser P0.1 и 5 JS runtime-файлов проходят. PR №4, production не обновлён |
 | P0.3 QR + ServiceRequest | 🟢 выполнено и проверено | 266 passed, 0 skipped: новые 28 PG workflow, 2 migration и 2 browser; все пять JS runtime-файлов прошли. PR №5, production не обновлён |
 | P0.4 Technician result | 🟢 выполнено и проверено | 276 passed; 6 новых PG cases, 4 Chromium cases; полный результат, акт, история и ACL подтверждены в PR №6 |
-| P0.5 Durable offline queue | 🟡 финальная приёмка | 279 Python/PG/browser и 14 IDB/SW cases прошли; дополнительный collision regression и release harness ожидают итогового CI |
+| P0.5 Durable offline queue | 🟢 выполнено и проверено | 283 Python/PG/browser без пропусков, 5 JS runtime-файлов и 16 Chromium IDB/SW cases; PR №7, код `90d9421` |
 | P0.6 Warehouse integrity | 🔴 blocker | Отрицательное количество, mobile warehouse, связь движения с Repair |
 | P0.7 Production acceptance | ⬜ не начато | PG/browser E2E, HTTPS upload, backup restore и rollback предстоит доказать |
 
@@ -153,30 +153,30 @@ DoD подтверждён на PostgreSQL 16 и Chromium в Actions. 18 PG-сц
 
 ## P0.5 — Durable offline queue
 
-**Статус: 🟡 в работе; функциональная приёмка прошла, финальный CI и разрешённая выкладка ожидаются.**
+**Статус: 🟢 выполнено и проверено.** CI [34437165334](https://github.com/acone87-arch/Fixit/actions/runs/34437165334), код `90d9421a03ddea2d6d30e65377b992a3d42ac4ed`: 283 passed, 0 failed, 0 skipped; 5 JS runtime-файлов и 16 Chromium IDB/SW cases.
 
 **Definition of Done:** уже введённый ремонт и фотографии переживают временную потерю сети/ответа и перезапуск, не отправляются от другого аккаунта; после восстановления сети корректно связаны с Repair. Сохранённые данные не уничтожаются автоматически при logout/ошибке.
 
 | ID | Статус | Задача и актуальное основание |
 |---|---|---|
-| OFF-01 | 🔴 blocker | Поддержать Blob и старые data_url: текущий engine старые фото помечает повреждёнными |
-| OFF-02 | 🔴 blocker | Атомарно записывать pendingRepairs/pendingAttachments, ожидать transaction completion, явно обрабатывать quota/abort |
-| OFF-03 | 🔴 blocker | User/org ownership очереди; account switch не отправляет чужие pending записи текущим токеном |
-| OFF-04 | 🔴 blocker | Согласовать SW/page/две вкладки: нет общей блокировки, возможны гонки repair/attachment |
-| OFF-05 | ⬜ не начато | Lost response, restart, истечение JWT/повторный login, безопасный retry, delayed upload после completed Repair |
-| OFF-06 | 🔴 blocker | Показать конкретные ошибки очереди и безопасный способ продолжить отправку, не обещая бесконечный успешный retry |
+| OFF-01 | 🟢 выполнено и проверено | Blob/data_url проходят реальный Chromium → API → PostgreSQL, включая lost response после commit |
+| OFF-02 | 🟢 выполнено и проверено | Атомарные repair+photos и receipt+links; abort/quota и collision legacy ID сохраняют исходные данные |
+| OFF-03 | 🟢 выполнено и проверено | User/org ownership, stale tabs/logout; unowned history сохраняется отдельно с экспортом, без автоматического присвоения |
+| OFF-04 | 🟢 выполнено и проверено | Web Locks для SW/page/двух вкладок, stable client_id и серверный row lock; старый установленный /tech/sw.js получает безопасный bridge |
+| OFF-05 | 🟢 выполнено и проверено | Lost response/restart с сохранением ID уже работал, защищён regression; добавлены JWT/relogin, delayed upload, concurrent retry без дубликатов |
+| OFF-06 | 🟢 выполнено и проверено | Durable ошибки, manual retry и foreground recovery без Background Sync; ошибка сохранения черновика не скрывается |
 
 **Код:** `app/static/offline/engine.js`, Pulse drafts/queue UI, `app/static/sw.js`, legacy SW/payload adapters, sync/media contracts.
 
 **Доказательства:** IndexedDB/SW runtime и browser с Blob/data_url; принудительный abort/quota; закрытие/перезапуск; два аккаунта/tenant; SW+две вкладки; потеря ответа после commit; один Repair и один attachment на client_id; own completed Repair upload. Android Chromium и iOS подтверждать отдельно; отсутствие Background Sync на iOS учитывать, foreground recovery обязателен.
 
-**Миграция:** вероятна версия/миграция IndexedDB; старые pending данные сохранять. Серверная миграция — только при необходимости. **Риск:** высокий — риск потери невосстановимых локальных фото.
+**Миграция:** DB `fixit-tech-db` и версия IndexedDB 2 сохранены; ownership/error добавляются к новым записям. Новая серверная миграция P0.5 не нужна; совокупная выкладка использует `20260908_0014` из P0.3. **Риск:** локальные данные требуют сохранения origin/профиля браузера; unowned history восстанавливается с участием владельца.
 
 ⚫ **Отдельно отложено:** full offline cold-start, кеш заявок/паспортов/склада и автономные переходы. Включать только при подтверждённой потребности первого пилота; текущий Pulse не объявлять offline-first. Старые origin/SW не отключать раньше завершения безопасной миграции очередей.
 
 ## P0.6 — Warehouse integrity
 
-**Статус: 🟡 в работе; функциональная приёмка прошла, финальный CI и разрешённая выкладка ожидаются.**
+**Статус: 🔴 blocker. Исполнение не начато.**
 
 **Definition of Done:** использованная деталь корректно уменьшает остаток, движение связано с Repair; повтор запроса, ошибка и конкурирующий расход не портят склад. Новый техник получает постоянный мобильный склад и может пройти приёмку/перемещение/списание.
 
@@ -600,3 +600,13 @@ Verify: main по-прежнему `80ec53e84402b24c3a8bb263d150e7bf7a0dd865`; c
 - Заключительная проверка обнаружила, что wildcard retirement `/tech/*` также перенаправляет `/tech/sw.js` (подтверждено HTTP 307 на сервере). Старый установленный worker поэтому не мог получить owner-safe обновление. Regression TestClient до исправления: **1 failed** (307 вместо 200).
 - Добавлен только явный JS-маршрут обновления `/tech/sw.js`; старый интерфейс остаётся redirect-only. Bridge использует общий engine, принимает оба sync tag, активируется без удаления IndexedDB или старых caches. HTTP-проверка вместе с lifecycle regressions: **9 passed**.
 - Добавлен реальный Chromium/SW case для legacy tag: под другим аккаунтом нет запросов, после возврата владельца ровно один repair и одно photo с его токеном. Синтетический HTTP server принимает запросы worker вне scope страницы; первоначальная попытка перехвата таких запросов Playwright route дала ошибку JSON в тестовой среде, после перехода на HTTP fixture проверка проходит. Финальный CI и повторная выкладка исправления ожидаются.
+
+### 10.09.2026 — P0.5: итоговая приёмка и подтверждённая выкладка
+
+- Проверенный код: `90d9421a03ddea2d6d30e65377b992a3d42ac4ed`, draft [PR №7](https://github.com/acone87-arch/Fixit/pull/7). [CI 34437165334](https://github.com/acone87-arch/Fixit/actions/runs/34437165334): **283 passed, 0 failed, 0 skipped**, 780 предупреждений зависимостей, 250.58 s. В составе — 103 PostgreSQL, 11 Chromium/API и 169 остальных Python cases; дополнительно все **5 JS runtime-файлов** и **16 настоящих Chromium IDB/SW cases**. Локальные пропуски PostgreSQL/Linux не выдаются за проверку; указанные результаты получены в Linux CI с PostgreSQL 16 и Chromium.
+- [Deploy 34461286380](https://github.com/acone87-arch/Fixit/actions/runs/34461286380): test и deploy success; production SHA `90d9421a03ddea2d6d30e65377b992a3d42ac4ed`, предыдущий `026b25c63ad07e20814d3f5cfcfca7db0ff84f04`, Alembic `20260908_0014 (head)`.
+- Резервная копия перед повторной выкладкой: `/opt/fixit/backups/pilot-20260910T093418Z-90d9421a03dd`. Сохранены DB dump, uploads, environment, SHA и предыдущий image; архивы проверены чтением списков и контрольными суммами. Полное восстановление production из копии не выполнялось и остаётся частью P0.7.
+- Независимая проверка `https://fixitpulse.ru` с обычной проверкой TLS: `/health` — 200 `status: ok`; HTTP bytes `/`, `/static/app.js?v=20260909-5`, `/static/offline/engine.js?v=20260909-5`, `/sw.js?v=20260909-5`, `/tech/sw.js` совпали с кодом принятого SHA (LF). Оба SW отдаются как JavaScript с `Cache-Control: no-cache`; `/tech`, `/tech/`, `/tech/app.js` сохраняют 307 в Pulse. Production данные для проверки не создавались.
+- Main повторно сверена: `87e3044f30a40b6d0cff0306e71f9aee83aca329`, identical, 0/0. PR №6/№7 не сливались. Выпуск выполнен через `codex/pilot-release-p0-5`; финальная запись этого журнала — отдельный документационный коммит, production остаётся на проверенном SHA кода.
+- Сохранены legacy DB v2, old data_url, origin и очереди без owner; последние доступны для экспорта и восстановления владельцем, не отправляются с произвольным новым токеном. Поддержка автоматической отправки требует Web Locks; при отсутствии возможности очередь сохраняется с понятной ошибкой. Восстановление в открытом приложении работает без Background Sync.
+- P0.6 не начинался; исправлена только ошибочно перенесённая в его заголовок промежуточная отметка P0.5. Реальные Android/iOS, полный offline cold-start, складской hardening и полная production acceptance остаются отдельными этапами. **FIXIT PILOT READY целиком не объявляется. Остановка после P0.5 и разрешённого деплоя.**
