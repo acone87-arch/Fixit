@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import CurrentUser, get_current_user, require_roles
 from app.database import get_db
-from app.models.core import Equipment, EquipmentAttachment, EquipmentType, User, UserRole
+from app.models.core import Equipment, EquipmentAttachment, EquipmentStatus, EquipmentType, User, UserRole
 from app.models.customer import Client, Site
 from app.models.organization import OrganizationMembership
 from app.models.repair import Repair, RepairAttachment, RepairPart
@@ -70,18 +70,17 @@ async def serialize(db, request, org):
         Repair.organization_id == org,
         Repair.service_request_id == request.id,
     ))
-    if not repair and request.task_id:
-        repair = await db.scalar(select(Repair).where(
+    if not repair and (request.task_id or request.ticket_id):
+        legacy_link = Repair.task_id == request.task_id if request.task_id else Repair.ticket_id == request.ticket_id
+        candidates = (await db.scalars(select(Repair).where(
             Repair.organization_id == org,
+            Repair.equipment_id == request.equipment_id,
             Repair.service_request_id.is_(None),
-            Repair.task_id == request.task_id,
-        ).order_by(Repair.closed_at.desc(), Repair.created_at.desc()))
-    elif not repair and request.ticket_id:
-        repair = await db.scalar(select(Repair).where(
-            Repair.organization_id == org,
-            Repair.service_request_id.is_(None),
-            Repair.ticket_id == request.ticket_id,
-        ).order_by(Repair.closed_at.desc(), Repair.created_at.desc()))
+            legacy_link,
+        ).limit(2))).all()
+        # Keep unambiguous historical compatibility; do not label an arbitrary
+        # repair as the result when old provenance matches several records.
+        repair = candidates[0] if len(candidates) == 1 else None
     parts = []
     if repair:
         parts = [{"part_name": name, "article": article, "quantity": qty} for name, article, qty in (await db.execute(select(Part.name, Part.article, RepairPart.quantity).join(RepairPart, RepairPart.part_id == Part.id).where(RepairPart.repair_id == repair.id))).all()]
@@ -113,7 +112,7 @@ async def serialize(db, request, org):
     if not any(item["type"] == "request.created" for item in history):
         history.insert(0, {"at": request.created_at, "type": "request.created", "message": "Заявка создана", "details": {}, "actor": None})
     photo_out = {"id": primary_photo.id, "original_name": primary_photo.original_name, "media_type": primary_photo.media_type, "byte_size": primary_photo.byte_size, "uploaded_at": primary_photo.uploaded_at, "download_url": f"/api/equipment/{equipment.id}/photo"} if primary_photo else None
-    return ServiceRequestDetail(id=request.id, number=request.number, ticket_id=request.ticket_id, task_id=request.task_id, equipment_id=request.equipment_id, title=request.title, client_name=client_label(client, site), site_name=site.name, equipment_name=equipment.name, serial_number=equipment.serial_number, description=request.description, priority=request.priority, assigned_technician_id=request.assigned_technician_id, assigned_technician_name=technician_name, status=request.status, created_at=request.created_at, completed_at=request.completed_at, approval_target=request.approval_target, repair_id=repair.id if repair else None, parts_used=parts, outcome=repair.description if repair else None, history=history, site_address=site.address, contact_name=site.contact_name or client.contact_name, contact_phone=site.contact_phone or client.contact_phone, equipment_type=equipment_type, manufacturer=equipment.manufacturer, model=equipment.model, equipment_status=equipment.status.value, equipment_version=equipment.version, attachments=attachments, request_attachments=request_attachments, primary_photo=photo_out)
+    return ServiceRequestDetail(id=request.id, number=request.number, ticket_id=request.ticket_id, task_id=request.task_id, equipment_id=request.equipment_id, title=request.title, client_name=client_label(client, site), site_name=site.name, equipment_name=equipment.name, serial_number=equipment.serial_number, description=request.description, priority=request.priority, assigned_technician_id=request.assigned_technician_id, assigned_technician_name=technician_name, status=request.status, created_at=request.created_at, completed_at=request.completed_at, approval_target=request.approval_target, repair_id=repair.id if repair else None, parts_used=parts, outcome=repair.description if repair else None, history=history, site_address=site.address, contact_name=site.contact_name or client.contact_name, contact_phone=site.contact_phone or client.contact_phone, equipment_type=equipment_type, manufacturer=equipment.manufacturer, model=equipment.model, equipment_status=equipment.status.value, equipment_version=equipment.version, attachments=attachments, request_attachments=request_attachments, primary_photo=photo_out, repair_sync_status=repair.sync_status.value if repair else None)
 
 
 @router.post("", response_model=ServiceRequestDetail, status_code=status.HTTP_201_CREATED)
@@ -125,9 +124,14 @@ async def create_service_request(
     equipment = await db.scalar(select(Equipment).where(
         Equipment.id == payload.equipment_id,
         Equipment.organization_id == user.organization_id,
-    ))
+    ).with_for_update())
     if not equipment:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Оборудование не найдено в организации")
+    if equipment.inventory_pending:
+        raise HTTPException(409, 'Сначала заполните карточку оборудования')
+    if equipment.status in {EquipmentStatus.working, EquipmentStatus.needs_repair}:
+        equipment.status = EquipmentStatus.needs_repair
+        equipment.version += 1
     technician_id = payload.assigned_technician_id
     request = ServiceRequest(
         organization_id=user.organization_id, number=await next_number(db, user.organization_id),
@@ -252,8 +256,8 @@ async def update_status(request_id: uuid.UUID, payload: ServiceRequestStatusUpda
     if payload.status not in REQUEST_STATUSES: raise HTTPException(422, "Неизвестный статус заявки")
     request = await locked_request(db, request_id, user.organization_id)
     details = payload.details or {}
-    await transition(db, request, user, payload.status, approval_target=details.get("approval_target"),
-                     reason=details.get("reason"), note=payload.note)
+    await transition(db, request, user, payload.status, approval_target=details.get("approval_target", "internal" if details.get("approval") else None),
+                     approval=details.get("approval"), reason=details.get("reason"), note=payload.note)
     await db.commit(); await db.refresh(request)
     result = await serialize(db, request, user.organization_id)
     if request.status == "waiting_approval" and request.approval_target == "internal":

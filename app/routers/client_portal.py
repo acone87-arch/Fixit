@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import CurrentUser, get_current_user, require_roles
 from app.database import get_db
-from app.models.core import Equipment, EquipmentAttachment, EquipmentType, User, UserRole
+from app.models.core import Equipment, EquipmentAttachment, EquipmentStatus, EquipmentType, User, UserRole
 from app.models.customer import Client, ClientUserAccess, Site
 from app.models.repair import Repair
 from app.models.service_request import ServiceRequest
@@ -18,6 +18,7 @@ from app.schemas.service_request import ServiceRequestApproval, ServiceRequestCr
 from app.services.client_portal import client_scope, ensure_client_equipment
 from app.services.service_requests import event, next_number
 from app.services.service_request_workflow import decide_approval as workflow_decide_approval
+from app.services.access_changes import lock_access_changes
 
 router = APIRouter(prefix="/api/client-portal", tags=["client portal"])
 
@@ -50,7 +51,7 @@ async def _access_member_and_client(db, organization_id, user_id, client_id):
         OrganizationMembership.is_active.is_(True),
         OrganizationMembership.role.in_({UserRole.client_admin, UserRole.client_site_user}),
     ))
-    client = await db.scalar(select(Client).where(Client.id == client_id, Client.organization_id == organization_id))
+    client = await db.scalar(select(Client).where(Client.id == client_id, Client.organization_id == organization_id, Client.is_active.is_(True)))
     if not member or not client:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Пользователь или клиент не найден")
     return member, client
@@ -64,7 +65,7 @@ async def _validate_access_scope(db, organization_id, member, client_id, site_id
     if site_id is None:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Выберите объект для менеджера объекта")
     site = await db.scalar(select(Site).where(
-        Site.id == site_id, Site.client_id == client_id, Site.organization_id == organization_id,
+        Site.id == site_id, Site.client_id == client_id, Site.organization_id == organization_id, Site.is_active.is_(True),
     ))
     if not site:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Объект не принадлежит клиенту")
@@ -104,8 +105,19 @@ async def list_access(client_id: uuid.UUID, db: AsyncSession = Depends(get_db),
 @router.post("/access", response_model=ClientAccessOut, status_code=status.HTTP_201_CREATED)
 async def grant_access(payload: ClientAccessCreate, db: AsyncSession = Depends(get_db),
                        user: CurrentUser = Depends(get_current_user)):
+    await lock_access_changes(db, user.organization_id, user)
     await _ensure_team_manager(user, payload.client_id, db)
     member, _ = await _access_member_and_client(db, user.organization_id, payload.user_id, payload.client_id)
+    existing = (await db.scalars(select(ClientUserAccess).where(
+        ClientUserAccess.organization_id == user.organization_id,
+        ClientUserAccess.user_id == payload.user_id,
+    ))).all()
+    if any(item.client_id != payload.client_id for item in existing):
+        raise HTTPException(status.HTTP_409_CONFLICT, "Пользователь уже относится к другому клиенту; используйте согласованное приглашение")
+    if user.role == UserRole.client_admin and not existing:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Нового участника подключайте по приглашению")
+    if any(item.client_id == payload.client_id and item.site_id == payload.site_id for item in existing):
+        raise HTTPException(status.HTTP_409_CONFLICT, "Такой доступ уже назначен; используйте изменение доступа")
     site = await _validate_access_scope(db, user.organization_id, member, payload.client_id, payload.site_id)
     access = ClientUserAccess(organization_id=user.organization_id, user_id=payload.user_id,
                               client_id=payload.client_id, site_id=site.id if site else None)
@@ -120,6 +132,7 @@ async def grant_access(payload: ClientAccessCreate, db: AsyncSession = Depends(g
 @router.patch("/access/{access_id}", response_model=ClientAccessOut)
 async def update_access(access_id: uuid.UUID, payload: ClientAccessUpdate, db: AsyncSession = Depends(get_db),
                         user: CurrentUser = Depends(get_current_user)):
+    await lock_access_changes(db, user.organization_id, user)
     access = await db.scalar(select(ClientUserAccess).where(
         ClientUserAccess.id == access_id, ClientUserAccess.organization_id == user.organization_id,
     ))
@@ -127,9 +140,28 @@ async def update_access(access_id: uuid.UUID, payload: ClientAccessUpdate, db: A
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Доступ не найден")
     await _ensure_team_manager(user, access.client_id, db)
     member, _ = await _access_member_and_client(db, user.organization_id, access.user_id, access.client_id)
+    if payload.is_active is True:
+        conflicting_client = await db.scalar(select(ClientUserAccess.id).where(
+            ClientUserAccess.organization_id == user.organization_id,
+            ClientUserAccess.user_id == access.user_id,
+            ClientUserAccess.client_id != access.client_id,
+            ClientUserAccess.is_active.is_(True),
+        ).limit(1))
+        if conflicting_client:
+            raise HTTPException(status.HTTP_409_CONFLICT, "Пользователь уже подключён к другому клиенту")
     if "site_id" in payload.model_fields_set:
         site = await _validate_access_scope(db, user.organization_id, member, access.client_id, payload.site_id)
+        previous_site_id = access.site_id
         access.site_id = site.id if site else None
+        if previous_site_id != access.site_id:
+            # Сохраняем отзыв прежнего Site, иначе старый invite восстановит его.
+            try:
+                await db.flush()
+            except Exception as exc:
+                await db.rollback()
+                raise HTTPException(status.HTTP_409_CONFLICT, "Такой доступ уже назначен") from exc
+            db.add(ClientUserAccess(organization_id=user.organization_id, user_id=access.user_id,
+                client_id=access.client_id, site_id=previous_site_id, is_active=False))
     if "is_active" in payload.model_fields_set:
         access.is_active = payload.is_active
     try: await db.commit()
@@ -143,6 +175,7 @@ async def update_access(access_id: uuid.UUID, payload: ClientAccessUpdate, db: A
 @router.delete("/access/{access_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_access(access_id: uuid.UUID, db: AsyncSession = Depends(get_db),
                         user: CurrentUser = Depends(get_current_user)):
+    await lock_access_changes(db, user.organization_id, user)
     access = await db.scalar(select(ClientUserAccess).where(
         ClientUserAccess.id == access_id, ClientUserAccess.organization_id == user.organization_id,
     ))
@@ -152,7 +185,8 @@ async def delete_access(access_id: uuid.UUID, db: AsyncSession = Depends(get_db)
     db.add(AuditEvent(
         organization_id=user.organization_id, actor_user_id=user.id, action="client.member_disabled",
         entity_type="client_access", entity_id=str(access.id), details_json={"client_id": str(access.client_id)}))
-    await db.delete(access)
+    # Сохраняем tombstone: pending invite не должен восстановить удалённый scope.
+    access.is_active = False
     await db.commit()
 
 
@@ -228,6 +262,14 @@ async def request_detail(request_id: uuid.UUID, db: AsyncSession = Depends(get_d
 @router.post("/requests", response_model=ServiceRequestDetail, status_code=status.HTTP_201_CREATED)
 async def create_request(payload: ServiceRequestCreate, db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     equipment = await ensure_client_equipment(payload.equipment_id, user, db)
+    await db.refresh(equipment, with_for_update=True)
+    # После ожидания lock повторно проверяем scope по свежему site_id.
+    await ensure_client_equipment(equipment.id, user, db)
+    if equipment.inventory_pending:
+        raise HTTPException(409, 'Сначала заполните карточку оборудования')
+    if equipment.status in {EquipmentStatus.working, EquipmentStatus.needs_repair}:
+        equipment.status = EquipmentStatus.needs_repair
+        equipment.version += 1
     request = ServiceRequest(organization_id=user.organization_id, number=await next_number(db, user.organization_id),
         equipment_id=equipment.id, title=payload.title, description=payload.description, priority=payload.priority, status="new")
     db.add(request); await db.flush()
@@ -239,7 +281,7 @@ async def create_request(payload: ServiceRequestCreate, db: AsyncSession = Depen
 @router.patch("/requests/{request_id}/approval", response_model=ServiceRequestDetail)
 async def approve_request(request_id: uuid.UUID, payload: ServiceRequestApproval, db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     query, _, _ = await _requests_query(user, db)
-    row = (await db.execute(query.where(ServiceRequest.id == request_id).with_for_update())).first()
+    row = (await db.execute(query.where(ServiceRequest.id == request_id).with_for_update(of=ServiceRequest))).first()
     if not row: raise HTTPException(status.HTTP_404_NOT_FOUND, "Заявка не найдена")
     request = row[0]
     await workflow_decide_approval(db, request, user, payload.action == "approved", payload.comment)

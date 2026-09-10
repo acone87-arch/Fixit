@@ -61,7 +61,7 @@ assert.match(source, /FixitOffline\.enqueueRepair\(payload, draft\.photos/);
 assert.match(source, /id="request-retry-sync"/);
 assert.match(source, /Работа завершена · \$\{completionSync\.attachmentsPending\} фото ожидают отправки/);
 assert.match(source, /FixitOffline\?\.configure\?\.\(\{ token: state\.token \}\)/);
-assert.match(source, /FixitOffline\?\.db\?\.kvDelete\?\.\('token'\)/);
+assert.match(source, /FixitOffline\?\.logout\?\.\(\)/);
 assert.match(source, /Фото оборудования/);
 assert.match(source, /equipment-history-photos/);
 const passportSource = source.slice(source.indexOf('async function openEquipmentPassport'));
@@ -75,6 +75,43 @@ const techSource = fs.readFileSync('app/static-tech/app.js', 'utf8');
 const workerSource = fs.readFileSync('app/static-tech/sw.js', 'utf8');
 assert.doesNotMatch(techSource, /if \(!pending\.length\) return resultsById/);
 assert.match(techSource, /attachment\.file instanceof Blob/);
-assert.match(workerSource, /await syncPendingAttachmentsFromSW\(token\)/);
-assert.match(workerSource, /await self\.TechDB\.delete\('pendingAttachments', attachment\.id\)/);
+assert.match(workerSource, /return self\.FixitOffline\.sync\(\)/);
+assert.match(workerSource, /importScripts\('\/static\/offline\/engine\.js/);
 console.log('technician workflow runtime: ok');
+
+// Настоящий async renderer: медленный dashboard не должен затереть открытую заявку.
+(async () => {
+  const pulseSource = source.slice(source.indexOf('async function renderPulse('), source.indexOf('async function renderTechnicianPulse('));
+  let release;
+  const pending = new Promise((resolve) => { release = resolve; });
+  const state = { me: { role: 'owner' }, route: 'pulse' };
+  const content = { innerHTML: '', querySelectorAll: () => [] };
+  const runtime = { state, api: () => pending, ensureEquipmentTypes: () => Promise.resolve(),
+    badge: () => '', esc: String, fmtDate: () => '', Date };
+  vm.runInNewContext(`${pulseSource}; this.render = renderPulse;`, runtime);
+  const rendering = runtime.render(content);
+  state.route = 'requests';
+  content.innerHTML = 'Открытая заявка на согласование';
+  release([]);
+  await rendering;
+  assert.equal(content.innerHTML, 'Открытая заявка на согласование', 'Старый dashboard затёр открытую заявку');
+  console.log('Асинхронный переход Pulse → заявка: пройдено');
+})().catch((error) => { console.error(error); process.exitCode = 1; });
+
+// P0.4: та же гонка в отдельном экране техника, реальные отложенные API promises.
+(async () => {
+  const renderer = source.slice(source.indexOf('async function renderTechnicianPulse('), source.indexOf('async function ensureCustomers('));
+  let release;
+  const pending = new Promise((resolve) => { release = resolve; });
+  const state = { me: { role: 'technician' }, route: 'pulse' };
+  const content = { innerHTML: '', querySelectorAll: () => [] };
+  const runtime = { state, api: () => pending, ensureEquipmentTypes: () => Promise.resolve(), esc: String };
+  vm.runInNewContext(`${renderer}; this.render = renderTechnicianPulse;`, runtime);
+  const rendering = runtime.render(content);
+  state.route = 'requests';
+  content.innerHTML = 'Назначенная заявка: Выехал';
+  release([]);
+  await rendering;
+  assert.equal(content.innerHTML, 'Назначенная заявка: Выехал', 'Главный экран техника затёр заявку');
+  console.log('Асинхронный переход техника Pulse → заявка: пройдено');
+})().catch((error) => { console.error(error); process.exitCode = 1; });

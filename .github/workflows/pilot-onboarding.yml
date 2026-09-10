@@ -1,0 +1,73 @@
+name: Pilot onboarding acceptance
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pilot-onboarding-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: pilot
+          POSTGRES_PASSWORD: pilot-ci-only
+          POSTGRES_DB: fixit_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U pilot -d fixit_test"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      PYTHONPATH: .
+      DATABASE_URL: postgresql+asyncpg://pilot:pilot-ci-only@127.0.0.1:5432/fixit_test
+      FIXIT_TEST_DATABASE_URL: postgresql+asyncpg://pilot:pilot-ci-only@127.0.0.1:5432/fixit_test
+      FIXIT_RUN_BROWSER: '1'
+      SECRET_KEY: isolated-pilot-ci-secret
+      PUBLIC_APP_URL: http://127.0.0.1:8765
+      ALLOWED_HOSTS: testserver,localhost,127.0.0.1
+      ALLOWED_ORIGINS: http://127.0.0.1:8765
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Установить тестовые зависимости
+        run: |
+          pip install -r requirements-dev.txt playwright==1.55.0
+          python -m playwright install --with-deps chromium
+          npm ci --prefix tests --ignore-scripts
+          npx --prefix tests playwright install --with-deps chromium
+      - name: Python, PostgreSQL и браузерная приёмка
+        run: pytest -q --junitxml=test-results/pilot.xml
+      - name: JS runtime
+        run: |
+          node tests/onboarding_equipment_runtime_test.js
+          node tests/pulse_offline_engine_runtime_test.js
+          node tests/technician_workflow_runtime_test.js
+          node tests/offline_attachment_sync_runtime_test.js
+          node tests/guest_photo_upload_runtime_test.js
+      - name: Durable queue — настоящий IndexedDB и SW
+        run: node tests/durable_queue_browser_test.js
+      - name: Сохранить результаты приёмки
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pilot-onboarding-${{ github.event.pull_request.head.sha }}
+          path: test-results/
+          retention-days: 7

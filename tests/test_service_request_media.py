@@ -67,6 +67,9 @@ def test_repair_attachment_has_durable_client_id_for_idempotent_photo_retry():
 
 
 class _AttachmentSession:
+    async def execute(self, statement):
+        return None
+
     def __init__(self, scalar_results):
         self.scalar_results = list(scalar_results)
         self.added = []

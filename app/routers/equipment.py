@@ -7,6 +7,7 @@ import qrcode.image.svg
 from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -75,7 +76,7 @@ async def create_equipment_type(
 @router.get("", response_model=list[EquipmentOut])
 async def list_equipment(client_id: uuid.UUID | None = None, site_id: uuid.UUID | None = None, db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     statement = (select(Equipment, EquipmentType.name, EquipmentAttachment)
-        .join(EquipmentType, Equipment.equipment_type_id == EquipmentType.id)
+        .outerjoin(EquipmentType, Equipment.equipment_type_id == EquipmentType.id)
         .outerjoin(EquipmentAttachment, (EquipmentAttachment.equipment_id == Equipment.id) & (EquipmentAttachment.organization_id == user.organization_id))
         .where(Equipment.organization_id == user.organization_id)
         .order_by(Equipment.updated_at.desc()))
@@ -84,7 +85,7 @@ async def list_equipment(client_id: uuid.UUID | None = None, site_id: uuid.UUID 
     if user.role in CLIENT_ROLES:
         client_id, site_ids = await client_scope(user, db)
         statement = (select(Equipment, EquipmentType.name, EquipmentAttachment)
-            .join(EquipmentType, Equipment.equipment_type_id == EquipmentType.id)
+            .outerjoin(EquipmentType, Equipment.equipment_type_id == EquipmentType.id)
             .join(Site, Site.id == Equipment.site_id)
             .outerjoin(EquipmentAttachment, (EquipmentAttachment.equipment_id == Equipment.id) & (EquipmentAttachment.organization_id == user.organization_id))
             .where(Equipment.organization_id == user.organization_id, Site.client_id == client_id)
@@ -105,7 +106,7 @@ async def list_equipment(client_id: uuid.UUID | None = None, site_id: uuid.UUID 
     # Для старых записей сохраняем историческое поле name в БД, но наружу
     # всегда отдаём тип: все клиенты показывают единое обозначение техники.
     return [EquipmentOut.model_validate(equipment).model_copy(update={
-        "name": type_name,
+        "name": type_name or equipment.name,
         "primary_photo": _photo_out(photo) if photo else None,
     }) for equipment, type_name, photo in rows]
 
@@ -274,7 +275,28 @@ async def update_equipment(
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Недостаточно прав для изменения оборудования")
     equipment = await _equipment_for_user(equipment_id, db, user) if user.role == UserRole.client_site_user else await db.scalar(select(Equipment).where(Equipment.id == equipment_id, Equipment.organization_id == user.organization_id))
     if not equipment: raise HTTPException(status.HTTP_404_NOT_FOUND, "Оборудование не найдено")
+    await db.refresh(equipment, with_for_update=True)
+    if user.role == UserRole.client_site_user:
+        await _equipment_for_user(equipment_id, db, user)
     changes = payload.model_dump(exclude_unset=True)
+    expected_version = changes.pop('expected_version', None)
+    detail_fields = {'equipment_type_id', 'manufacturer', 'model', 'serial_number', 'location'}
+    if detail_fields.intersection(changes):
+        if user.role not in {UserRole.owner, UserRole.admin}:
+            raise HTTPException(403, 'Полное редактирование доступно администратору')
+        if expected_version is None:
+            raise HTTPException(422, 'Передайте версию редактируемой карточки')
+    if expected_version is not None and expected_version != equipment.version:
+        raise HTTPException(409, 'Карточка изменилась. Откройте её заново')
+    if equipment.inventory_pending:
+        raise HTTPException(409, 'Сначала завершите первичную инвентаризацию')
+    if any(changes.get(key, 'omitted') is None for key in ('site_id', 'status', 'equipment_type_id', 'serial_number')):
+        raise HTTPException(422, 'Тип, серийный номер, объект и статус не могут быть пустыми')
+    if 'equipment_type_id' in changes:
+        kind = await db.scalar(select(EquipmentType).where(EquipmentType.id == changes['equipment_type_id'], EquipmentType.organization_id == user.organization_id))
+        if not kind:
+            raise HTTPException(422, 'Тип оборудования не найден')
+        equipment.name = kind.name
     if user.role == UserRole.client_site_user and changes.get("site_id"):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Менеджер объекта не может переносить оборудование")
     if changes.get("site_id"):
@@ -289,7 +311,11 @@ async def update_equipment(
     for field, value in changes.items():
         setattr(equipment, field, value)
     equipment.version += 1
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(409, 'Оборудование с таким серийным номером уже существует') from exc
     await db.refresh(equipment)
     return equipment
 
@@ -306,6 +332,9 @@ async def delete_equipment(
     ))
     if not equipment:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Оборудование не найдено")
+
+    if equipment.inventory_batch_id:
+        raise HTTPException(409, 'Оборудование с напечатанным QR нельзя удалить. Используйте архивирование')
 
     # Паспорт с реальными заявками/ремонтами — часть аудита. Его нельзя удалить
     # вместе с историей одной кнопкой, поэтому для ошибочной записи разрешаем
@@ -330,7 +359,7 @@ async def get_passport(equipment_id: uuid.UUID, db: AsyncSession = Depends(get_d
     await _equipment_for_user(equipment_id, db, user)
     equipment_row = (await db.execute(
         select(Equipment, EquipmentType.name, Site, Client, EquipmentAttachment)
-        .join(EquipmentType, EquipmentType.id == Equipment.equipment_type_id)
+        .outerjoin(EquipmentType, EquipmentType.id == Equipment.equipment_type_id)
         .join(Site, Site.id == Equipment.site_id)
         .join(Client, Client.id == Site.client_id)
         .outerjoin(EquipmentAttachment, (EquipmentAttachment.equipment_id == Equipment.id) & (EquipmentAttachment.organization_id == user.organization_id))
@@ -450,9 +479,11 @@ async def get_passport(equipment_id: uuid.UUID, db: AsyncSession = Depends(get_d
             history.append(EquipmentServiceHistoryEntry(id=f"ticket:{ticket.id}", status="legacy",
                 occurred_at=ticket.created_at, title="Обращение через QR",
                 problem=ticket.comment or ", ".join(ticket.symptom_tags or []), legacy=True))
-    # A legacy repair is retained only if no canonical request claims it.
+    # Only an actual canonical link suppresses a separate repair entry.
+    # Task/Ticket provenance alone can match several repairs; never hide them
+    # or arbitrarily assign one of them to a canonical request.
     for repair, technician_name in repair_rows:
-        if repair.service_request_id or repair.task_id in request_by_task or repair.ticket_id in request_by_ticket:
+        if repair.service_request_id in request_by_id:
             continue
         history.append(EquipmentServiceHistoryEntry(id=f"repair:{repair.id}", status="legacy",
             occurred_at=repair.closed_at or repair.created_at, completed_at=repair.closed_at,

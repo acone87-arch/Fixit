@@ -5,6 +5,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.config import settings
+from app.routers import inventory
 from app.routers import auth, client_portal, customers, equipment, invites, organizations, push, repairs, service_requests, sync, tasks, tickets, users, warehouses
 
 def configure_http_security(application: FastAPI) -> None:
@@ -22,6 +23,7 @@ app = FastAPI(title="Service & Warehouse Management API", version="0.1.0")
 configure_http_security(app)
 
 app.include_router(auth.router)
+app.include_router(inventory.router)
 app.include_router(organizations.router)
 app.include_router(customers.router)
 app.include_router(customers.sites_router)
@@ -74,6 +76,12 @@ async def qr_redirect(qr_token: str):
 @app.get("/tech", include_in_schema=False)
 async def tech_redirect():
     return RedirectResponse(url="/#requests", status_code=307)
+
+
+@app.get("/tech/sw.js", include_in_schema=False)
+async def legacy_tech_worker():
+    """Let installed legacy workers upgrade to the owner-safe shared queue."""
+    return FileResponse("app/static/offline/sw.js", media_type="application/javascript", headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/tech/{legacy_path:path}", include_in_schema=False)

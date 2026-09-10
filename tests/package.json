@@ -1,0 +1,8 @@
+{
+  "private": true,
+  "description": "Isolated offline queue runtime and browser acceptance",
+  "devDependencies": {
+    "fake-indexeddb": "6.2.4",
+    "playwright": "1.55.0"
+  }
+}

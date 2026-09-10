@@ -52,7 +52,11 @@ async def get_current_user(
     payload = decode_access_token(token)
     if not payload or "sub" not in payload:
         raise credentials_error
-    user_id = uuid.UUID(payload["sub"])
+    try:
+        user_id = uuid.UUID(payload["sub"])
+        organization_id = uuid.UUID(payload["org"]) if payload.get("org") else None
+    except (ValueError, TypeError, AttributeError):
+        raise credentials_error
     user = await db.get(User, user_id)
     if not user or not user.is_active:
         raise credentials_error
@@ -62,7 +66,7 @@ async def get_current_user(
     )
     if payload.get("org"):
         membership_query = membership_query.where(
-            OrganizationMembership.organization_id == uuid.UUID(payload["org"])
+            OrganizationMembership.organization_id == organization_id
         )
     membership = await db.scalar(membership_query.order_by(OrganizationMembership.created_at))
     if not membership:

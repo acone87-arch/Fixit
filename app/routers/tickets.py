@@ -9,12 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import require_roles
 from app.database import get_db
-from app.models.core import Equipment, EquipmentAttachment, EquipmentStatus, EquipmentType, Ticket, User, UserRole
+from app.models.core import Equipment, EquipmentAttachment, EquipmentStatus, EquipmentType, Ticket, TicketStatus, User, UserRole
 from app.models.customer import Site
 from app.schemas.equipment import PublicEquipmentOut
 from app.schemas.ticket import GuestTicketCreate, TicketCreateResult, TicketOut
-from app.models.service_request import ServiceRequest, ServiceRequestAttachment
-from app.services.service_requests import event, next_number
+from app.models.service_request import GuestRequestReceipt, ServiceRequest, ServiceRequestAttachment
+from app.services.service_requests import event, lock_request_intake, next_number
 from app.services.media import image_response, normalize_image
 
 public_router = APIRouter(prefix="/api/public/equipment", tags=["guest"])
@@ -26,7 +26,7 @@ async def get_public_equipment(qr_token: uuid.UUID, db: AsyncSession = Depends(g
     row = (
         await db.execute(
             select(Equipment, EquipmentType.name, Site.name, EquipmentAttachment)
-            .join(EquipmentType, Equipment.equipment_type_id == EquipmentType.id)
+            .outerjoin(EquipmentType, Equipment.equipment_type_id == EquipmentType.id)
             .join(Site, Site.id == Equipment.site_id)
             .outerjoin(EquipmentAttachment, EquipmentAttachment.equipment_id == Equipment.id)
             .where(Equipment.public_qr_token == qr_token)
@@ -36,7 +36,7 @@ async def get_public_equipment(qr_token: uuid.UUID, db: AsyncSession = Depends(g
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Оборудование не найдено")
     equipment, type_name, site_name, photo = row
     return PublicEquipmentOut(
-        name=type_name,
+        name=type_name or equipment.name, inventory_pending=equipment.inventory_pending,
         manufacturer=equipment.manufacturer,
         model=equipment.model,
         serial_number=equipment.serial_number,
@@ -67,11 +67,22 @@ async def create_guest_ticket(qr_token: uuid.UUID, payload: GuestTicketCreate, r
     )
     if not equipment:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Оборудование не найдено")
+    if equipment.inventory_pending:
+        raise HTTPException(409, 'Сначала заполните карточку оборудования')
+    await lock_request_intake(db, equipment.organization_id)
+    receipt = await db.get(GuestRequestReceipt, (equipment.organization_id, payload.idempotency_key))
+    if receipt:
+        linked = await db.get(ServiceRequest, receipt.service_request_id)
+        if linked.equipment_id != equipment.id:
+            raise HTTPException(status.HTTP_409_CONFLICT, "Ключ отправки уже использован для другого оборудования")
+        return await _duplicate_result(db, linked)
     existing = await db.scalar(select(Ticket).where(
         Ticket.organization_id == equipment.organization_id,
         Ticket.idempotency_key == payload.idempotency_key,
     ))
     if existing:
+        if existing.equipment_id != equipment.id:
+            raise HTTPException(status.HTTP_409_CONFLICT, "Ключ отправки уже использован для другого оборудования")
         linked = await db.scalar(select(ServiceRequest).where(ServiceRequest.ticket_id == existing.id))
         return TicketCreateResult(ticket_id=existing.id, service_request_id=linked.id if linked else None, number=linked.number if linked else None, status=existing.status, duplicate=True, active_request=bool(linked and linked.status not in {"completed", "closed", "cancelled"}))
     active = await db.scalar(select(ServiceRequest).where(
@@ -79,7 +90,11 @@ async def create_guest_ticket(qr_token: uuid.UUID, payload: GuestTicketCreate, r
         ServiceRequest.status.not_in({"completed", "closed", "cancelled"}),
     ).order_by(ServiceRequest.created_at.desc()))
     if active:
-        return TicketCreateResult(ticket_id=active.ticket_id, service_request_id=active.id, number=active.number, status=TicketStatus.assigned if active.status == "assigned" else TicketStatus.new, duplicate=True, active_request=True)
+        db.add(GuestRequestReceipt(organization_id=equipment.organization_id,
+            idempotency_key=payload.idempotency_key, service_request_id=active.id))
+        result = await _duplicate_result(db, active)
+        await db.commit()
+        return result
 
     ticket = Ticket(
         organization_id=equipment.organization_id,
@@ -95,6 +110,8 @@ async def create_guest_ticket(qr_token: uuid.UUID, payload: GuestTicketCreate, r
     await db.flush()
     request = ServiceRequest(organization_id=equipment.organization_id, number=await next_number(db, equipment.organization_id), ticket_id=ticket.id, equipment_id=equipment.id, status="new", priority="urgent" if payload.severity.value == "not_working" else "planned", title=(payload.comment or ", ".join(payload.symptom_tags) or "Новая заявка")[:255], description=payload.comment)
     db.add(request); await db.flush()
+    db.add(GuestRequestReceipt(organization_id=equipment.organization_id,
+        idempotency_key=payload.idempotency_key, service_request_id=request.id))
     db.add(event(equipment.organization_id, request.id, None, "request.created", "Заявка создана через QR", {"ticket_id": str(ticket.id)}))
 
     # Гостевая заявка не должна тихо перезаписать более серьёзный статус
@@ -108,13 +125,20 @@ async def create_guest_ticket(qr_token: uuid.UUID, payload: GuestTicketCreate, r
     return TicketCreateResult(ticket_id=ticket.id, service_request_id=request.id, number=request.number, status=ticket.status, duplicate=False)
 
 
+async def _duplicate_result(db: AsyncSession, linked: ServiceRequest) -> TicketCreateResult:
+    ticket = await db.get(Ticket, linked.ticket_id) if linked.ticket_id else None
+    return TicketCreateResult(ticket_id=linked.ticket_id, service_request_id=linked.id,
+        number=linked.number, status=ticket.status if ticket else TicketStatus.new,
+        duplicate=True, active_request=linked.status not in {"completed", "closed", "cancelled"})
+
+
 @public_router.post("/{qr_token}/requests/{request_id}/attachments", status_code=status.HTTP_201_CREATED)
 async def upload_guest_problem_photo(qr_token: uuid.UUID, request_id: uuid.UUID, request: Request,
                                     file: UploadFile = File(...), client_id: str | None = Form(None),
                                     db: AsyncSession = Depends(get_db)):
     _rate_limit(request, qr_token)
     service_request = await db.scalar(select(ServiceRequest).join(Equipment, Equipment.id == ServiceRequest.equipment_id).where(
-        ServiceRequest.id == request_id, Equipment.public_qr_token == qr_token).with_for_update())
+        ServiceRequest.id == request_id, Equipment.public_qr_token == qr_token).with_for_update(of=ServiceRequest))
     if not service_request: raise HTTPException(status.HTTP_404_NOT_FOUND, "Заявка не найдена")
     if client_id is not None:
         client_id = client_id.strip()

@@ -1,4 +1,4 @@
-"""PDF generation for an immutable view of a completed service act."""
+"""PDF generation from the stored repair and current equipment/client details."""
 
 from __future__ import annotations
 

@@ -15,6 +15,7 @@ from app.models.organization import AuditEvent
 from app.models.service_request import ServiceRequest
 from app.schemas.customer import ClientCreate, ClientOut, ClientUpdate, SiteCreate, SiteOut, SiteUpdate, TechnicianClientAccessUpdate
 from app.services.client_portal import CLIENT_ROLES, client_scope
+from app.services.access_changes import lock_access_changes
 
 router = APIRouter(prefix="/api/clients", tags=["clients"])
 sites_router = APIRouter(prefix="/api/sites", tags=["sites"])
@@ -60,8 +61,10 @@ async def list_clients(
         .order_by(Client.name)
     )
     if user.role in CLIENT_ROLES:
-        client_id, _ = await client_scope(user, db)
+        client_id, allowed_site_ids = await client_scope(user, db)
         query = query.where(Client.id == client_id)
+        if allowed_site_ids is not None:
+            query = query.where(Site.id.in_(allowed_site_ids))
     elif user.role == UserRole.technician:
         query = query.where(Client.id.in_(select(TechnicianClientAccess.client_id).where(
             TechnicianClientAccess.organization_id == user.organization_id,
@@ -222,7 +225,7 @@ async def list_sites(
 async def list_service_technicians(client_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(require_roles(UserRole.owner, UserRole.admin, UserRole.dispatcher))):
     client = await db.scalar(select(Client.id).where(Client.id == client_id, Client.organization_id == user.organization_id))
     if not client: raise HTTPException(status.HTTP_404_NOT_FOUND, "Клиент не найден")
-    rows = (await db.execute(select(User, TechnicianClientAccess).join(OrganizationMembership, (OrganizationMembership.user_id == User.id) & (OrganizationMembership.organization_id == user.organization_id)).outerjoin(TechnicianClientAccess, (TechnicianClientAccess.technician_id == User.id) & (TechnicianClientAccess.client_id == client_id) & (TechnicianClientAccess.organization_id == user.organization_id)).where(OrganizationMembership.role == UserRole.technician, User.is_active.is_(True)).order_by(User.full_name))).all()
+    rows = (await db.execute(select(User, TechnicianClientAccess).join(OrganizationMembership, (OrganizationMembership.user_id == User.id) & (OrganizationMembership.organization_id == user.organization_id)).outerjoin(TechnicianClientAccess, (TechnicianClientAccess.technician_id == User.id) & (TechnicianClientAccess.client_id == client_id) & (TechnicianClientAccess.organization_id == user.organization_id)).where(OrganizationMembership.role == UserRole.technician, OrganizationMembership.is_active.is_(True), User.is_active.is_(True)).order_by(User.full_name))).all()
     return [{"id": account.id, "full_name": account.full_name, "assigned": access is not None} for account, access in rows]
 
 
@@ -233,10 +236,11 @@ async def replace_service_technicians(
     db: AsyncSession = Depends(get_db),
     user: CurrentUser = Depends(require_roles(UserRole.owner, UserRole.admin, UserRole.dispatcher)),
 ):
-    client = await db.scalar(select(Client).where(Client.id == client_id, Client.organization_id == user.organization_id))
+    await lock_access_changes(db, user.organization_id, user)
+    client = await db.scalar(select(Client).where(Client.id == client_id, Client.organization_id == user.organization_id).with_for_update())
     if not client: raise HTTPException(status.HTTP_404_NOT_FOUND, "Клиент не найден")
     technician_ids = set(payload.technician_ids)
-    valid = set((await db.scalars(select(User.id).join(OrganizationMembership, (OrganizationMembership.user_id == User.id) & (OrganizationMembership.organization_id == user.organization_id)).where(User.id.in_(technician_ids), OrganizationMembership.role == UserRole.technician, User.is_active.is_(True)))).all()) if technician_ids else set()
+    valid = set((await db.scalars(select(User.id).join(OrganizationMembership, (OrganizationMembership.user_id == User.id) & (OrganizationMembership.organization_id == user.organization_id)).where(User.id.in_(technician_ids), OrganizationMembership.role == UserRole.technician, OrganizationMembership.is_active.is_(True), User.is_active.is_(True)))).all()) if technician_ids else set()
     if valid != technician_ids: raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Можно назначить только активных техников организации")
     existing = (await db.scalars(select(TechnicianClientAccess).where(TechnicianClientAccess.organization_id == user.organization_id, TechnicianClientAccess.client_id == client_id))).all()
     for item in existing:

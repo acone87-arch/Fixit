@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Enum, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, Enum, ForeignKey, Integer, String, Text, UniqueConstraint, false
 from sqlalchemy.dialects.postgresql import ARRAY, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -72,9 +72,25 @@ class EquipmentType(Base):
     name: Mapped[str] = mapped_column(String(100))
 
 
+class EquipmentInventoryBatch(Base):
+    __tablename__ = "equipment_inventory_batches"
+    __table_args__ = (CheckConstraint('quantity BETWEEN 1 AND 500', name='ck_inventory_batch_quantity'),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey('organizations.id'), index=True)
+    site_id: Mapped[uuid.UUID] = mapped_column(ForeignKey('sites.id'), index=True)
+    quantity: Mapped[int] = mapped_column(Integer)
+    created_by_user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey('users.id'))
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+
 class Equipment(Base):
     __tablename__ = "equipment"
-    __table_args__ = (UniqueConstraint("organization_id", "serial_number", name="uq_equipment_org_serial"),)
+    __table_args__ = (
+        UniqueConstraint("organization_id", "serial_number", name="uq_equipment_org_serial"),
+        UniqueConstraint('inventory_batch_id', 'inventory_number', name='uq_equipment_inventory_number'),
+        CheckConstraint('inventory_pending OR (equipment_type_id IS NOT NULL AND serial_number IS NOT NULL)', name='ck_equipment_inventory_complete'),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id"), index=True)
@@ -82,11 +98,14 @@ class Equipment(Base):
     # Отдельный от id токен для публичного QR — так по ссылке нельзя подобрать/угадать
     # внутренний идентификатор и достучаться до админских выборок по id.
     public_qr_token: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), unique=True, default=uuid.uuid4)
-    equipment_type_id: Mapped[int] = mapped_column(ForeignKey("equipment_types.id"))
+    equipment_type_id: Mapped[int | None] = mapped_column(ForeignKey("equipment_types.id"))
+    inventory_pending: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    inventory_batch_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey('equipment_inventory_batches.id'), index=True)
+    inventory_number: Mapped[int | None] = mapped_column(Integer)
     name: Mapped[str] = mapped_column(String(255))
     manufacturer: Mapped[str | None] = mapped_column(String(255))
     model: Mapped[str | None] = mapped_column(String(255))
-    serial_number: Mapped[str] = mapped_column(String(255))
+    serial_number: Mapped[str | None] = mapped_column(String(255))
     status: Mapped[EquipmentStatus] = mapped_column(
         Enum(EquipmentStatus, name="equipment_status"), default=EquipmentStatus.working
     )

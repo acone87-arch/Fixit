@@ -21,6 +21,7 @@ async function init() {
     const res = await fetch(`/api/public/equipment/${qrToken}`);
     if (!res.ok) throw new Error();
     const eq = await res.json();
+    if (eq.inventory_pending) { location.replace('/#inventory/' + encodeURIComponent(qrToken)); return; }
     state.equipment = eq;
     document.getElementById('eq-name').textContent = `${eq.name}${eq.model ? ' · ' + eq.model : ''}`;
     document.getElementById('eq-meta').textContent = `S/N ${eq.serial_number || '—'} · ${eq.site_name || 'Объект'} · ${eq.status === 'needs_repair' ? 'Требует ремонта' : 'Работает'}`;
