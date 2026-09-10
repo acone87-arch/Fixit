@@ -5,6 +5,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.config import settings
+from app.routers import inventory
 from app.routers import auth, client_portal, customers, equipment, invites, organizations, push, repairs, service_requests, sync, tasks, tickets, users, warehouses
 
 def configure_http_security(application: FastAPI) -> None:
@@ -22,6 +23,7 @@ app = FastAPI(title="Service & Warehouse Management API", version="0.1.0")
 configure_http_security(app)
 
 app.include_router(auth.router)
+app.include_router(inventory.router)
 app.include_router(organizations.router)
 app.include_router(customers.router)
 app.include_router(customers.sites_router)

@@ -127,6 +127,8 @@ async def create_service_request(
     ).with_for_update())
     if not equipment:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Оборудование не найдено в организации")
+    if equipment.inventory_pending:
+        raise HTTPException(409, 'Сначала заполните карточку оборудования')
     if equipment.status in {EquipmentStatus.working, EquipmentStatus.needs_repair}:
         equipment.status = EquipmentStatus.needs_repair
         equipment.version += 1

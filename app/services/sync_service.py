@@ -100,6 +100,9 @@ async def sync_one_repair(db: AsyncSession, technician_id: uuid.UUID, organizati
             if not equipment:
                 raise _SyncFailure("Оборудование не найдено")
 
+            if equipment.inventory_pending:
+                raise _SyncFailure("Сначала заполните карточку оборудования")
+
             # Пока ожидали Equipment lock, другой запрос мог уже зафиксировать
             # тот же local_uuid. Проверка владельца обязательна и на этом пути.
             retry = await _existing_sync_result(db, technician_id, organization_id, payload)

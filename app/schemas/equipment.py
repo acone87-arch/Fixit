@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.core import EquipmentStatus, TaskPriority, TaskStatus
 
@@ -17,24 +17,58 @@ class EquipmentTypeCreate(BaseModel):
 
 
 class EquipmentBase(BaseModel):
-    equipment_type_id: int
+    equipment_type_id: int | None
     site_id: uuid.UUID
     # Название больше не вводится пользователем: сервер берёт его из типа
     # оборудования, чтобы во всех разделах было единое обозначение.
     name: str | None = None
     manufacturer: str | None = None
     model: str | None = None
-    serial_number: str
+    serial_number: str | None
     location: str | None = None
 
 
 class EquipmentCreate(EquipmentBase):
-    pass
+    equipment_type_id: int
+    serial_number: str = Field(min_length=1, max_length=255)
 
 
 class EquipmentUpdate(BaseModel):
+    model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
     status: EquipmentStatus | None = None
     site_id: uuid.UUID | None = None
+    equipment_type_id: int | None = None
+    manufacturer: str | None = Field(default=None, max_length=255)
+    model: str | None = Field(default=None, max_length=255)
+    serial_number: str | None = Field(default=None, min_length=1, max_length=255)
+    location: str | None = Field(default=None, max_length=255)
+    expected_version: int | None = Field(default=None, ge=1)
+
+
+class EquipmentInventoryComplete(BaseModel):
+    model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
+    equipment_type_id: int
+    manufacturer: str | None = Field(default=None, max_length=255)
+    model: str | None = Field(default=None, max_length=255)
+    serial_number: str = Field(min_length=1, max_length=255)
+    location: str | None = Field(default=None, max_length=255)
+    expected_version: int = Field(ge=1)
+
+
+class EquipmentBatchCreate(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    site_id: uuid.UUID
+    quantity: int = Field(ge=1, le=500)
+    idempotency_key: uuid.UUID
+
+
+class EquipmentBatchOut(BaseModel):
+    id: uuid.UUID
+    site_id: uuid.UUID
+    quantity: int
+    completed: int
+    pdf_url: str
+    created_at: datetime
 
 
 class EquipmentOut(EquipmentBase):
@@ -44,6 +78,9 @@ class EquipmentOut(EquipmentBase):
     status: EquipmentStatus
     version: int
     created_at: datetime
+    inventory_pending: bool = False
+    inventory_batch_id: uuid.UUID | None = None
+    inventory_number: int | None = None
     primary_photo: "EquipmentPhotoOut | None" = None
 
 
@@ -130,7 +167,8 @@ class PublicEquipmentOut(BaseModel):
     name: str
     manufacturer: str | None
     model: str | None
-    serial_number: str
+    serial_number: str | None
+    inventory_pending: bool = False
     status: EquipmentStatus
     site_name: str | None = None
     photo_url: str | None = None

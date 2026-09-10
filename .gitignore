@@ -15,3 +15,6 @@ __pycache__/
 node_modules/
 .npm-cache/
 .p05-*.py
+.venv-inventory/
+.inventory-*.py
+tmp/pdfs/

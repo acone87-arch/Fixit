@@ -619,7 +619,7 @@ async function router() {
   state.clientTab = state.clientId ? (routeTab || 'overview') : null;
   state.clientSiteId = state.clientTab === 'sites' && routeChildId ? routeChildId : null;
   const allowedRoutes = (NAV[state.me?.role] || []).map(([key]) => key);
-  if (!allowedRoutes.includes(state.route)) {
+  if (!allowedRoutes.includes(state.route) && state.route !== 'inventory') {
     state.route = defaultRoute;
     history.replaceState(null, '', `#${defaultRoute}`);
   }
@@ -635,7 +635,8 @@ async function router() {
   }
   content.innerHTML = '<div class="section-loading">Загрузка…</div>';
   try {
-    if (state.route === 'pulse') await renderPulse(content);
+    if (state.route === 'inventory') { content.innerHTML = '<p>Инвентаризация оборудования</p><button class="btn btn-secondary" onclick="openQrQuickAction()">Сканировать QR</button>'; await openInventoryToken(routeId); }
+    else if (state.route === 'pulse') await renderPulse(content);
     else if (state.me.role.startsWith('client_') && state.route === 'requests' && state.requestId) await renderClientRequest(content, state.requestId);
     else if (state.route === 'requests' && state.requestId) await openServiceRequest(state.requestId);
     else if (state.me.role.startsWith('client_') && state.route === 'requests') await renderClientRequests(content);
@@ -1603,7 +1604,7 @@ function openCreateSiteModal(preselectedClientId = null) {
     const name = backdrop.querySelector('#f-site-name').value.trim();
     if (name.length < 2) return toast('Укажите название объекта', 'error');
     try {
-      await api('/sites', { method: 'POST', body: JSON.stringify({
+      const createdSite = await api('/sites', { method: 'POST', body: JSON.stringify({
         client_id: backdrop.querySelector('#f-site-client').value,
         name,
         address: backdrop.querySelector('#f-site-address').value.trim() || null,
@@ -1611,7 +1612,8 @@ function openCreateSiteModal(preselectedClientId = null) {
         contact_phone: backdrop.querySelector('#f-site-phone').value.trim() || null,
         contact_email: backdrop.querySelector('#f-site-email').value.trim() || null,
       }) });
-      closeModal(); toast('Объект создан'); router();
+      closeModal(); toast('Объект создан'); await router();
+      if (['owner', 'admin'].includes(state.me.role)) await openInventoryBatches(createdSite.id);
     } catch (e) { toast(e.message, 'error'); }
   });
 }
@@ -1647,6 +1649,7 @@ async function renderEquipment(content) {
             <button type="button" data-site-value="">Все объекты</button>${activeSites.map((site) => `<button type="button" data-site-value="${site.id}"><small>${esc(readableClientName(clientOf(site.client_id)?.legal_name || clientOf(site.client_id)?.name, site.name))}</small>${esc(site.name)}</button>`).join('')}
           </div>
         </div>
+        ${['owner','admin'].includes(state.me.role) ? '<button class="btn btn-secondary" id="inventory-batches-btn">Инвентаризация / QR</button>' : ''}
         ${canEdit ? '<button class="btn btn-primary" id="add-equipment-btn">+ Добавить оборудование</button>' : ''}
       </div>
     </div>
@@ -1657,6 +1660,7 @@ async function renderEquipment(content) {
       </table>
     </div><div class="mobile-card-list" id="equipment-cards"></div>`;
 
+  document.getElementById('inventory-batches-btn')?.addEventListener('click', () => openInventoryBatches(document.getElementById('equipment-location-filter').value).catch(error => toast(error.message, 'error')));
   const rows = document.getElementById('equipment-rows');
   const cards = document.getElementById('equipment-cards');
   const renderRows = () => {
@@ -1672,15 +1676,15 @@ async function renderEquipment(content) {
       const client = site ? clientOf(site.client_id) : null;
       return `
       <tr class="clickable" data-id="${eq.id}">
-      <td><strong>${esc(typeName(eq.equipment_type_id))}</strong><div class="text-soft">${esc(eq.manufacturer || '')} ${esc(eq.model || '')}</div></td>
+      <td><strong>${esc(eq.inventory_pending ? eq.name : typeName(eq.equipment_type_id))}</strong><div class="text-soft">${esc(eq.manufacturer || '')} ${esc(eq.model || '')}</div></td>
       <td class="mono">${esc(eq.serial_number)}</td>
-      <td>${badge(EQUIPMENT_STATUS, eq.status)}</td>
+      <td>${eq.inventory_pending ? '<span class="badge badge-amber">Не заполнено</span>' : badge(EQUIPMENT_STATUS, eq.status)}</td>
       <td>${esc(readableClientName(client?.legal_name || client?.name, site?.name || eq.location))}<div class="text-soft">${esc(site?.name || eq.location || '—')}</div></td>
       </tr>`;
     }).join('') : '<tr class="empty-row"><td colspan="4">На этом объекте оборудования нет</td></tr>';
     cards.innerHTML = visibleItems.length ? visibleItems.map((eq) => {
       const site = siteOf(eq.site_id); const client = site ? clientOf(site.client_id) : null;
-      return `<button class="mobile-info-card equipment-card" data-id="${eq.id}"><div class="mobile-card-top"><span class="equipment-glyph">◌</span>${badge(EQUIPMENT_STATUS, eq.status)}</div><strong>${esc(typeName(eq.equipment_type_id))}</strong><span class="text-soft">${esc(eq.manufacturer || '')} ${esc(eq.model || '')}</span><div class="mobile-card-meta"><span class="mono">${esc(eq.serial_number)}</span><span>${esc(readableClientName(client?.legal_name || client?.name, site?.name || eq.location))} · ${esc(site?.name || eq.location || '—')}</span></div></button>`;
+      return `<button class="mobile-info-card equipment-card" data-id="${eq.id}"><div class="mobile-card-top"><span class="equipment-glyph">◌</span>${eq.inventory_pending ? '<span class="badge badge-amber">Не заполнено</span>' : badge(EQUIPMENT_STATUS, eq.status)}</div><strong>${esc(eq.inventory_pending ? eq.name : typeName(eq.equipment_type_id))}</strong><span class="text-soft">${esc(eq.manufacturer || '')} ${esc(eq.model || '')}</span><div class="mobile-card-meta"><span class="mono">${esc(eq.serial_number)}</span><span>${esc(readableClientName(client?.legal_name || client?.name, site?.name || eq.location))} · ${esc(site?.name || eq.location || '—')}</span></div></button>`;
     }).join('') : '<div class="mobile-empty">На этом объекте оборудования нет</div>';
 
     rows.querySelectorAll('tr[data-id]').forEach((tr) => {
@@ -1816,6 +1820,7 @@ function downloadBlob(blob, filename) {
 }
 
 async function openEquipmentManageModal(passport) {
+  if (['owner', 'admin'].includes(state.me.role)) return openEquipmentDetailsEditor(passport);
   const sites = state.sites.filter((site) => site.is_active);
   const options = sites.map((site) => {
     const client = state.clients.find((item) => item.id === site.client_id);
@@ -1858,6 +1863,7 @@ async function openCreateServiceRequestForEquipment(passport) {
 async function openEquipmentPassport(id) {
   try {
     const [passport, qrBlob] = await Promise.all([api(`/equipment/${id}/passport`), apiBlob(`/equipment/${id}/qr`)]);
+    if (passport.inventory_pending) return openEquipmentDetailsEditor(passport);
     const qrObjectUrl = URL.createObjectURL(qrBlob);
     const equipmentTypeName = (state.equipmentTypes.find((type) => type.id === passport.equipment_type_id) || {}).name || passport.name;
     const clientName = readableClientName(passport.client_name, passport.site_name);

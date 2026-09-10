@@ -26,7 +26,7 @@ async def get_public_equipment(qr_token: uuid.UUID, db: AsyncSession = Depends(g
     row = (
         await db.execute(
             select(Equipment, EquipmentType.name, Site.name, EquipmentAttachment)
-            .join(EquipmentType, Equipment.equipment_type_id == EquipmentType.id)
+            .outerjoin(EquipmentType, Equipment.equipment_type_id == EquipmentType.id)
             .join(Site, Site.id == Equipment.site_id)
             .outerjoin(EquipmentAttachment, EquipmentAttachment.equipment_id == Equipment.id)
             .where(Equipment.public_qr_token == qr_token)
@@ -36,7 +36,7 @@ async def get_public_equipment(qr_token: uuid.UUID, db: AsyncSession = Depends(g
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Оборудование не найдено")
     equipment, type_name, site_name, photo = row
     return PublicEquipmentOut(
-        name=type_name,
+        name=type_name or equipment.name, inventory_pending=equipment.inventory_pending,
         manufacturer=equipment.manufacturer,
         model=equipment.model,
         serial_number=equipment.serial_number,
@@ -67,6 +67,8 @@ async def create_guest_ticket(qr_token: uuid.UUID, payload: GuestTicketCreate, r
     )
     if not equipment:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Оборудование не найдено")
+    if equipment.inventory_pending:
+        raise HTTPException(409, 'Сначала заполните карточку оборудования')
     await lock_request_intake(db, equipment.organization_id)
     receipt = await db.get(GuestRequestReceipt, (equipment.organization_id, payload.idempotency_key))
     if receipt:

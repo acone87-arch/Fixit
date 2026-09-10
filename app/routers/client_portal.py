@@ -265,6 +265,8 @@ async def create_request(payload: ServiceRequestCreate, db: AsyncSession = Depen
     await db.refresh(equipment, with_for_update=True)
     # После ожидания lock повторно проверяем scope по свежему site_id.
     await ensure_client_equipment(equipment.id, user, db)
+    if equipment.inventory_pending:
+        raise HTTPException(409, 'Сначала заполните карточку оборудования')
     if equipment.status in {EquipmentStatus.working, EquipmentStatus.needs_repair}:
         equipment.status = EquipmentStatus.needs_repair
         equipment.version += 1
