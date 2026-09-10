@@ -76,6 +76,12 @@ async def tech_redirect():
     return RedirectResponse(url="/#requests", status_code=307)
 
 
+@app.get("/tech/sw.js", include_in_schema=False)
+async def legacy_tech_worker():
+    """Let installed legacy workers upgrade to the owner-safe shared queue."""
+    return FileResponse("app/static/offline/sw.js", media_type="application/javascript", headers={"Cache-Control": "no-cache"})
+
+
 @app.get("/tech/{legacy_path:path}", include_in_schema=False)
 async def legacy_tech_redirect(legacy_path: str):
     """The legacy shell stays in the repository for rollback only.

@@ -5,10 +5,19 @@ const http = require('node:http');
 const { chromium } = require('playwright');
 const engine = () => fs.readFileSync(process.env.FIXIT_QUEUE_ENGINE || 'app/static/offline/engine.js');
 const token = (sub = 'alice', org = 'org-a', exp = Math.floor(Date.now()/1000)+3600) => `e30.${Buffer.from(JSON.stringify({sub,org,exp})).toString('base64url')}.test`;
+let legacyCalls;
 const server = http.createServer((req,res) => {
+  if (legacyCalls && req.url.startsWith('/api/')) {
+    res.setHeader('Content-Type','application/json');
+    legacyCalls.push({url:req.url,auth:req.headers.authorization});
+    req.resume();
+    if(req.url.endsWith('/sync/repairs')) return res.end(JSON.stringify({results:[{local_uuid:'repair-1',server_id:'server-1',resolved_as:'applied'}]}));
+    res.statusCode=201;return res.end('{}');
+  }
   if(req.url.startsWith('/sw.js')) {res.statusCode=404;return res.end();}
   res.setHeader('Content-Type', req.url === '/' ? 'text/html; charset=utf-8' : 'text/javascript; charset=utf-8');
   if (req.url === '/') return res.end('<script src="/engine.js"></script>');
+  if (req.url === '/tech/sw.js') return res.end(fs.readFileSync('app/static/offline/sw.js'));
   if (req.url === '/worker.js') return res.end("importScripts('/engine.js');self.addEventListener('install',e=>e.waitUntil(self.skipWaiting()));self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));self.addEventListener('message',e=>e.waitUntil(FixitOffline.sync().then(()=>e.ports[0].postMessage('done'))));");
   res.end(engine());
 });
@@ -42,6 +51,35 @@ async function mock(page, {lost=false, attachmentStatus=201}={}) {
   },{lost,attachmentStatus});
 }
 const tests = {
+  async 'legacy worker sync tag upgrades safely across account switches'(page,context) {
+    await enqueue(page);
+    legacyCalls=[];
+    await page.evaluate(async()=>{
+      const reg=await navigator.serviceWorker.register('/tech/sw.js');
+      const worker=reg.installing || reg.waiting || reg.active;
+      if(worker.state!=='activated') await new Promise(resolve=>worker.addEventListener('statechange',()=>{if(worker.state==='activated')resolve();}));
+    });
+    const worker=context.serviceWorkers().find(w=>w.url().endsWith('/tech/sw.js'));
+    assert.ok(worker);
+    const sync=()=>worker.evaluate(async()=>{
+      let pending;
+      const event=new Event('sync');
+      Object.defineProperty(event,'tag',{value:'sync-repairs'});
+      event.waitUntil=p=>{pending=p;};
+      self.dispatchEvent(event);
+      if(!pending) throw new Error('Legacy sync tag was ignored');
+      await pending;
+    });
+    await page.evaluate(t=>FixitOffline.configure({token:t}),token('bob','org-b'));
+    await sync(); assert.equal(legacyCalls.length,0);
+    const ownerToken=token();
+    await page.evaluate(t=>FixitOffline.configure({token:t}),ownerToken);
+    await sync();
+    assert.deepEqual(legacyCalls.map(c=>c.url),['/api/v1/sync/repairs','/api/repairs/server-1/attachments']);
+    assert.ok(legacyCalls.every(c=>c.auth===`Bearer ${ownerToken}`));
+    legacyCalls=null;
+    assert.equal(await page.evaluate(async()=> (await FixitOffline.queueStatus()).fullySynced),true);
+  },
   async 'colliding legacy photo id never overwrites another repairs data'(page) {
     await page.evaluate(()=>FixitOffline.enqueueRepair({local_uuid:'first'},[{id:'same',file:new Blob(['original'])}]));
     await assert.rejects(()=>page.evaluate(()=>FixitOffline.enqueueRepair({local_uuid:'second'},[{id:'same',file:new Blob(['replacement'])}])));

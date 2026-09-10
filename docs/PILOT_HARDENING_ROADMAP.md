@@ -592,3 +592,11 @@ Verify: main по-прежнему `80ec53e84402b24c3a8bb263d150e7bf7a0dd865`; c
 - Финальный CI с подготовкой выкладки ожидается. Production пока не обновлён.
 
 - Дополнительный OFF-02 regression: повтор legacy attachment ID перезаписывал сохранённое фото другого ремонта. Отдельный Chromium case на `45b13c5` падает с `Missing expected rejection`; после проверки ID в той же IDB transaction сохраняется original photo и второй repair не записывается. Полный локальный queue suite: **15 passed**. Требуется финальный CI обновлённого кода.
+
+### 10.09.2026 — P0.5: первая выкладка и совместимость установленного legacy SW
+
+- SHA `026b25c63ad07e20814d3f5cfcfca7db0ff84f04`: CI [34404551137](https://github.com/acone87-arch/Fixit/actions/runs/34404551137) — **282 passed, 0 failed, 0 skipped**, 5 JS runtime-файлов и 15 настоящих Chromium IDB/SW cases. Промежуточный запуск `34404259589` отменён новым коммитом, успешным не считается.
+- Разрешённая пользователем выкладка P0.1–P0.5: [34436740922](https://github.com/acone87-arch/Fixit/actions/runs/34436740922), success. Сервер перешёл с `87e3044f30a40b6d0cff0306e71f9aee83aca329` на `026b25c63ad07e20814d3f5cfcfca7db0ff84f04`, Alembic `20260908_0014 (head)`, backup `/opt/fixit/backups/pilot-20260910T042022Z-026b25c63ad0`. Main/PR не сливались.
+- Заключительная проверка обнаружила, что wildcard retirement `/tech/*` также перенаправляет `/tech/sw.js` (подтверждено HTTP 307 на сервере). Старый установленный worker поэтому не мог получить owner-safe обновление. Regression TestClient до исправления: **1 failed** (307 вместо 200).
+- Добавлен только явный JS-маршрут обновления `/tech/sw.js`; старый интерфейс остаётся redirect-only. Bridge использует общий engine, принимает оба sync tag, активируется без удаления IndexedDB или старых caches. HTTP-проверка вместе с lifecycle regressions: **9 passed**.
+- Добавлен реальный Chromium/SW case для legacy tag: под другим аккаунтом нет запросов, после возврата владельца ровно один repair и одно photo с его токеном. Синтетический HTTP server принимает запросы worker вне scope страницы; первоначальная попытка перехвата таких запросов Playwright route дала ошибку JSON в тестовой среде, после перехода на HTTP fixture проверка проходит. Финальный CI и повторная выкладка исправления ожидаются.
