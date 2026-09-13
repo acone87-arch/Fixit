@@ -35,6 +35,7 @@ async def test_new_site_batch_pdf_mobile_scan_fill_retry_and_next(live, tmp_path
         try:
             await page.goto('http://127.0.0.1:8765/#equipment')
             await page.locator('#inventory-batches-btn').wait_for()
+            await expect(page.locator('#inventory-batches-btn')).to_have_text('Создать партию оборудования и QR')
             await page.evaluate('(client) => openCreateSiteModal(client)',str(f.client.id))
             await page.locator('#f-site-name').fill('Новый объект для инвентаризации')
             await page.locator('#modal-save').click()
@@ -94,7 +95,7 @@ async def test_admin_edits_all_card_details_without_changing_qr(live):
             await page.goto('http://127.0.0.1:8765/#equipment')
             await page.locator('#inventory-batches-btn').wait_for()
             await page.evaluate('(id)=>openEquipmentPassport(id)',row['id'])
-            await page.locator('#passport-more').click()
+            await expect(page.locator('#passport-manage')).to_have_text('Редактировать карточку')
             await page.locator('#passport-manage').click()
             await page.locator('#inventory-type').select_option('new')
             await page.locator('#inventory-new-type').fill('Подметальная машина')

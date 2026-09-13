@@ -1635,6 +1635,7 @@ async function renderEquipment(content) {
   const clientOf = (id) => state.clients.find((client) => client.id === id);
   const canEdit = state.me.role !== 'technician';
   const technicianFleet = state.me.role === 'technician';
+  const canManageInventory = ['owner', 'admin'].includes(state.me.role);
   const activeSites = state.sites.filter((site) => site.is_active);
 
   content.innerHTML = `
@@ -1649,10 +1650,13 @@ async function renderEquipment(content) {
             <button type="button" data-site-value="">Все объекты</button>${activeSites.map((site) => `<button type="button" data-site-value="${site.id}"><small>${esc(readableClientName(clientOf(site.client_id)?.legal_name || clientOf(site.client_id)?.name, site.name))}</small>${esc(site.name)}</button>`).join('')}
           </div>
         </div>
-        ${['owner','admin'].includes(state.me.role) ? '<button class="btn btn-secondary" id="inventory-batches-btn">Инвентаризация / QR</button>' : ''}
         ${canEdit ? '<button class="btn btn-primary" id="add-equipment-btn">+ Добавить оборудование</button>' : ''}
       </div>
     </div>
+    ${canManageInventory ? `<section class="inventory-entry-card" aria-label="Первичная инвентаризация оборудования">
+      <div><strong>Первичная инвентаризация</strong><span>Создайте сразу несколько пустых карточек и скачайте PDF с QR-кодами для печати.</span></div>
+      <button class="btn btn-primary" id="inventory-batches-btn">Создать партию оборудования и QR</button>
+    </section>` : ''}
     <div class="card mobile-table" style="padding:0">
       <table>
         <thead><tr><th>Тип оборудования</th><th>Серийный №</th><th>Статус</th><th>Клиент и объект</th></tr></thead>
@@ -1905,7 +1909,7 @@ async function openEquipmentPassport(id) {
     const backdrop = openModal('', `<section class="equipment-passport">
       <div class="passport-top">
         ${photoControl}
-        <div class="passport-summary"><header class="passport-hero"><div><span class="passport-eyebrow">${esc(equipmentTypeName)}</span><h2>${esc([passport.manufacturer, passport.model].filter(Boolean).join(' ') || passport.name)}</h2><div class="passport-status-row">${badge(EQUIPMENT_STATUS, passport.status)}<span class="mono">S/N ${esc(passport.serial_number)}</span>${passport.inventory_number ? `<span class="mono">Инв. № ${esc(passport.inventory_number)}</span>` : ''}</div></div><button type="button" class="passport-more" id="passport-more" aria-label="Дополнительные действия" aria-expanded="false">•••</button><div class="passport-more-menu hidden" id="passport-more-menu" role="menu"><button type="button" role="menuitem" id="passport-download-qr">Скачать QR</button>${isStaff ? '<button type="button" role="menuitem" id="passport-manage">Редактировать и переместить</button><button type="button" role="menuitem" class="passport-menu-danger" id="passport-archive">Архивировать</button>' : ''}</div></header>
+        <div class="passport-summary"><header class="passport-hero"><div><span class="passport-eyebrow">${esc(equipmentTypeName)}</span><h2>${esc([passport.manufacturer, passport.model].filter(Boolean).join(' ') || passport.name)}</h2><div class="passport-status-row">${badge(EQUIPMENT_STATUS, passport.status)}<span class="mono">S/N ${esc(passport.serial_number)}</span>${passport.inventory_number ? `<span class="mono">Инв. № ${esc(passport.inventory_number)}</span>` : ''}</div></div><button type="button" class="passport-more" id="passport-more" aria-label="Дополнительные действия" aria-expanded="false">•••</button><div class="passport-more-menu hidden" id="passport-more-menu" role="menu"><button type="button" role="menuitem" id="passport-download-qr">Скачать QR</button>${isStaff ? '<button type="button" role="menuitem" class="passport-menu-danger" id="passport-archive">Архивировать</button>' : ''}</div></header>
         <div class="passport-context"><div><small>Клиент</small><strong>${esc(clientName)}</strong></div><div><small>Объект</small><strong>${esc(passport.site_name || 'Не указан')}</strong>${passport.site_address ? `<span>${esc(passport.site_address)}</span>` : ''}</div></div>
         <div class="passport-overview-grid passport-top-data"><div class="passport-data"><span>Производитель</span><strong>${esc(passport.manufacturer || 'Не указан')}</strong></div><div class="passport-data"><span>Модель</span><strong>${esc(passport.model || passport.name)}</strong></div><div class="passport-data"><span>Расположение</span><strong>${esc(passport.location || passport.site_address || 'Не указано')}</strong></div></div>
         ${passport.active_request ? `<div class="passport-active-request passport-top-request"><div><span>Активная заявка SR-${String(passport.active_request.number).padStart(5, '0')}</span><strong>${esc(passport.active_request.title)}</strong><small>${esc(passport.active_request.assigned_technician_name || 'Мастер ещё не назначен')}</small></div>${requestBadge(passport.active_request)}</div>` : ''}</div>
@@ -1914,7 +1918,7 @@ async function openEquipmentPassport(id) {
       <section data-passport-panel="overview"><div class="passport-overview-grid"><div class="passport-data"><span>Серийный номер</span><strong class="mono">${esc(passport.serial_number)}</strong></div>${passport.inventory_number ? `<div class="passport-data"><span>Инвентарный номер</span><strong>${esc(passport.inventory_number)}</strong></div>` : ''}<div class="passport-data"><span>Текущий статус</span>${badge(EQUIPMENT_STATUS, passport.status)}</div></div>${passport.active_request ? '' : '<div class="passport-no-request">Активных заявок нет — оборудование готово к работе.</div>'}<div class="passport-qr"><img src="${qrObjectUrl}" data-object-url alt="QR-код оборудования"><div><span>QR оборудования</span><p>Используйте для быстрого открытия паспорта и обращения в сервис.</p><button class="btn btn-ghost btn-sm" id="passport-qr-download-inline">Скачать QR</button></div></div></section>
       <section class="hidden" data-passport-panel="history"><div class="equipment-history"><h3>История обслуживания</h3>${history}</div></section>
       <section class="hidden" data-passport-panel="documents"><div class="passport-documents">${documents}</div></section>
-    </section>`, `<span class="passport-footer-action">${primaryAction}</span><button class="btn btn-secondary" id="passport-close">Закрыть</button>`);
+    </section>`, `<span class="passport-footer-action">${primaryAction}</span>${isStaff ? '<button class="btn btn-primary" id="passport-manage">Редактировать карточку</button>' : ''}<button class="btn btn-secondary" id="passport-close">Закрыть</button>`);
     backdrop.querySelector('#passport-close').addEventListener('click', closeModal);
     if (passport.primary_photo) {
       apiBlob(`/equipment/${passport.id}/photo`).then((blob) => {
