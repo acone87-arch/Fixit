@@ -66,13 +66,23 @@ async def test_invalid_batch_quantity_has_no_side_effects(pg, quantity):
         assert await db.scalar(select(func.count()).select_from(EquipmentInventoryBatch)) == 0
 
 
-async def test_only_admin_can_batch_and_only_assigned_technician_can_complete(flow):
+async def test_only_admin_can_batch_and_site_manager_or_assigned_technician_can_complete(flow):
     f=flow
     payload, created, rows = await batch(f)
     row=rows[0]
     assert (await f.http.post('/api/equipment-inventory/batches', headers=auth(f.tech,f.org), json=payload)).status_code == 403
     assert (await f.http.get(created['pdf_url'], headers=auth(f.tech,f.org))).status_code == 403
-    assert (await f.http.post(f"/api/equipment-inventory/{row['id']}/complete", headers=f.manager_headers, json=details(f,row))).status_code == 403
+    manager_done = await f.http.post(f"/api/equipment-inventory/{row['id']}/complete",
+        headers=f.manager_headers, json=details(f,row))
+    assert manager_done.status_code == 200, manager_done.text
+    assert (await f.http.post(f"/api/equipment-inventory/{row['id']}/complete",
+        headers=f.manager_headers, json=details(f,row))).status_code == 200  # response loss retry
+    manager_change = {**details(f,row), 'model': 'Changed by manager'}
+    assert (await f.http.post(f"/api/equipment-inventory/{row['id']}/complete",
+        headers=f.manager_headers, json=manager_change)).status_code == 409
+    assert (await f.http.patch(f"/api/equipment/{row['id']}", headers=f.manager_headers,
+        json={'model':'Changed','expected_version':2})).status_code == 403
+    row=rows[1]
     assert (await complete(f,row,user=f.tech)).status_code == 403
     grant = await f.http.put(f'/api/clients/{f.client.id}/technicians', headers=auth(f.owner,f.org), json={'technician_ids':[str(f.tech.id)]})
     assert grant.status_code == 200
@@ -84,6 +94,8 @@ async def test_only_admin_can_batch_and_only_assigned_technician_can_complete(fl
     # Other client / other tenant and unknown batch must remain inaccessible.
     _, _, other = await batch(f, site_id=str(f.sites[2].id))
     assert (await complete(f,other[0],user=f.tech)).status_code == 403
+    assert (await f.http.post(f"/api/equipment-inventory/{other[0]['id']}/complete",
+        headers=f.manager_headers, json=details(f,other[0]))).status_code == 404
     assert (await f.http.post('/api/equipment-inventory/batches',headers=auth(f.owner,f.org),json={**payload,'idempotency_key':str(uuid.uuid4()),'site_id':str(f.sites[3].id)})).status_code == 404
     assert (await f.http.get('/api/equipment-inventory/batches/'+str(uuid.uuid4())+'/pdf',headers=auth(f.owner,f.org))).status_code == 404
 

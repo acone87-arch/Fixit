@@ -16,7 +16,8 @@ pytestmark = [pytest.mark.asyncio,pytest.mark.skipif(os.getenv('FIXIT_RUN_BROWSE
 async def signed_page(browser, f, user, mobile=False):
     context=await browser.new_context(viewport={'width':390,'height':844} if mobile else {'width':1280,'height':900},
         service_workers='block',is_mobile=mobile,has_touch=mobile)
-    token=auth(user,f.org)['Authorization'].removeprefix('Bearer ')
+    authorization = user['Authorization'] if isinstance(user, dict) else auth(user,f.org)['Authorization']
+    token=authorization.removeprefix('Bearer ')
     await context.add_init_script('localStorage.setItem("token", '+__import__('json').dumps(token)+');localStorage.setItem("fixit-install-dismissed","1");')
     return context, await context.new_page()
 
@@ -114,3 +115,28 @@ async def test_admin_edits_all_card_details_without_changing_qr(live):
                 assert saved.site_id==f.sites[1].id and saved.status.value=='mothballed'
         finally:
             await context.close(); await browser.close()
+
+
+async def test_site_manager_completes_pending_card_from_mobile_qr(live):
+    from playwright.async_api import async_playwright, expect
+    f=live
+    _,_,rows=await batch(f,1)
+    row=rows[0]
+    async with async_playwright() as p:
+        browser=await p.chromium.launch(executable_path=os.getenv('FIXIT_CHROMIUM_PATH') or None)
+        manager_context,page=await signed_page(browser,f,f.manager_headers,True)
+        try:
+            await page.goto(f"http://127.0.0.1:8765/e/{row['public_qr_token']}")
+            await expect(page.locator('#inventory-type')).to_be_visible()
+            await page.locator('#inventory-type').select_option(str(f.kind.id))
+            await page.locator('#inventory-serial').fill('SITE-MANAGER-INVENTORY')
+            await page.locator('#inventory-location').fill('Комната главного менеджера')
+            await page.locator('#inventory-save').click()
+            await expect(page.locator('#inventory-next')).to_be_visible()
+            async with f.sessions() as db:
+                saved=await db.get(Equipment,uuid.UUID(row['id']))
+                assert not saved.inventory_pending
+                assert saved.serial_number=='SITE-MANAGER-INVENTORY'
+                assert saved.public_qr_token==uuid.UUID(row['public_qr_token'])
+        finally:
+            await manager_context.close(); await browser.close()

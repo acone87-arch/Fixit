@@ -88,8 +88,8 @@ async def batch_pdf(batch_id: uuid.UUID, db: AsyncSession = Depends(get_db),
 @router.post('/{equipment_id}/complete', response_model=EquipmentOut)
 async def complete_inventory(equipment_id: uuid.UUID, payload: EquipmentInventoryComplete,
                              db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
-    if user.role not in {UserRole.owner, UserRole.admin, UserRole.technician}:
-        raise HTTPException(403, 'Заполнять карточку может администратор или назначенный техник')
+    if user.role not in {UserRole.owner, UserRole.admin, UserRole.technician, UserRole.client_site_user}:
+        raise HTTPException(403, 'Заполнять карточку может администратор, менеджер объекта или назначенный техник')
     equipment = await ensure_equipment_access(equipment_id, user, db)
     await db.refresh(equipment, with_for_update=True)
     await ensure_equipment_access(equipment_id, user, db)

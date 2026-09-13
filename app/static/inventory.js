@@ -61,8 +61,8 @@ async function openInventoryToken(token) {
 async function openEquipmentDetailsEditor(passport) {
   const pending = passport.inventory_pending;
   const admin = ['owner','admin'].includes(state.me.role);
-  if (!admin && !(pending && state.me.role === 'technician')) {
-    return openModal('Карточка ещё не заполнена', '<p>Первичную инвентаризацию выполняет администратор или назначенный клиенту техник.</p>', '<button class="btn btn-secondary" onclick="closeModal()">Закрыть</button>');
+  if (!admin && !(pending && ['technician','client_site_user'].includes(state.me.role))) {
+    return openModal('Карточка ещё не заполнена', '<p>Первичную инвентаризацию выполняет администратор, менеджер объекта или назначенный клиенту техник.</p>', '<button class="btn btn-secondary" onclick="closeModal()">Закрыть</button>');
   }
   await Promise.all([ensureEquipmentTypes(), ensureCustomers()]);
   const sites = state.sites.filter(site => site.is_active || site.id === passport.site_id);
