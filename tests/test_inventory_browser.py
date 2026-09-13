@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy import select
 
 from app.models.core import Equipment
-from test_onboarding_postgres import pg, auth
+from test_onboarding_postgres import pg, auth, invite, accept
 from test_onboarding_browser import live
 from test_inventory_postgres import batch, complete
 
@@ -120,11 +120,15 @@ async def test_admin_edits_all_card_details_without_changing_qr(live):
 async def test_site_manager_completes_pending_card_from_mobile_qr(live):
     from playwright.async_api import async_playwright, expect
     f=live
+    invitation=await invite(f)
+    accepted=await accept(f,invitation,email='inventory-qr-manager@example.com')
+    assert accepted.status_code==200,accepted.text
+    manager_headers={'Authorization':'Bearer '+accepted.json()['access_token']}
     _,_,rows=await batch(f,1)
     row=rows[0]
     async with async_playwright() as p:
         browser=await p.chromium.launch(executable_path=os.getenv('FIXIT_CHROMIUM_PATH') or None)
-        manager_context,page=await signed_page(browser,f,f.manager_headers,True)
+        manager_context,page=await signed_page(browser,f,manager_headers,True)
         try:
             await page.goto(f"http://127.0.0.1:8765/e/{row['public_qr_token']}")
             await expect(page.locator('#inventory-type')).to_be_visible()
