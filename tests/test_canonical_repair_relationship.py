@@ -138,7 +138,7 @@ class _SyncSession:
 
 def test_offline_sync_persists_canonical_link_and_retry_is_idempotent():
     organization_id, technician_id, equipment_id, request_id = [uuid.uuid4() for _ in range(4)]
-    equipment = SimpleNamespace(id=equipment_id, version=1, status=None)
+    equipment = SimpleNamespace(id=equipment_id, version=1, status=None, inventory_pending=False)
     item = request(
         id=request_id,
         organization_id=organization_id,

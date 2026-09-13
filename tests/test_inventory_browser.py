@@ -21,9 +21,12 @@ async def signed_page(browser, f, user, mobile=False):
     return context, await context.new_page()
 
 
-async def test_new_site_batch_pdf_mobile_scan_fill_retry_and_next(live, tmp_path):
+async def test_new_site_batch_pdf_mobile_scan_fill_retry_and_next(live, tmp_path, monkeypatch):
     from playwright.async_api import async_playwright, expect
     f=live
+    from app.routers import equipment as equipment_router
+    from test_technician_result_postgres import photo_bytes
+    monkeypatch.setattr(equipment_router, 'UPLOAD_ROOT', tmp_path/'uploads')
     await f.http.put(f'/api/clients/{f.client.id}/technicians',headers=auth(f.owner,f.org),json={'technician_ids':[str(f.tech.id)]})
     async with async_playwright() as p:
         browser=await p.chromium.launch(executable_path=os.getenv('FIXIT_CHROMIUM_PATH') or None)
@@ -50,10 +53,12 @@ async def test_new_site_batch_pdf_mobile_scan_fill_retry_and_next(live, tmp_path
             try:
                 await mobile.goto(f'http://127.0.0.1:8765/e/{rows[0].public_qr_token}')
                 await expect(mobile.locator('#inventory-type')).to_be_visible()
+                assert await mobile.evaluate('document.documentElement.scrollWidth <= document.documentElement.clientWidth')
                 await mobile.locator('#inventory-type').select_option(str(f.kind.id))
                 await mobile.locator('#inventory-maker').fill('Мобильный производитель')
                 await mobile.locator('#inventory-model').fill('Модель с телефона')
                 await mobile.locator('#inventory-serial').fill('MOBILE-INVENTORY')
+                await mobile.locator('#inventory-photo').set_input_files({'name':'machine.png','mimeType':'image/png','buffer':photo_bytes()})
                 await mobile.evaluate('''() => { const original=window.fetch;let lost=false;window.fetch=async (...args)=>{const response=await original(...args);if(String(args[0]).endsWith('/complete')&&!lost){lost=true;throw new Error('Lost response after commit');}return response;}; }''')
                 await mobile.locator('#inventory-save').click()
                 await expect(mobile.locator('#inventory-error')).to_contain_text('Lost response')
@@ -67,6 +72,8 @@ async def test_new_site_batch_pdf_mobile_scan_fill_retry_and_next(live, tmp_path
                     saved=await db.get(Equipment,rows[0].id)
                     assert not saved.inventory_pending and saved.public_qr_token==rows[0].public_qr_token
                     assert saved.serial_number=='MOBILE-INVENTORY'
+                passport=await f.http.get(f'/api/equipment/{rows[0].id}/passport',headers=auth(f.owner,f.org))
+                assert passport.json()['primary_photo'] is not None
             finally:
                 await tech_context.close()
         finally:
@@ -88,6 +95,8 @@ async def test_admin_edits_all_card_details_without_changing_qr(live):
             await page.evaluate('(id)=>openEquipmentPassport(id)',row['id'])
             await page.locator('#passport-more').click()
             await page.locator('#passport-manage').click()
+            await page.locator('#inventory-type').select_option('new')
+            await page.locator('#inventory-new-type').fill('Подметальная машина')
             await page.locator('#inventory-maker').fill('Изменённый производитель')
             await page.locator('#inventory-model').fill('Исправленная модель')
             await page.locator('#inventory-serial').fill('EDITED-SERIAL')
@@ -101,6 +110,7 @@ async def test_admin_edits_all_card_details_without_changing_qr(live):
                 assert saved.public_qr_token==uuid.UUID(row['public_qr_token'])
                 assert saved.manufacturer=='Изменённый производитель' and saved.model=='Исправленная модель'
                 assert saved.serial_number=='EDITED-SERIAL' and saved.location=='Второй этаж'
+                assert saved.equipment_type_id!=f.kind.id and saved.name=='Подметальная машина'
                 assert saved.site_id==f.sites[1].id and saved.status.value=='mothballed'
         finally:
             await context.close(); await browser.close()

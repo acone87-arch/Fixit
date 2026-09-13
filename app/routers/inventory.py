@@ -34,7 +34,10 @@ async def create_batch(payload: EquipmentBatchCreate, db: AsyncSession = Depends
         Site.organization_id == user.organization_id, Site.is_active.is_(True)).with_for_update())
     if not site:
         raise HTTPException(404, 'Активный объект не найден')
-    batch = await db.get(EquipmentInventoryBatch, payload.idempotency_key)
+    batch = await db.scalar(select(EquipmentInventoryBatch).where(
+        EquipmentInventoryBatch.id == payload.idempotency_key,
+        EquipmentInventoryBatch.organization_id == user.organization_id,
+    ))
     if batch:
         if (batch.organization_id, batch.site_id, batch.quantity) != (user.organization_id, site.id, payload.quantity):
             raise HTTPException(409, 'Ключ уже использован для другой партии')

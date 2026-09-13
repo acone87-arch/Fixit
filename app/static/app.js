@@ -1870,9 +1870,9 @@ async function openEquipmentPassport(id) {
     const isStaff = ['owner', 'admin', 'dispatcher'].includes(state.me.role);
     const isClient = state.me.role.startsWith('client_');
     // Keep these in lockstep with the existing API access checks.  Technicians can
-    // replace a photo, but only dispatchers and administrators can remove it.
+    // replace a photo, but only the service owner, administrators and dispatchers can remove it.
     const canUploadPhoto = ['owner', 'admin', 'dispatcher', 'technician', 'client_site_user'].includes(state.me.role);
-    const canDeletePhoto = ['admin', 'dispatcher'].includes(state.me.role);
+    const canDeletePhoto = ['owner', 'admin', 'dispatcher'].includes(state.me.role);
     const statusLabels = { new: 'Новая', assigned: 'Назначена', on_the_way: 'В пути', arrived: 'На объекте', in_progress: 'В работе', waiting_parts: 'Ждёт запчасти', waiting_approval: 'Ждёт согласования', completed: 'Выполнена', closed: 'Закрыта', cancelled: 'Отменена', legacy: 'Историческая запись' };
     const requestBadge = (request) => `<span class="badge badge-${['completed', 'closed'].includes(request.status) ? 'good' : request.status.startsWith('waiting') ? 'amber' : request.status === 'cancelled' ? 'idle' : 'warn'}"><span class="badge-dot"></span>${esc(statusLabels[request.status] || request.status)}</span>`;
     const normalizeHistoryText = (value) => String(value || '').toLocaleLowerCase('ru-RU').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
