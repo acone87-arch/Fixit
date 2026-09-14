@@ -8,9 +8,9 @@
 - Исходный документ: `Fixit_Audit_2026-09-07.md`, независимый аудит от 07.09.2026.
 - Audit SHA: `80ec53e84402b24c3a8bb263d150e7bf7a0dd865`.
 - Последняя сверенная main: `87e3044f30a40b6d0cff0306e71f9aee83aca329`.
-- Последняя сверка: 13.09.2026; GitHub Compare `identical`, ahead/behind `0/0`, новых commits `0`, изменённых файлов `0`.
+- Последняя сверка: 14.09.2026; GitHub Compare `identical`, ahead/behind `0/0`, новых commits `0`, изменённых файлов `0`.
 - P0.1 выполнен и проверен в PR [№3](https://github.com/acone87-arch/Fixit/pull/3); проверенный SHA кода: `cde3d81a79b7f29efd17f65bac0538914a75ca1c`. P0.1–P0.5 выложены совокупной release-веткой; main не изменена.
-- Текущий шаг: **QR-инвентаризация перед P0.6 завершена и проверена. Остановка перед P0.6.** Ветка `codex/qr-inventory`, draft [PR №8](https://github.com/acone87-arch/Fixit/pull/8), проверенный SHA кода `386d09a6d0c703a399c74fed0e2396a0c414b542`. P0.1–P0.5 остаются развёрнуты на production SHA `90d9421a03ddea2d6d30e65377b992a3d42ac4ed`; QR-инвентаризация на production не выкладывалась. Merge в main не выполнялся.
+- Текущий шаг: **P0.6 Warehouse integrity завершён и проверен. Остановка перед P0.7.** Ветка `codex/p0-6-warehouse-integrity`, draft [PR №9](https://github.com/acone87-arch/Fixit/pull/9), проверенный SHA кода `5e97b75d64a84f85a5e3e2209b6d09cd1163da86`. P0.1–P0.5 и QR-инвентаризация развёрнуты на production SHA `15964ce4daea3deaebf2bdb9ede69bfb49144ebe`; P0.6 на production не выкладывался. Merge в main не выполнялся.
 - **FIXIT PILOT READY не подтверждён.**
 
 ### Как читать доказательства
@@ -57,7 +57,7 @@
 | P0.4 Technician result | 🟢 выполнено и проверено | 276 passed; 6 новых PG cases, 4 Chromium cases; полный результат, акт, история и ACL подтверждены в PR №6 |
 | P0.5 Durable offline queue | 🟢 выполнено и проверено | 283 Python/PG/browser без пропусков, 5 JS runtime-файлов и 16 Chromium IDB/SW cases; PR №7, код `90d9421` |
 | P0.5a QR inventory | 🟢 выполнено и проверено | 293 Python/PG/browser без пропусков, 5 JS runtime-файлов и 16 Chromium IDB/SW cases; PR №8, код `386d09a` |
-| P0.6 Warehouse integrity | 🔴 blocker | Отрицательное количество, mobile warehouse, связь движения с Repair |
+| P0.6 Warehouse integrity | 🟢 выполнено и проверено | 303 Python/PG/browser без пропусков; 9 новых PG/migration cases, 5 JS runtime и 16 Chromium IDB/SW; PR №9, код `5e97b75` |
 | P0.7 Production acceptance | ⬜ не начато | PG/browser E2E, HTTPS upload, backup restore и rollback предстоит доказать |
 
 ## P0.1 — Onboarding
@@ -198,23 +198,23 @@ DoD подтверждён на PostgreSQL 16 и Chromium в Actions. 18 PG-сц
 
 ## P0.6 — Warehouse integrity
 
-**Статус: 🔴 blocker. Исполнение не начато.**
+**Статус: 🟢 выполнено и проверено.**
 
 **Definition of Done:** использованная деталь корректно уменьшает остаток, движение связано с Repair; повтор запроса, ошибка и конкурирующий расход не портят склад. Новый техник получает постоянный мобильный склад и может пройти приёмку/перемещение/списание.
 
 | ID | Статус | Задача и актуальное основание |
 |---|---|---|
-| WH-01 | 🔴 blocker | quantity>0 в схемах и сервисах receive/transfer/consumption; аудит воспроизвёл увеличение 10→15 при расходе -5 |
-| WH-02 | 🔴 blocker | Persistent mobile warehouse: GET /mine/stock создаёт через flush без commit |
-| WH-03 | 🔴 blocker | StockMovement → Repair: sync списывает с repair_id=None, связь потом не заполняется |
-| WH-04 | ⬜ не начато | Два списания последней детали, missing-row race, порядок блокировок, rollback всего ремонта |
-| WH-05 | 🔴 blocker | Retry/idempotency receive/transfer; повтор POST сейчас создаёт новое движение |
+| WH-01 | 🟢 выполнено и проверено | Receive/transfer отклоняют quantity≤0 схемой; offline consumption возвращает per-item failure без изменения остатка. Сервисы и БД дополнительно запрещают неположительные движения/RepairPart |
+| WH-02 | 🟢 выполнено и проверено | GET `/mine/stock` фиксирует автоматически созданный склад; частичный уникальный индекс и literal ON CONFLICT гарантируют один постоянный mobile warehouse при конкурентных запросах |
+| WH-03 | 🟢 выполнено и проверено | Repair создаётся до списания; writeoff StockMovement получает реальный `repair_id`. Полный receipt→transfer→repair ledger проверен на PostgreSQL |
+| WH-04 | 🟢 выполнено и проверено | Стабильный порядок warehouse locks закрывает существующую и отсутствующую stock row; два ремонта не расходуют одну последнюю деталь, а ошибка второй детали откатывает Repair, обе детали и ledger |
+| WH-05 | 🟢 выполнено и проверено | Клиент сохраняет UUID операции до подтверждения; одинаковый receipt/transfer retry возвращает прежнее движение, иной payload с тем же ключом получает 409. Legacy payload без ключа поддержан |
 
 **Код:** `app/schemas/warehouse.py`, `repair.py`, `app/services/stock_service.py`, `sync_service.py`, `app/core/deps.py`, `app/routers/warehouses.py`, warehouse UI.
 
 **Доказательства:** PG receive→transfer→repair; negative/zero; недостаток; новый техник; concurrent consumption; отказ второй детали откатывает первую и Repair; повтор после потери ответа; проверка ledger repair_id. Существующие row locks и CHECK stock>=0 сохранять.
 
-**Миграция:** возможны positive-quantity/owner uniqueness constraints и ключи идемпотентности; сначала проверить старые данные. **Риск:** средний/высокий — складская целостность. ERP/закупочную систему не строить.
+**Миграция:** `20260914_0016` перед изменением схемы проверяет старые неположительные movements/RepairPart и дубликаты mobile owner; при проблеме останавливается без исправления истории. Затем добавляет positive-quantity CHECK и частичный уникальный индекс mobile warehouse. Downgrade снимает только новые ограничения. Идемпотентность использует UUID самого StockMovement, поэтому отдельная таблица/колонка не нужна. **Риск:** средний/высокий — перед production нужна отдельная разрешённая выкладка с backup и preflight.
 
 ## P0.7 — Production acceptance
 
@@ -656,3 +656,13 @@ Verify: main по-прежнему `80ec53e84402b24c3a8bb263d150e7bf7a0dd865`; c
 - Локальный доступный suite: 166 passed, 127 skipped — пропуски относятся к отсутствующим локально PostgreSQL/Linux/browser условиям и не используются как приёмка. Точечный legacy regression: 13 passed; durable queue: 16 passed.
 - PDF QA: A4, 595×842 pt, 2 страницы для 9 QR, 9 URI annotations. Обе страницы отрендерены Poppler и просмотрены в исходном разрешении: кириллица, номера, рамки и QR не обрезаны.
 - Main повторно сверена с `87e3044f30a40b6d0cff0306e71f9aee83aca329`: identical 0/0. PR №8 остаётся draft; merge и deployment не выполнялись. P0.6/P0.7 не начинались.
+
+### 14.09.2026 — P0.6 Warehouse integrity: итоговая приёмка
+
+- База этапа — развёрнутый cumulative QR SHA `15964ce4daea3deaebf2bdb9ede69bfb49144ebe`; main повторно сверена с `87e3044f30a40b6d0cff0306e71f9aee83aca329`, изменений нет. Работа выполнена в `codex/p0-6-warehouse-integrity`, draft [PR №9](https://github.com/acone87-arch/Fixit/pull/9).
+- Исправлены все WH-01–WH-05: положительное количество защищено схемами, сервисами и CHECK; новый техник получает один постоянный mobile warehouse; writeoff ledger создаётся с `repair_id`; warehouse/stock блокировки имеют стабильный порядок и защищают missing-row race; receipt/transfer получили совместимую UUID-идемпотентность и устойчивый retry в интерфейсе.
+- Offline/legacy контракт сохранён: невалидное количество детали возвращает `resolved_as=failed` внутри HTTP 200 и откатывает savepoint всего ремонта; старые receipt/transfer без idempotency key продолжают работать с серверным UUID. Старые очереди, origin, payload Task/Ticket и существующие складские записи не удаляются и не переписываются.
+- Миграция `20260914_0016` сначала останавливает upgrade при неположительной истории или дубликатах mobile owner, не исправляя данные автоматически; чистый upgrade/downgrade/upgrade и отказ на legacy-дубликатах проверены на PostgreSQL 16.
+- Первичный [CI 34807744615](https://github.com/acone87-arch/Fixit/actions/runs/34807744615) выявил параметризованный partial-index predicate и нарушение per-item offline validation; повторный [CI 34824696178](https://github.com/acone87-arch/Fixit/actions/runs/34824696178) выявил обращение к истёкшему ORM user после rollback конкурентного повтора. Оба дефекта исправлены, regression tests сохранены.
+- Проверенный код `5e97b75d64a84f85a5e3e2209b6d09cd1163da86`, [CI 34825475897](https://github.com/acone87-arch/Fixit/actions/runs/34825475897): **303 passed, 0 failed, 0 skipped**, 978 предупреждений зависимостей, 293.87 s. Включены 9 новых P0.6 PostgreSQL/migration cases; дополнительно прошли все **5 JS runtime-файлов** и **16 настоящих Chromium IDB/SW cases**. Локально доступный набор: 166 passed, 137 skipped; локальные пропуски PostgreSQL/browser не используются как приёмка.
+- P0.6 не сливался в main и не развёртывался. Production остаётся на `15964ce4daea3deaebf2bdb9ede69bfb49144ebe`. Перед production миграции 0016 нужны отдельное разрешение, backup и проверка preflight. **Остановка после P0.6; P0.7 не начинать без отдельной команды. FIXIT PILOT READY целиком ещё не объявляется.**
