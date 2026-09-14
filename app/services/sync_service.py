@@ -88,6 +88,8 @@ async def sync_one_repair(db: AsyncSession, technician_id: uuid.UUID, organizati
 
     result: SyncItemResult | None = None
     try:
+        if any(item.quantity <= 0 for item in payload.parts_used):
+            raise _SyncFailure("Количество запчастей должно быть больше нуля")
         # Каждый элемент пакета — в своей savepoint-транзакции. Если по одной
         # записи не хватило запчастей, исключение откатывает ТОЛЬКО эту
         # savepoint (включая уже применённые внутри неё частичные списания),
@@ -178,8 +180,6 @@ async def sync_one_repair(db: AsyncSession, technician_id: uuid.UUID, organizati
                 part = await db.scalar(select(Part.id).where(Part.id == item.part_id, Part.organization_id == organization_id))
                 if not part:
                     raise _SyncFailure("Запчасть не найдена в организации")
-                if item.quantity <= 0:
-                    raise _SyncFailure("Количество запчастей должно быть больше нуля")
 
             conflict = equipment.version != payload.base_equipment_version
             repair = Repair(

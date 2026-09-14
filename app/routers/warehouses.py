@@ -128,28 +128,32 @@ async def receive_movement(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_roles(UserRole.admin, UserRole.dispatcher)),
 ):
+    organization_id = user.organization_id
+    actor_id = user.id
     if payload.type != StockMovementType.receipt or not payload.to_warehouse_id or payload.from_warehouse_id:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Некорректный тип операции")
-    existing = await _movement_retry(db, payload, user.organization_id)
+    existing = await _movement_retry(db, payload, organization_id)
     if existing:
         return _movement_result(existing, True)
     warehouse_ok = await db.scalar(select(Warehouse.id).where(
-        Warehouse.id == payload.to_warehouse_id, Warehouse.organization_id == user.organization_id
+        Warehouse.id == payload.to_warehouse_id, Warehouse.organization_id == organization_id
     ))
     part_ok = await db.scalar(select(Part.id).where(
-        Part.id == payload.part_id, Part.organization_id == user.organization_id
+        Part.id == payload.part_id, Part.organization_id == organization_id
     ))
     if not warehouse_ok or not part_ok:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Склад или запчасть не найдены в организации")
     movement_id = payload.idempotency_key or uuid.uuid4()
     try:
         movement = await receive_stock(
-            db, payload.to_warehouse_id, payload.part_id, payload.quantity, user.id,
-            user.organization_id, movement_id=movement_id,
+            db, payload.to_warehouse_id, payload.part_id, payload.quantity, actor_id,
+            organization_id, movement_id=movement_id,
         )
     except IntegrityError as exc:
         await db.rollback()
-        existing = await _movement_retry(db, payload, user.organization_id)
+        # rollback expires ORM dependencies; use UUID values captured before
+        # the transaction instead of touching ``user`` on this recovery path.
+        existing = await _movement_retry(db, payload, organization_id)
         if existing:
             return _movement_result(existing, True)
         raise HTTPException(status.HTTP_409_CONFLICT, "Операция склада конфликтует с другой записью") from exc
@@ -163,24 +167,26 @@ async def transfer_movement(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_roles(UserRole.admin, UserRole.dispatcher)),
 ):
+    organization_id = user.organization_id
+    actor_id = user.id
     if payload.type != StockMovementType.transfer or not payload.from_warehouse_id or not payload.to_warehouse_id:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Некорректный тип операции")
-    existing = await _movement_retry(db, payload, user.organization_id)
+    existing = await _movement_retry(db, payload, organization_id)
     if existing:
         return _movement_result(existing, True)
     warehouse_count = len((await db.scalars(select(Warehouse.id).where(
         Warehouse.id.in_([payload.from_warehouse_id, payload.to_warehouse_id]),
-        Warehouse.organization_id == user.organization_id,
+        Warehouse.organization_id == organization_id,
     ))).all())
     part_ok = await db.scalar(select(Part.id).where(
-        Part.id == payload.part_id, Part.organization_id == user.organization_id
+        Part.id == payload.part_id, Part.organization_id == organization_id
     ))
     if warehouse_count != 2 or not part_ok:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Склад или запчасть не найдены в организации")
     try:
         movement = await transfer_stock(
             db, payload.from_warehouse_id, payload.to_warehouse_id, payload.part_id, payload.quantity,
-            user.id, user.organization_id, movement_id=payload.idempotency_key or uuid.uuid4(),
+            actor_id, organization_id, movement_id=payload.idempotency_key or uuid.uuid4(),
         )
     except InsufficientStockError as exc:
         raise HTTPException(
@@ -189,7 +195,7 @@ async def transfer_movement(
         ) from exc
     except IntegrityError as exc:
         await db.rollback()
-        existing = await _movement_retry(db, payload, user.organization_id)
+        existing = await _movement_retry(db, payload, organization_id)
         if existing:
             return _movement_result(existing, True)
         raise HTTPException(status.HTTP_409_CONFLICT, "Операция склада конфликтует с другой записью") from exc
