@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -121,7 +121,10 @@ async def get_technician_mobile_warehouse_id(
             )
             .on_conflict_do_nothing(
                 index_elements=[Warehouse.organization_id, Warehouse.owner_user_id],
-                index_where=(Warehouse.type == WarehouseType.mobile),
+                # Keep the predicate literal and identical to the partial
+                # unique index. PostgreSQL cannot infer that index from a
+                # parameterized ``type = $1`` ON CONFLICT predicate.
+                index_where=text("type = 'mobile' AND owner_user_id IS NOT NULL"),
             )
             .returning(Warehouse.id)
         )

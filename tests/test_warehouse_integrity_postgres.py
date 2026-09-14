@@ -166,7 +166,10 @@ async def test_non_positive_quantities_are_rejected_without_stock_changes(flow, 
             )],
         },
     )
-    assert bad_repair.status_code == 422
+    assert bad_repair.status_code == 200, bad_repair.text
+    result = bad_repair.json()["results"][0]
+    assert result["resolved_as"] == "failed"
+    assert "больше нуля" in result["error"]
     async with flow.sessions() as db:
         assert (await db.get(WarehouseStock, (mobile.id, part.id))).quantity == 4
         assert await db.scalar(select(func.count()).select_from(StockMovement)) == 0

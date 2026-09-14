@@ -1,14 +1,17 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 from app.models.repair import SyncStatus
 
 
 class RepairPartInput(BaseModel):
     part_id: uuid.UUID
-    quantity: int = Field(gt=0)
+    # Offline batches keep their per-item result contract: invalid quantities
+    # are rejected by sync_one_repair and returned as resolved_as="failed"
+    # without turning the whole HTTP batch into a 422 response.
+    quantity: int
 
 
 class RepairCreate(BaseModel):
