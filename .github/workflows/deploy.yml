@@ -15,37 +15,71 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: pilot
+          POSTGRES_PASSWORD: pilot-ci-only
+          POSTGRES_DB: fixit_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U pilot -d fixit_test"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      PYTHONPATH: .
+      DATABASE_URL: postgresql+asyncpg://pilot:pilot-ci-only@127.0.0.1:5432/fixit_test
+      FIXIT_TEST_DATABASE_URL: postgresql+asyncpg://pilot:pilot-ci-only@127.0.0.1:5432/fixit_test
+      FIXIT_RUN_BROWSER: '1'
+      SECRET_KEY: isolated-release-ci-secret
+      PUBLIC_APP_URL: http://127.0.0.1:8765
+      ALLOWED_HOSTS: testserver,localhost,127.0.0.1
+      ALLOWED_ORIGINS: http://127.0.0.1:8765
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
       - name: Install test dependencies
         run: |
-          pip install -r requirements.txt -r requirements-dev.txt
+          pip install -r requirements-dev.txt playwright==1.55.0
+          python -m playwright install --with-deps chromium
           npm ci --prefix tests --ignore-scripts
-      - name: Run Python regression tests
-        env:
-          PYTHONPATH: .
-          DATABASE_URL: postgresql+asyncpg://fsm:fsm@localhost:5432/fsm
-          SECRET_KEY: ci-test-secret
-          PUBLIC_APP_URL: http://localhost:8000
-          ALLOWED_ORIGINS: http://localhost:8000
-          ALLOWED_HOSTS: testserver,localhost,127.0.0.1
-        run: pytest -q
-      - name: Run offline runtime tests
+          npx --prefix tests playwright install --with-deps chromium
+      - name: Run Python, PostgreSQL and browser acceptance
+        run: pytest -q --junitxml=test-results/release.xml
+      - name: Run JS runtime acceptance
         run: |
+          node tests/onboarding_equipment_runtime_test.js
           node tests/pulse_offline_engine_runtime_test.js
           node tests/technician_workflow_runtime_test.js
           node tests/offline_attachment_sync_runtime_test.js
-          node tests/onboarding_equipment_runtime_test.js
+          node tests/guest_photo_upload_runtime_test.js
+      - name: Run real IndexedDB and service worker acceptance
+        run: node tests/durable_queue_browser_test.js
+      - name: Restore a real PostgreSQL and media backup in isolation
+        run: bash scripts/ci_backup_restore_drill.sh
+      - name: Save release acceptance results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-acceptance-${{ github.sha }}
+          path: test-results/
+          retention-days: 14
 
   deploy:
     needs: test
     runs-on: ubuntu-latest
     environment: production
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - name: Validate deployment secrets
         env:
@@ -171,3 +205,12 @@ jobs:
           curl -fsS --noproxy '*' --connect-timeout 10 --max-time 20 \
             --resolve fixitpulse.ru:443:127.0.0.1 https://fixitpulse.ru/health >/dev/null
           REMOTE
+      - name: Verify HTTPS multipart limits
+        run: |
+          truncate -s 2M /tmp/fixit-accepted-upload.bin
+          truncate -s 10M /tmp/fixit-rejected-upload.bin
+          endpoint="https://fixitpulse.ru/api/public/equipment/00000000-0000-0000-0000-000000000001/requests/00000000-0000-0000-0000-000000000002/attachments"
+          accepted_status=$(curl -sS -o /dev/null -w '%{http_code}' -F file=@/tmp/fixit-accepted-upload.bin "$endpoint")
+          rejected_status=$(curl -sS -o /dev/null -w '%{http_code}' -F file=@/tmp/fixit-rejected-upload.bin "$endpoint")
+          test "$accepted_status" = 404
+          test "$rejected_status" = 413

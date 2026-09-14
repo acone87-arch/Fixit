@@ -1,10 +1,16 @@
-from fastapi import FastAPI
+from pathlib import Path
+import uuid
+
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.config import settings
+from app.database import get_db
 from app.routers import inventory
 from app.routers import auth, client_portal, customers, equipment, invites, organizations, push, repairs, service_requests, sync, tasks, tickets, users, warehouses
 
@@ -45,7 +51,20 @@ app.include_router(push.router)
 
 
 @app.get("/health", tags=["meta"])
-async def health():
+async def health(db: AsyncSession = Depends(get_db)):
+    """Report readiness only when both durable dependencies are usable."""
+    try:
+        await db.execute(text("SELECT 1"))
+        upload_root = Path("uploads")
+        if not upload_root.is_dir():
+            raise RuntimeError("uploads directory is unavailable")
+        probe = upload_root / f".health-{uuid.uuid4().hex}"
+        try:
+            probe.write_bytes(b"")
+        finally:
+            probe.unlink(missing_ok=True)
+    except Exception:
+        return JSONResponse({"status": "unavailable"}, status_code=503)
     return {"status": "ok"}
 
 

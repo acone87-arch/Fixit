@@ -26,6 +26,11 @@ if name=='docker':
     if 'ps' in args: print('old-container')
     if 'pg_dump' in args: print('synthetic dump')
     if 'pg_restore' in args: print('synthetic archive list')
+    if 'psql' in args and '-Atc' in args:
+        query=args[args.index('-Atc')+1]
+        if 'information_schema.tables' in query: print('alembic_version')
+        elif 'count(*)' in query: print('1')
+        elif 'version_num' in query: print('20260914_0016')
     if args[0]=='run':
         with tarfile.open(fileobj=sys.stdout.buffer,mode='w|gz') as archive:
             item=tarfile.TarInfo('uploads/photo.jpg');item.size=5;archive.addfile(item,io.BytesIO(b'photo'))
@@ -36,6 +41,9 @@ if name=='curl' and os.environ['FAILURE']=='health': sys.exit(7)
         path = commands / name; path.write_text(harness); path.chmod(0o755)
     previous = '1' * 40; release = '2' * 40
     (tmp_path / 'head').write_text(previous)
+    (repo / 'scripts').mkdir()
+    (repo / 'scripts' / 'verify_pilot_backup.sh').write_text(
+        Path('scripts/verify_pilot_backup.sh').read_text())
     source = Path('scripts/deploy_pilot_release.sh').read_text().replace('/opt/fixit', str(repo))
     script = tmp_path / 'release.sh'; script.write_text(source)
     env = {**os.environ, 'PATH': str(commands) + os.pathsep + os.environ['PATH'], 'HARNESS_ROOT': str(tmp_path), 'FAILURE': failure}

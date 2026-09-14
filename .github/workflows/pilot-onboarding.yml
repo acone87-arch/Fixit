@@ -64,6 +64,8 @@ jobs:
           node tests/guest_photo_upload_runtime_test.js
       - name: Durable queue — настоящий IndexedDB и SW
         run: node tests/durable_queue_browser_test.js
+      - name: Backup restore — настоящий PostgreSQL и media archive
+        run: bash scripts/ci_backup_restore_drill.sh
       - name: Сохранить результаты приёмки
         if: always()
         uses: actions/upload-artifact@v4

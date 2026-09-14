@@ -46,7 +46,20 @@ docker run --rm --volumes-from "$old_container:ro" --entrypoint tar "$old_image"
 test -s "$backup/database.dump" && test -s "$backup/uploads.tar.gz"
 "${compose[@]}" exec -T db pg_restore --list < "$backup/database.dump" > "$backup/database.list"
 tar -tzf "$backup/uploads.tar.gz" > "$backup/uploads.list"
-sha256sum "$backup/database.dump" "$backup/uploads.tar.gz" > "$backup/SHA256SUMS"
+"${compose[@]}" exec -T db psql -U fsm -d fsm -Atc \
+  "SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE' ORDER BY table_name" \
+  | while IFS= read -r table; do
+      count=$("${compose[@]}" exec -T db psql -U fsm -d fsm -Atc \
+        "SELECT count(*) FROM \"$table\"")
+      printf '%s|%s\n' "$table" "$count"
+    done > "$backup/database.counts"
+media_manifest_root=$(mktemp -d)
+tar -xzf "$backup/uploads.tar.gz" -C "$media_manifest_root"
+(cd "$media_manifest_root" && find uploads -type f -print0 | sort -z | xargs -0 -r sha256sum) \
+  > "$backup/uploads.sha256"
+rm -rf "$media_manifest_root"
+(cd "$backup" && sha256sum database.dump uploads.tar.gz > SHA256SUMS)
+bash scripts/verify_pilot_backup.sh "$backup"
 "${compose[@]}" run --rm -T api alembic upgrade head </dev/null
 "${compose[@]}" up -d --no-deps --no-build --force-recreate api
 healthy=false

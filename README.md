@@ -95,10 +95,13 @@ alembic upgrade head
 ## Автодеплой на VPS
 
 Workflow `.github/workflows/deploy.yml` запускается после каждого push в
-`main` (или вручную через **Actions → Deploy to VPS → Run workflow**). Он
-подключается к серверу по SSH, обновляет `/opt/fixit`, собирает новый образ,
-применяет `alembic upgrade head`, затем обновляет контейнеры и ждёт успешного
-ответа `/health`. Если миграция не прошла, работающий API не перезапускается.
+`main`, после fast-forward pilot release-ветки или вручную через
+**Actions → Deploy to VPS → Run workflow**. Он повторяет полный
+PostgreSQL/Chromium/JS gate для точного `github.sha`, подключается к серверу по
+SSH, создаёт и восстанавливает в изоляции DB+media backup, собирает новый
+образ, применяет `alembic upgrade head`, затем обновляет API и проверяет
+readiness, TLS и multipart limits. Порядок выпуска и восстановления описан в
+[`docs/PRODUCTION_RUNBOOK.md`](docs/PRODUCTION_RUNBOOK.md).
 
 В GitHub Environment `production` должны быть настроены Secrets:
 
@@ -109,8 +112,9 @@ Workflow `.github/workflows/deploy.yml` запускается после каж
 
 Файл `/opt/fixit/.env` хранится только на сервере и при деплое не
 перезаписывается. Данные PostgreSQL остаются в Docker volume
-`postgres_data`. При ошибке health-check workflow завершается с ошибкой и
-выводит последние 100 строк лога API.
+`postgres_data`. При ошибке backup restore, миграции или readiness release
+script возвращает предыдущий checkout и API image без Alembic downgrade и без
+удаления PostgreSQL/media volumes.
 
 ## Веб-панель администратора
 

@@ -1,4 +1,5 @@
 import asyncio
+import os
 from logging.config import fileConfig
 
 from alembic import context
@@ -14,17 +15,27 @@ config.set_main_option("sqlalchemy.url", settings.database_url)
 if config.config_file_name:
     fileConfig(config.config_file_name)
 target_metadata = Base.metadata
+migration_schema = os.getenv("FIXIT_MIGRATION_SCHEMA")
+
+
+def migration_options():
+    return {"version_table_schema": migration_schema} if migration_schema else {}
 
 
 def run_migrations_offline():
     context.configure(url=settings.database_url, target_metadata=target_metadata,
-                      literal_binds=True, dialect_opts={"paramstyle": "named"})
+                      literal_binds=True, dialect_opts={"paramstyle": "named"},
+                      **migration_options())
     with context.begin_transaction():
         context.run_migrations()
 
 
 def do_run_migrations(connection):
-    context.configure(connection=connection, target_metadata=target_metadata, compare_type=True)
+    if migration_schema:
+        escaped = migration_schema.replace('"', '""')
+        connection.exec_driver_sql(f'SET search_path TO "{escaped}"')
+    context.configure(connection=connection, target_metadata=target_metadata, compare_type=True,
+                      **migration_options())
     with context.begin_transaction():
         context.run_migrations()
 
