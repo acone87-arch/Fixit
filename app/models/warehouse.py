@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, Enum, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import CheckConstraint, Enum, ForeignKey, Index, Integer, String, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -23,6 +23,15 @@ class StockMovementType(str, enum.Enum):
 
 class Warehouse(Base):
     __tablename__ = "warehouses"
+    __table_args__ = (
+        Index(
+            "uq_warehouse_org_mobile_owner",
+            "organization_id",
+            "owner_user_id",
+            unique=True,
+            postgresql_where=text("type = 'mobile' AND owner_user_id IS NOT NULL"),
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id"), index=True)
@@ -64,6 +73,9 @@ class WarehouseStock(Base):
 
 class StockMovement(Base):
     __tablename__ = "stock_movements"
+    __table_args__ = (
+        CheckConstraint("quantity > 0", name="ck_stock_movement_quantity_positive"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id"), index=True)

@@ -1,14 +1,14 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.repair import SyncStatus
 
 
 class RepairPartInput(BaseModel):
     part_id: uuid.UUID
-    quantity: int
+    quantity: int = Field(gt=0)
 
 
 class RepairCreate(BaseModel):

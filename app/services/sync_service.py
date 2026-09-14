@@ -179,29 +179,7 @@ async def sync_one_repair(db: AsyncSession, technician_id: uuid.UUID, organizati
                 if not part:
                     raise _SyncFailure("Запчасть не найдена в организации")
 
-            # Для акта без запчастей склад вообще не нужен. Раньше именно это
-            # лишнее требование не давало технику закрыть выполненный ремонт.
-            if payload.parts_used:
-                mobile_warehouse_id = await get_technician_mobile_warehouse_id(db, technician_id, organization_id)
-                for item in payload.parts_used:
-                    try:
-                        await decrement_stock(
-                            db,
-                            warehouse_id=mobile_warehouse_id,
-                            part_id=item.part_id,
-                            quantity=item.quantity,
-                            repair_id=None,
-                            created_by=technician_id,
-                            organization_id=organization_id,
-                        )
-                    except InsufficientStockError as exc:
-                        raise _SyncFailure(
-                            f"Недостаточно запчастей на складе: доступно {exc.available}, "
-                            f"требуется {exc.requested}"
-                        ) from exc
-
             conflict = equipment.version != payload.base_equipment_version
-
             repair = Repair(
                 organization_id=organization_id,
                 id=uuid.uuid4(),
@@ -222,7 +200,30 @@ async def sync_one_repair(db: AsyncSession, technician_id: uuid.UUID, organizati
                 device_updated_at=payload.device_updated_at,
             )
             db.add(repair)
-            await db.flush()  # получаем repair.id для repair_parts и sync_operations
+            # StockMovement has a real FK to Repair. Flushing the repair first
+            # keeps every ledger row attributable even inside the same savepoint.
+            await db.flush()
+
+            # Для акта без запчастей склад вообще не нужен. Раньше именно это
+            # лишнее требование не давало технику закрыть выполненный ремонт.
+            if payload.parts_used:
+                mobile_warehouse_id = await get_technician_mobile_warehouse_id(db, technician_id, organization_id)
+                for item in payload.parts_used:
+                    try:
+                        await decrement_stock(
+                            db,
+                            warehouse_id=mobile_warehouse_id,
+                            part_id=item.part_id,
+                            quantity=item.quantity,
+                            repair_id=repair.id,
+                            created_by=technician_id,
+                            organization_id=organization_id,
+                        )
+                    except InsufficientStockError as exc:
+                        raise _SyncFailure(
+                            f"Недостаточно запчастей на складе: доступно {exc.available}, "
+                            f"требуется {exc.requested}"
+                        ) from exc
 
             for item in payload.parts_used:
                 db.add(RepairPart(repair_id=repair.id, part_id=item.part_id, quantity=item.quantity))

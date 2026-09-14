@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Enum, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
+from sqlalchemy import CheckConstraint, Enum, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -69,6 +69,9 @@ class Repair(Base):
 
 class RepairPart(Base):
     __tablename__ = "repair_parts"
+    __table_args__ = (
+        CheckConstraint("quantity > 0", name="ck_repair_part_quantity_positive"),
+    )
 
     repair_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("repairs.id"), primary_key=True)
     part_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("parts.id"), primary_key=True)

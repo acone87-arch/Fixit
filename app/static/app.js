@@ -2038,6 +2038,7 @@ async function renderWarehouse(content) {
 async function openStockMoveModal(type, warehouses) {
   const parts = await api('/parts');
   const isTransfer = type === 'transfer';
+  const attemptStorageKey = `fixit-stock-attempt:${state.me.id}:${type}`;
   const backdrop = openModal(isTransfer ? 'Перемещение между складами' : 'Приёмка на склад', `
     <div class="field"><label>Запчасть</label>
       <select id="f-part">${parts.map((p) => `<option value="${p.id}">${esc(p.name)} (${esc(p.article)})</option>`).join('')}</select>
@@ -2062,7 +2063,18 @@ async function openStockMoveModal(type, warehouses) {
         quantity: qty,
       };
       if (isTransfer) payload.from_warehouse_id = backdrop.querySelector('#f-from').value;
+      let attempt = null;
+      try { attempt = JSON.parse(localStorage.getItem(attemptStorageKey) || 'null'); } catch (_) { attempt = null; }
+      const sameAttempt = attempt
+        && attempt.idempotency_key
+        && attempt.part_id === payload.part_id
+        && attempt.to_warehouse_id === payload.to_warehouse_id
+        && (attempt.from_warehouse_id || null) === (payload.from_warehouse_id || null)
+        && attempt.quantity === payload.quantity;
+      payload.idempotency_key = sameAttempt ? attempt.idempotency_key : crypto.randomUUID();
+      localStorage.setItem(attemptStorageKey, JSON.stringify(payload));
       await api(`/warehouses/movements/${isTransfer ? 'transfer' : 'receive'}`, { method: 'POST', body: JSON.stringify(payload) });
+      localStorage.removeItem(attemptStorageKey);
       closeModal();
       toast(isTransfer ? 'Перемещение выполнено' : 'Приёмка выполнена');
       router();

@@ -2,17 +2,47 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, get_technician_mobile_warehouse_id, require_roles
 from app.database import get_db
 from app.models.core import User, UserRole
-from app.models.warehouse import Part, Warehouse, WarehouseStock
-from app.schemas.warehouse import PartCreate, PartOut, StockItem, StockMovementCreate, WarehouseOut
+from app.models.warehouse import Part, StockMovement, StockMovementType, Warehouse, WarehouseStock
+from app.schemas.warehouse import (
+    PartCreate, PartOut, StockItem, StockMovementCreate, StockMovementResult, WarehouseOut,
+)
 from app.services.stock_service import InsufficientStockError, receive_stock, transfer_stock
 
 router = APIRouter(prefix="/api/warehouses", tags=["warehouses"])
 parts_router = APIRouter(prefix="/api/parts", tags=["parts"])
+
+
+def _same_movement(existing: StockMovement, payload: StockMovementCreate) -> bool:
+    return (
+        existing.type == payload.type
+        and existing.part_id == payload.part_id
+        and existing.from_warehouse_id == payload.from_warehouse_id
+        and existing.to_warehouse_id == payload.to_warehouse_id
+        and existing.quantity == payload.quantity
+    )
+
+
+async def _movement_retry(
+    db: AsyncSession, payload: StockMovementCreate, organization_id: uuid.UUID
+) -> StockMovement | None:
+    if not payload.idempotency_key:
+        return None
+    existing = await db.get(StockMovement, payload.idempotency_key)
+    if not existing:
+        return None
+    if existing.organization_id != organization_id or not _same_movement(existing, payload):
+        raise HTTPException(status.HTTP_409_CONFLICT, "Ключ повтора уже использован для другой операции")
+    return existing
+
+
+def _movement_result(movement: StockMovement, already_applied: bool = False) -> StockMovementResult:
+    return StockMovementResult(movement_id=movement.id, already_applied=already_applied)
 
 
 @router.get("", response_model=list[WarehouseOut])
@@ -31,6 +61,9 @@ async def my_warehouse_stock(
     user: User = Depends(require_roles(UserRole.technician)),
 ):
     warehouse_id = await get_technician_mobile_warehouse_id(db, user.id, user.organization_id)
+    # GET may provision a legacy technician's warehouse. Persist it before the
+    # request session closes; sync callers keep using their surrounding tx.
+    await db.commit()
     rows = (
         await db.execute(
             select(WarehouseStock, Part)
@@ -89,14 +122,17 @@ async def warehouse_stock(
     ]
 
 
-@router.post("/movements/receive", status_code=status.HTTP_201_CREATED)
+@router.post("/movements/receive", response_model=StockMovementResult, status_code=status.HTTP_201_CREATED)
 async def receive_movement(
     payload: StockMovementCreate,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_roles(UserRole.admin, UserRole.dispatcher)),
 ):
-    if payload.type != "receipt" or not payload.to_warehouse_id:
+    if payload.type != StockMovementType.receipt or not payload.to_warehouse_id or payload.from_warehouse_id:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Некорректный тип операции")
+    existing = await _movement_retry(db, payload, user.organization_id)
+    if existing:
+        return _movement_result(existing, True)
     warehouse_ok = await db.scalar(select(Warehouse.id).where(
         Warehouse.id == payload.to_warehouse_id, Warehouse.organization_id == user.organization_id
     ))
@@ -105,20 +141,33 @@ async def receive_movement(
     ))
     if not warehouse_ok or not part_ok:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Склад или запчасть не найдены в организации")
-    await receive_stock(db, payload.to_warehouse_id, payload.part_id, payload.quantity, user.id,
-                        user.organization_id)
+    movement_id = payload.idempotency_key or uuid.uuid4()
+    try:
+        movement = await receive_stock(
+            db, payload.to_warehouse_id, payload.part_id, payload.quantity, user.id,
+            user.organization_id, movement_id=movement_id,
+        )
+    except IntegrityError as exc:
+        await db.rollback()
+        existing = await _movement_retry(db, payload, user.organization_id)
+        if existing:
+            return _movement_result(existing, True)
+        raise HTTPException(status.HTTP_409_CONFLICT, "Операция склада конфликтует с другой записью") from exc
     await db.commit()
-    return {"status": "ok"}
+    return _movement_result(movement)
 
 
-@router.post("/movements/transfer", status_code=status.HTTP_201_CREATED)
+@router.post("/movements/transfer", response_model=StockMovementResult, status_code=status.HTTP_201_CREATED)
 async def transfer_movement(
     payload: StockMovementCreate,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_roles(UserRole.admin, UserRole.dispatcher)),
 ):
-    if payload.type != "transfer" or not payload.from_warehouse_id or not payload.to_warehouse_id:
+    if payload.type != StockMovementType.transfer or not payload.from_warehouse_id or not payload.to_warehouse_id:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Некорректный тип операции")
+    existing = await _movement_retry(db, payload, user.organization_id)
+    if existing:
+        return _movement_result(existing, True)
     warehouse_count = len((await db.scalars(select(Warehouse.id).where(
         Warehouse.id.in_([payload.from_warehouse_id, payload.to_warehouse_id]),
         Warehouse.organization_id == user.organization_id,
@@ -129,17 +178,23 @@ async def transfer_movement(
     if warehouse_count != 2 or not part_ok:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Склад или запчасть не найдены в организации")
     try:
-        await transfer_stock(
+        movement = await transfer_stock(
             db, payload.from_warehouse_id, payload.to_warehouse_id, payload.part_id, payload.quantity,
-            user.id, user.organization_id
+            user.id, user.organization_id, movement_id=payload.idempotency_key or uuid.uuid4(),
         )
     except InsufficientStockError as exc:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             f"Недостаточно запчастей: доступно {exc.available}, требуется {exc.requested}",
         ) from exc
+    except IntegrityError as exc:
+        await db.rollback()
+        existing = await _movement_retry(db, payload, user.organization_id)
+        if existing:
+            return _movement_result(existing, True)
+        raise HTTPException(status.HTTP_409_CONFLICT, "Операция склада конфликтует с другой записью") from exc
     await db.commit()
-    return {"status": "ok"}
+    return _movement_result(movement)
 
 
 @parts_router.get("", response_model=list[PartOut])

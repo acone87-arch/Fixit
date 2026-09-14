@@ -4,7 +4,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.warehouse import StockMovement, StockMovementType, WarehouseStock
+from app.models.warehouse import StockMovement, StockMovementType, Warehouse, WarehouseStock
 
 
 class InsufficientStockError(Exception):
@@ -12,6 +12,22 @@ class InsufficientStockError(Exception):
         self.part_id = part_id
         self.available = available
         self.requested = requested
+
+
+def _require_positive_quantity(quantity: int) -> None:
+    if quantity <= 0:
+        raise ValueError("Количество должно быть больше нуля")
+
+
+async def _lock_warehouses(db: AsyncSession, warehouse_ids: list[uuid.UUID]) -> None:
+    # Warehouse rows always exist, so locking them also serializes creation of a
+    # previously missing WarehouseStock row. Stable ordering prevents deadlocks.
+    await db.scalars(
+        select(Warehouse.id)
+        .where(Warehouse.id.in_(sorted(set(warehouse_ids), key=str)))
+        .order_by(Warehouse.id)
+        .with_for_update()
+    )
 
 
 async def _lock_stock_row(db: AsyncSession, warehouse_id: uuid.UUID, part_id: uuid.UUID) -> WarehouseStock | None:
@@ -36,15 +52,18 @@ async def decrement_stock(
     repair_id: uuid.UUID | None,
     created_by: uuid.UUID | None,
     organization_id: uuid.UUID,
-) -> None:
+    movement_id: uuid.UUID | None = None,
+) -> StockMovement:
+    _require_positive_quantity(quantity)
+    await _lock_warehouses(db, [warehouse_id])
     row = await _lock_stock_row(db, warehouse_id, part_id)
     available = row.quantity if row else 0
     if available < quantity:
         raise InsufficientStockError(part_id=part_id, available=available, requested=quantity)
     row.quantity -= quantity
     row.version += 1
-    db.add(
-        StockMovement(
+    movement = StockMovement(
+            id=movement_id or uuid.uuid4(),
             organization_id=organization_id,
             type=StockMovementType.writeoff,
             part_id=part_id,
@@ -54,7 +73,9 @@ async def decrement_stock(
             repair_id=repair_id,
             created_by=created_by,
         )
-    )
+    db.add(movement)
+    await db.flush()
+    return movement
 
 
 async def transfer_stock(
@@ -65,13 +86,16 @@ async def transfer_stock(
     quantity: int,
     created_by: uuid.UUID | None,
     organization_id: uuid.UUID,
-) -> None:
+    movement_id: uuid.UUID | None = None,
+) -> StockMovement:
+    _require_positive_quantity(quantity)
     if from_warehouse_id == to_warehouse_id:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Склады должны отличаться")
 
     # Блокируем обе строки в стабильном порядке (по id), чтобы два встречных
     # перемещения между теми же двумя складами не привели к deadlock'у.
     ids_in_order = sorted([from_warehouse_id, to_warehouse_id], key=str)
+    await _lock_warehouses(db, ids_in_order)
     locked = {}
     for warehouse_id in ids_in_order:
         locked[warehouse_id] = await _lock_stock_row(db, warehouse_id, part_id)
@@ -89,8 +113,8 @@ async def transfer_stock(
     else:
         db.add(WarehouseStock(warehouse_id=to_warehouse_id, part_id=part_id, quantity=quantity))
 
-    db.add(
-        StockMovement(
+    movement = StockMovement(
+            id=movement_id or uuid.uuid4(),
             organization_id=organization_id,
             type=StockMovementType.transfer,
             part_id=part_id,
@@ -99,7 +123,9 @@ async def transfer_stock(
             quantity=quantity,
             created_by=created_by,
         )
-    )
+    db.add(movement)
+    await db.flush()
+    return movement
 
 
 async def receive_stock(
@@ -109,15 +135,18 @@ async def receive_stock(
     quantity: int,
     created_by: uuid.UUID | None,
     organization_id: uuid.UUID,
-) -> None:
+    movement_id: uuid.UUID | None = None,
+) -> StockMovement:
+    _require_positive_quantity(quantity)
+    await _lock_warehouses(db, [to_warehouse_id])
     row = await _lock_stock_row(db, to_warehouse_id, part_id)
     if row:
         row.quantity += quantity
         row.version += 1
     else:
         db.add(WarehouseStock(warehouse_id=to_warehouse_id, part_id=part_id, quantity=quantity))
-    db.add(
-        StockMovement(
+    movement = StockMovement(
+            id=movement_id or uuid.uuid4(),
             organization_id=organization_id,
             type=StockMovementType.receipt,
             part_id=part_id,
@@ -126,4 +155,6 @@ async def receive_stock(
             quantity=quantity,
             created_by=created_by,
         )
-    )
+    db.add(movement)
+    await db.flush()
+    return movement

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import decode_access_token
@@ -110,13 +111,26 @@ async def get_technician_mobile_warehouse_id(
         technician = await db.get(User, technician_id)
         if not technician:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Техник не найден")
-        warehouse = Warehouse(
-            organization_id=organization_id,
-            type=WarehouseType.mobile,
-            name=f"Мобильный склад — {technician.full_name}",
-            owner_user_id=technician_id,
+        warehouse_id = await db.scalar(
+            insert(Warehouse)
+            .values(
+                organization_id=organization_id,
+                type=WarehouseType.mobile,
+                name=f"Мобильный склад — {technician.full_name}",
+                owner_user_id=technician_id,
+            )
+            .on_conflict_do_nothing(
+                index_elements=[Warehouse.organization_id, Warehouse.owner_user_id],
+                index_where=(Warehouse.type == WarehouseType.mobile),
+            )
+            .returning(Warehouse.id)
         )
-        db.add(warehouse)
-        await db.flush()
-        warehouse_id = warehouse.id
+        if not warehouse_id:
+            warehouse_id = await db.scalar(
+                select(Warehouse.id).where(
+                    Warehouse.owner_user_id == technician_id,
+                    Warehouse.organization_id == organization_id,
+                    Warehouse.type == WarehouseType.mobile,
+                )
+            )
     return warehouse_id

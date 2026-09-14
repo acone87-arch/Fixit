@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.warehouse import StockMovementType, WarehouseType
 
@@ -45,10 +45,19 @@ class StockMovementCreate(BaseModel):
     part_id: uuid.UUID
     from_warehouse_id: uuid.UUID | None = None
     to_warehouse_id: uuid.UUID | None = None
-    quantity: int
+    quantity: int = Field(gt=0)
+    # New clients persist this UUID until the server acknowledges the movement.
+    # It stays optional so already installed clients keep working.
+    idempotency_key: uuid.UUID | None = None
 
 
 class StockMovementOut(StockMovementCreate):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
     created_at: datetime
+
+
+class StockMovementResult(BaseModel):
+    status: str = "ok"
+    movement_id: uuid.UUID
+    already_applied: bool = False
