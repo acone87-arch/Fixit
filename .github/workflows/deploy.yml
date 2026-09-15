@@ -161,7 +161,7 @@ jobs:
           trap 'rm -f "\$release_script"' EXIT
           git show "$RELEASE_SHA:scripts/deploy_pilot_release.sh" > "\$release_script"
           chmod 700 "\$release_script"
-          bash "\$release_script" "$RELEASE_SHA"
+          bash "\$release_script" "$RELEASE_SHA" </dev/null
           rm -f "\$release_script"
           trap - EXIT
 

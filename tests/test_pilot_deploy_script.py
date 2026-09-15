@@ -10,7 +10,7 @@ def test_workflow_executes_release_script_from_a_file():
     workflow = Path('.github/workflows/deploy.yml').read_text()
     assert 'git show "$RELEASE_SHA:scripts/deploy_pilot_release.sh" | bash' not in workflow
     materialize = workflow.index('git show "$RELEASE_SHA:scripts/deploy_pilot_release.sh" > "\\$release_script"')
-    execute = workflow.index('bash "\\$release_script" "$RELEASE_SHA"')
+    execute = workflow.index('bash "\\$release_script" "$RELEASE_SHA" </dev/null')
     assert materialize < execute
 
 
@@ -35,7 +35,7 @@ if name=='docker':
     if 'psql' in args and '-Atc' in args:
         query=args[args.index('-Atc')+1]
         if query.strip()=='SELECT 1': print('1')
-        elif 'information_schema.tables' in query: print('alembic_version')
+        elif 'information_schema.tables' in query: print('alembic_version\\nusers')
         elif 'count(*)' in query: print('1')
         elif 'version_num' in query: print('20260914_0016')
     if args[0]=='run':
@@ -58,6 +58,8 @@ if name=='curl' and os.environ['FAILURE']=='health': sys.exit(7)
     calls = [json.loads(line) for line in (tmp_path / 'calls').read_text().splitlines()]
     position = lambda value: next(i for i, call in enumerate(calls) if value in call)
     assert ['docker', 'compose', '-f', 'docker-compose.prod.yml', 'ps', '-q', '--all', 'api'] in calls
+    count_calls = [call for call in calls if 'SELECT count(*)' in call]
+    assert len(count_calls) > 1
     assert position('stop') < position('pg_dump') < position('pg_restore') < position('upgrade')
     assert next((repo / 'backups').glob('*/database.dump')).stat().st_size > 0
     assert next((repo / 'backups').glob('*/uploads.tar.gz')).stat().st_size > 0

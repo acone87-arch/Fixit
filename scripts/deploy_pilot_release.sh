@@ -49,10 +49,10 @@ test -s "$backup/database.dump" && test -s "$backup/uploads.tar.gz"
 "${compose[@]}" exec -T db pg_restore --list < "$backup/database.dump" > "$backup/database.list"
 tar -tzf "$backup/uploads.tar.gz" > "$backup/uploads.list"
 "${compose[@]}" exec -T db psql -U fsm -d fsm -Atc \
-  "SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE' ORDER BY table_name" \
+  "SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE' ORDER BY table_name" </dev/null \
   | while IFS= read -r table; do
       count=$("${compose[@]}" exec -T db psql -U fsm -d fsm -Atc \
-        "SELECT count(*) FROM \"$table\"")
+        "SELECT count(*) FROM \"$table\"" </dev/null)
       printf '%s|%s\n' "$table" "$count"
     done > "$backup/database.counts"
 media_manifest_root=$(mktemp -d)
