@@ -1,0 +1,16 @@
+.git
+.env
+.env.*
+backups/
+uploads/
+.pytest_cache/
+**/__pycache__/
+*.pyc
+*.pyo
+.venv/
+.venv-*/
+node_modules/
+test-results/
+playwright-report/
+.codex-remote-attachments/
+.codex-worktrees/
