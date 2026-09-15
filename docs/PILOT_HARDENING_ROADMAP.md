@@ -7,10 +7,10 @@
 - Репозиторий: `acone87-arch/Fixit`.
 - Исходный документ: `Fixit_Audit_2026-09-07.md`, независимый аудит от 07.09.2026.
 - Audit SHA: `80ec53e84402b24c3a8bb263d150e7bf7a0dd865`.
-- Последняя сверенная main: `b72d287089de0efadc06584d4ea1ea1350f9b58f`.
-- Последняя сверка: 16.09.2026; локальный HEAD и `origin/main` совпадают, production выпущен из того же exact SHA, Alembic — `20260914_0016 (head)`.
+- Проверенный runtime-baseline P0.7: `b72d287089de0efadc06584d4ea1ea1350f9b58f`.
+- Канонические refs после закрывающей записи: `main` и production указывают на commit, содержащий эту запись; его exact SHA фиксируется успешным workflow `Deploy to VPS` и приводится в итоговом отчёте, а не вписывается самоссылкой в сам commit. Alembic — `20260914_0016 (head)`.
 - P0.1–P0.7 совокупно включены в `main`. Draft PR №3–№11 закрыты после fast-forward интеграции их commit-цепочки; отдельные merge-коммиты не создавались.
-- Текущий шаг: **P0.7 Production acceptance завершён и проверен.** Проверенный и развёрнутый SHA `b72d287089de0efadc06584d4ea1ea1350f9b58f`, [GitHub Actions 34989840833](https://github.com/acone87-arch/Fixit/actions/runs/34989840833). Следующий этап — только отдельные задачи parity-аудита ниже, без повторного открытия P0.
+- Текущий шаг: **P0.7 Production acceptance завершён и проверен.** Runtime-baseline `b72d287089de0efadc06584d4ea1ea1350f9b58f` проверен и развёрнут в [GitHub Actions 34989840833](https://github.com/acone87-arch/Fixit/actions/runs/34989840833); закрывающая roadmap-запись не меняет runtime. Следующий этап — только отдельные задачи parity-аудита ниже, без повторного открытия P0.
 - **FIXIT PILOT READY подтверждён для зафиксированного P0 scope.** Остаточные parity-задачи не являются P0-блокерами и перечислены явно в конце журнала.
 
 ### Как читать доказательства
