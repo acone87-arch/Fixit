@@ -34,6 +34,11 @@ def do_run_migrations(connection):
     if migration_schema:
         escaped = migration_schema.replace('"', '""')
         connection.exec_driver_sql(f'SET search_path TO "{escaped}"')
+        # SET starts SQLAlchemy's implicit transaction.  Commit that wrapper
+        # first so Alembic owns and commits the following migration
+        # transaction instead of having connect() roll it back on exit.
+        # SET (unlike SET LOCAL) remains active for this session.
+        connection.commit()
     context.configure(connection=connection, target_metadata=target_metadata, compare_type=True,
                       **migration_options())
     with context.begin_transaction():
