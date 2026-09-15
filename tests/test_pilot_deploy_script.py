@@ -58,7 +58,10 @@ if name=='curl' and os.environ['FAILURE']=='health': sys.exit(7)
     calls = [json.loads(line) for line in (tmp_path / 'calls').read_text().splitlines()]
     position = lambda value: next(i for i, call in enumerate(calls) if value in call)
     assert ['docker', 'compose', '-f', 'docker-compose.prod.yml', 'ps', '-q', '--all', 'api'] in calls
-    count_calls = [call for call in calls if 'SELECT count(*)' in call]
+    count_calls = [
+        call for call in calls
+        if any('SELECT count(*)' in argument for argument in call)
+    ]
     assert len(count_calls) > 1
     assert position('stop') < position('pg_dump') < position('pg_restore') < position('upgrade')
     assert next((repo / 'backups').glob('*/database.dump')).stat().st_size > 0
