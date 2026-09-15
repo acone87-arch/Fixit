@@ -27,7 +27,8 @@ docker run -d --name "$container" --network none \
   -e POSTGRES_DB=fixit_restore postgres:16-alpine >/dev/null
 ready=false
 for attempt in $(seq 1 30); do
-  if docker exec "$container" pg_isready -U fsm -d fixit_restore >/dev/null 2>&1; then
+  if test "$(docker exec "$container" psql -U fsm -d fixit_restore -Atc \
+      'SELECT 1' 2>/dev/null || true)" = 1; then
     ready=true
     break
   fi

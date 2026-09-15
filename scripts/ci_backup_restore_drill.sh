@@ -22,7 +22,8 @@ docker run -d --name "$source_container" --network none \
   -e POSTGRES_DB=fsm postgres:16-alpine >/dev/null
 ready=false
 for attempt in $(seq 1 30); do
-  if docker exec "$source_container" pg_isready -U fsm -d fsm >/dev/null 2>&1; then
+  if test "$(docker exec "$source_container" psql -U fsm -d fsm -Atc \
+      'SELECT 1' 2>/dev/null || true)" = 1; then
     ready=true
     break
   fi
