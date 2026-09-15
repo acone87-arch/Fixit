@@ -28,7 +28,8 @@ if name=='docker':
     if 'pg_restore' in args: print('synthetic archive list')
     if 'psql' in args and '-Atc' in args:
         query=args[args.index('-Atc')+1]
-        if 'information_schema.tables' in query: print('alembic_version')
+        if query.strip()=='SELECT 1': print('1')
+        elif 'information_schema.tables' in query: print('alembic_version')
         elif 'count(*)' in query: print('1')
         elif 'version_num' in query: print('20260914_0016')
     if args[0]=='run':
