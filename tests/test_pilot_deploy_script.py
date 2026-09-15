@@ -6,9 +6,15 @@ import subprocess
 
 import pytest
 
-pytestmark = pytest.mark.skipif(os.name == 'nt', reason='Linux deployment shell harness runs in CI')
+def test_workflow_executes_release_script_from_a_file():
+    workflow = Path('.github/workflows/deploy.yml').read_text()
+    assert 'git show "$RELEASE_SHA:scripts/deploy_pilot_release.sh" | bash' not in workflow
+    materialize = workflow.index('git show "$RELEASE_SHA:scripts/deploy_pilot_release.sh" > "\\$release_script"')
+    execute = workflow.index('bash "\\$release_script" "$RELEASE_SHA"')
+    assert materialize < execute
 
 
+@pytest.mark.skipif(os.name == 'nt', reason='Linux deployment shell harness runs in CI')
 @pytest.mark.parametrize('failure', ['', 'migration', 'health'])
 def test_backup_precedes_migration_and_failure_restores_image(tmp_path, failure):
     repo = tmp_path / 'fixit'; repo.mkdir()
@@ -51,6 +57,7 @@ if name=='curl' and os.environ['FAILURE']=='health': sys.exit(7)
     result = subprocess.run(['bash', str(script), release], env=env, capture_output=True, text=True, timeout=20)
     calls = [json.loads(line) for line in (tmp_path / 'calls').read_text().splitlines()]
     position = lambda value: next(i for i, call in enumerate(calls) if value in call)
+    assert ['docker', 'compose', '-f', 'docker-compose.prod.yml', 'ps', '-q', '--all', 'api'] in calls
     assert position('stop') < position('pg_dump') < position('pg_restore') < position('upgrade')
     assert next((repo / 'backups').glob('*/database.dump')).stat().st_size > 0
     assert next((repo / 'backups').glob('*/uploads.tar.gz')).stat().st_size > 0

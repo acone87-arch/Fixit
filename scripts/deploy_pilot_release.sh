@@ -10,7 +10,9 @@ git diff --quiet
 git diff --cached --quiet
 compose=(docker compose -f docker-compose.prod.yml)
 old_sha=$(git rev-parse HEAD)
-old_container=$("${compose[@]}" ps -q api)
+# --all also finds the container left stopped by an interrupted prior release,
+# so the next exact-SHA deployment can recover without manual VPS surgery.
+old_container=$("${compose[@]}" ps -q --all api)
 test -n "$old_container"
 old_image=$(docker inspect --format '{{.Image}}' "$old_container")
 old_tag=$(docker inspect --format '{{.Config.Image}}' "$old_container")

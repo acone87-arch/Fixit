@@ -157,7 +157,13 @@ jobs:
           echo "ALLOWED_ORIGINS: \$legacy_origin,https://fixitpulse.ru"
           echo "ALLOWED_HOSTS: \$legacy_host,fixitpulse.ru,localhost,127.0.0.1"
           git fetch origin "$RELEASE_SHA"
-          git show "$RELEASE_SHA:scripts/deploy_pilot_release.sh" | bash -s -- "$RELEASE_SHA"
+          release_script="\$(mktemp /tmp/fixit-release.XXXXXX)"
+          trap 'rm -f "\$release_script"' EXIT
+          git show "$RELEASE_SHA:scripts/deploy_pilot_release.sh" > "\$release_script"
+          chmod 700 "\$release_script"
+          bash "\$release_script" "$RELEASE_SHA"
+          rm -f "\$release_script"
+          trap - EXIT
 
           healthy=false
           for attempt in \$(seq 1 20); do
