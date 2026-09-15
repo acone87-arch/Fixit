@@ -7,11 +7,11 @@
 - Репозиторий: `acone87-arch/Fixit`.
 - Исходный документ: `Fixit_Audit_2026-09-07.md`, независимый аудит от 07.09.2026.
 - Audit SHA: `80ec53e84402b24c3a8bb263d150e7bf7a0dd865`.
-- Последняя сверенная main: `87e3044f30a40b6d0cff0306e71f9aee83aca329`.
-- Последняя сверка: 14.09.2026; GitHub Compare `identical`, ahead/behind `0/0`, новых commits `0`, изменённых файлов `0`.
-- P0.1 выполнен и проверен в PR [№3](https://github.com/acone87-arch/Fixit/pull/3); проверенный SHA кода: `cde3d81a79b7f29efd17f65bac0538914a75ca1c`. P0.1–P0.5 выложены совокупной release-веткой; main не изменена.
-- Текущий шаг: **P0.6 Warehouse integrity завершён и проверен. Остановка перед P0.7.** Ветка `codex/p0-6-warehouse-integrity`, draft [PR №9](https://github.com/acone87-arch/Fixit/pull/9), проверенный SHA кода `5e97b75d64a84f85a5e3e2209b6d09cd1163da86`. P0.1–P0.5 и QR-инвентаризация развёрнуты на production SHA `15964ce4daea3deaebf2bdb9ede69bfb49144ebe`; P0.6 на production не выкладывался. Merge в main не выполнялся.
-- **FIXIT PILOT READY не подтверждён.**
+- Последняя сверенная main: `b72d287089de0efadc06584d4ea1ea1350f9b58f`.
+- Последняя сверка: 16.09.2026; локальный HEAD и `origin/main` совпадают, production выпущен из того же exact SHA, Alembic — `20260914_0016 (head)`.
+- P0.1–P0.7 совокупно включены в `main`. Draft PR №3–№11 закрыты после fast-forward интеграции их commit-цепочки; отдельные merge-коммиты не создавались.
+- Текущий шаг: **P0.7 Production acceptance завершён и проверен.** Проверенный и развёрнутый SHA `b72d287089de0efadc06584d4ea1ea1350f9b58f`, [GitHub Actions 34989840833](https://github.com/acone87-arch/Fixit/actions/runs/34989840833). Следующий этап — только отдельные задачи parity-аудита ниже, без повторного открытия P0.
+- **FIXIT PILOT READY подтверждён для зафиксированного P0 scope.** Остаточные parity-задачи не являются P0-блокерами и перечислены явно в конце журнала.
 
 ### Как читать доказательства
 
@@ -58,7 +58,7 @@
 | P0.5 Durable offline queue | 🟢 выполнено и проверено | 283 Python/PG/browser без пропусков, 5 JS runtime-файлов и 16 Chromium IDB/SW cases; PR №7, код `90d9421` |
 | P0.5a QR inventory | 🟢 выполнено и проверено | 293 Python/PG/browser без пропусков, 5 JS runtime-файлов и 16 Chromium IDB/SW cases; PR №8, код `386d09a` |
 | P0.6 Warehouse integrity | 🟢 выполнено и проверено | 303 Python/PG/browser без пропусков; 9 новых PG/migration cases, 5 JS runtime и 16 Chromium IDB/SW; PR №9, код `5e97b75` |
-| P0.7 Production acceptance | ⬜ не начато | PG/browser E2E, HTTPS upload, backup restore и rollback предстоит доказать |
+| P0.7 Production acceptance | 🟢 выполнено и проверено | 311 passed; 5 JS runtime и реальный IndexedDB/SW; CI и production restore; exact-SHA deploy; HTTPS multipart; rollback проверен |
 
 ## P0.1 — Onboarding
 
@@ -218,20 +218,20 @@ DoD подтверждён на PostgreSQL 16 и Chromium в Actions. 18 PG-сц
 
 ## P0.7 — Production acceptance
 
-**Статус: ⬜ не начато.**
+**Статус: 🟢 выполнено и проверено.**
 
 **Definition of Done:** полный Pilot E2E проходит на production-like PostgreSQL; DB+media backup действительно восстановлен в изолированную среду; выпускается проверенный SHA, а предыдущую работоспособную версию можно восстановить по проверенному runbook. Не объявлять готовность только по зелёному CI или наличию volume.
 
 | ID | Статус | Задача и актуальное основание |
 |---|---|---|
-| OPS-01 | ⬜ не начато | PG integration и browser E2E всей цепочки, включая отрицательные ACL и retries |
-| OPS-02 | 🔴 blocker | CI без PG и PR gate; guest JS runtime не включён. Подключить доказательные проверки этапов |
-| OPS-03 | 🔴 blocker | Deploy делает git pull main вместо exact tested SHA; автоматическое восстановление после failed rollout отсутствует |
-| OPS-04 | ⬜ не начато | Миграции со старой схемы, совместимость старого API при upgrade, сбой/lock timeout; воспроизводимый baseline пустой БД |
-| OPS-05 | ⬜ не начато | Реальный HTTPS/nginx upload >1 МБ и до разрешённого лимита, типы и частичный retry. Глобальный nginx limit на VPS неизвестен |
-| OPS-06 | ⬜ не начато | Найти существующий backup DB+media, retention и секреты доступа; восстановить в изоляции и проверить данные/фото. Внешний backup не подтверждён, отсутствие в repo не равно отсутствию на VPS |
-| OPS-07 | ⬜ не начато | Runbook rollback: failed migration, failed app health, совместимость схемы, возврат image и при необходимости восстановление; health должен проверять полезную готовность |
-| OPS-08 | 🔴 blocker | Известный дефект закреплённого multipart parser; совместимое обновление перед публичной загрузкой, тесты upload. Проверить image context/secrets и необходимые ограничения запросов |
+| OPS-01 | 🟢 выполнено и проверено | Полный Python/PostgreSQL/Chromium suite: 311 passed, 0 failed, 0 skipped; отрицательные ACL и retries входят в gate |
+| OPS-02 | 🟢 выполнено и проверено | CI запускает PostgreSQL, Chromium, все 5 JS runtime-файлов и настоящий IndexedDB/SW до deployment |
+| OPS-03 | 🟢 выполнено и проверено | Release исполняет материализованный script exact tested SHA; сохранение предыдущего image и автоматический application rollback доказаны двумя безопасными failed rollout |
+| OPS-04 | 🟢 выполнено и проверено | Добавлен точный historical baseline `20260825_0000`; проверены clean bootstrap, legacy stamp+upgrade, сохранение данных и no-op для уже применённого `0016` |
+| OPS-05 | 🟢 выполнено и проверено | Production HTTPS smoke: multipart 2 MiB дошёл до приложения и вернул 404, 10 MiB остановлен nginx с 413; реальные фото/retry проверены изолированно |
+| OPS-06 | 🟢 выполнено и проверено | CI restore: 3 таблицы/2 media; production restore drill: 30 таблиц/11 media, revision `0016`; backup `pilot-20260915T154628Z-b72d287089de` |
+| OPS-07 | 🟢 выполнено и проверено | Runbook обновлён; rollback не делает Alembic downgrade и сохраняет DB/uploads; возврат предыдущего image фактически сработал при двух неуспешных rollout |
+| OPS-08 | 🟢 выполнено и проверено | Multipart parser и лимиты включены в полный regression; production nginx/app boundary подтверждён без создания заявок |
 
 **Код/инфраструктура:** `.github/workflows/deploy.yml`, Docker/compose, Alembic, nginx, requirements, health, backup/runbook. Текущий порядок migrations-before-restart сохранить; успешный deploy не доказывает recoverability.
 
@@ -666,3 +666,45 @@ Verify: main по-прежнему `80ec53e84402b24c3a8bb263d150e7bf7a0dd865`; c
 - Первичный [CI 34807744615](https://github.com/acone87-arch/Fixit/actions/runs/34807744615) выявил параметризованный partial-index predicate и нарушение per-item offline validation; повторный [CI 34824696178](https://github.com/acone87-arch/Fixit/actions/runs/34824696178) выявил обращение к истёкшему ORM user после rollback конкурентного повтора. Оба дефекта исправлены, regression tests сохранены.
 - Проверенный код `5e97b75d64a84f85a5e3e2209b6d09cd1163da86`, [CI 34825475897](https://github.com/acone87-arch/Fixit/actions/runs/34825475897): **303 passed, 0 failed, 0 skipped**, 978 предупреждений зависимостей, 293.87 s. Включены 9 новых P0.6 PostgreSQL/migration cases; дополнительно прошли все **5 JS runtime-файлов** и **16 настоящих Chromium IDB/SW cases**. Локально доступный набор: 166 passed, 137 skipped; локальные пропуски PostgreSQL/browser не используются как приёмка.
 - P0.6 не сливался в main и не развёртывался. Production остаётся на `15964ce4daea3deaebf2bdb9ede69bfb49144ebe`. Перед production миграции 0016 нужны отдельное разрешение, backup и проверка preflight. **Остановка после P0.6; P0.7 не начинать без отдельной команды. FIXIT PILOT READY целиком ещё не объявляется.**
+
+### 15–16.09.2026 — P0.7 Production acceptance: итоговая приёмка и выпуск
+
+- При clean bootstrap воспроизведён корневой дефект: первая сохранённая SaaS-миграция `20260826_0001` ошибочно считалась корнем, хотя создавалась поверх legacy-схемы commit `77b37fc4f29eb6f568335815001848500aee39d3`. Из-за отсутствующего предка чистая БД не могла воспроизводимо пройти реальную цепочку до `head`.
+- Добавлен точный historical snapshot `20260825_0000`; единственное изменение ancestry — `20260826_0001.down_revision = 20260825_0000`. Цепочка остаётся линейной и имеет один head `20260914_0016`. Уже работающая production БД на `0016` не stamp'илась, не downgrade'илась и при `upgrade head` получила no-op.
+- Историческая цепочка: `0000 legacy baseline → 0001 SaaS foundation → 0002 clients/sites → 0003 service acts → 0004 service requests → 0005 equipment media → 0006 request media → 0007 repair attachment idempotency → 0008 client access → 0009 canonical repair link → 0010 technician access → 0011 push → 0012 invites → 0013 guest media idempotency → 0014 guest receipt → 0015 inventory → 0016 warehouse integrity`.
+- Проверены: пустая PostgreSQL БД; точное устройство legacy baseline; `stamp 0000 → upgrade head` с сохранением legacy-данных; повторный upgrade с `0016`; один Alembic head; backup DB+media и восстановление в одноразовую среду; readiness/rollback; точный release SHA; nginx/TLS/multipart boundary.
+- Acceptance SHA `8b6900f6ca844f7fb0016ed42ad15852bcfb3b70` прошёл [run 34957748478](https://github.com/acone87-arch/Fixit/actions/runs/34957748478). Два первых production rollout безопасно выявили stdin-дефекты release/restore shell и автоматически вернули приложение без Alembic downgrade; исправления сохранены в `ae0bfd6` и `e169425` с regression.
+- Канонический release `b72d287089de0efadc06584d4ea1ea1350f9b58f`, [run 34989840833](https://github.com/acone87-arch/Fixit/actions/runs/34989840833): **311 passed, 0 failed, 0 skipped**; все **5 JS runtime-файлов**; настоящий Chromium IndexedDB/SW; CI restore **3 таблицы / 2 media / 0016**; production restore **30 таблиц / 11 media / 0016**; exact-SHA deploy и HTTPS multipart smoke успешны.
+- `main`, `origin/main` и production приведены к `b72d287089de0efadc06584d4ea1ea1350f9b58f`; production `/health` возвращает `{"status":"ok"}`, Alembic — `20260914_0016 (head)`. Реальные production invite/ServiceRequest для smoke не создавались.
+- Draft PR №3–№11 закрыты GitHub после попадания их commit-цепочки в `main`; отдельные merge-коммиты не создавались. Их ветки оставлены как исторические указатели.
+- Итог P0.1–P0.7: все этапы зелёные, обязательных P0 blockers нет. **FIXIT PILOT READY подтверждён в границах roadmap.**
+
+### 16.09.2026 — Backend ↔ Frontend parity audit после выпуска
+
+Аудит выполнен только после совпадения `main` и production и успешного полного gate. Продуктовый код не менялся. Для каждого пункта прослежены UI → handler → payload → API → ACL → response → обновление UI.
+
+| № | Возможность | Статус | Трасса и вывод |
+|---:|---|---|---|
+| 1 | Назначение / переназначение заявки | 🟠 P1 | При создании staff-формой `assigned_technician_id` доходит до `POST /service-requests`; отдельный `PATCH /{id}/assign` и ACL admin/dispatcher существуют. Но public/client создают `new`, а detail не имеет действия назначения; кроме того state machine не допускает `assigned → assigned`. Поэтому диспетчер не может из UI назначить такую заявку или переназначить текущую. |
+| 2 | Client Equipment → Passport | 🟢 | Карточки `/client-portal/equipment` вызывают `openEquipmentPassport` → `/equipment/{id}/passport` и QR; `ensure_client_equipment` ограничивает Client/Site; фото, история, документы и заявка отображляются в том же контексте. |
+| 3 | Результат для клиента | 🟢 | Client request detail получает canonical Repair: `outcome`, parts, before/after photos, документы, act и history; protected media/act endpoints повторно проверяют scope; после approval/detail UI перечитывается. Диагностика и работы сохранены в читаемом outcome. |
+| 4 | Equipment role guards | 🟡 P2 | Основные create/update/photo/passport/inventory действия согласованы с ACL. Найдено одно точное расхождение: UI показывает owner удаление фото (`canDeletePhoto`), а `DELETE /equipment/{id}/photo` допускает только admin/dispatcher, поэтому owner получает 403. |
+| 5 | Редактирование Site | ⚫ backend-only | `PATCH /sites/{site_id}` с tenant guard, обновлением location оборудования и audit event существует. UI позволяет создать и открыть объект, но не вызывает PATCH и не предлагает редактор. |
+| 6 | Список / отзыв invite | ⚫ backend-only | Backend имеет scoped `GET /client-portal/clients/{id}/invites` и `POST /client-portal/invites/{id}/revoke`. UI создаёт Site Manager/Director invite и показывает одноразовые URL/QR, но не выводит список и не вызывает revoke. |
+| 7 | Client Portal filters | 🟡 P2 | Кнопки «Все / Активные / Ожидают меня / Завершённые» отрисованы, но обработчики и параметры API отсутствуют; список всегда остаётся полным. Поле поиска оборудования также не связано с фильтрацией. |
+| 8 | Attachments | 🟡 P2 | Guest problem photos, technician approval photos, durable result photos, просмотр protected media и документов связаны end-to-end. Общий authenticated `POST /service-requests/{id}/attachments` допускает виды вложений, но staff/client create/detail не имеют общего add-attachment UI; это частичный capability mismatch, не потеря существующего technician/guest пути. |
+| 9 | QR Inventory | 🟢 | Admin UI создаёт idempotent batch, получает список/PDF и открывает QR; scan ведёт к тому же Equipment ID; complete endpoint проверяет admin/Site Manager/назначенного техника, version, tenant/site и возвращает паспорт. |
+| 10 | Warehouse P0.6 | 🟢 | Staff UI читает склады/остатки, создаёт parts, receipt/transfer с сохранённым UUID retry key и перечитывает экран; technician видит только mobile warehouse. Backend повторно проверяет tenant, роли, склады/part, блокировки и идемпотентность. |
+
+Итог parity: **🔴 P0 — 0; 🟠 P1 — 1; 🟡 P2 — 3; ⚫ backend-only — 2; полностью связанных пунктов — 4.**
+
+Оставшийся backlog, не входящий в завершённый P0:
+
+1. P1 — единое действие назначения и безопасного переназначения мастера в detail заявки, включая public/client-created `new` и явное правило state machine.
+2. P2 — синхронизировать owner guard удаления фото оборудования между UI и API и закрепить runtime-тестом.
+3. P2 — подключить реальные фильтры заявок Client Portal и поиск оборудования с понятным empty state.
+4. P2 — добавить компактный authenticated attachment picker там, где staff/client уже имеют право загрузки; не менять guest и durable technician queues.
+5. Backend-only — вывести редактирование Site поверх существующего `PATCH /sites/{id}`.
+6. Backend-only — вывести список активных/истёкших invite и отзыв поверх существующих scoped endpoints.
+
+**Остановка после P0.7 и parity-аудита. Эти шесть задач не исправлять без отдельной команды.**
