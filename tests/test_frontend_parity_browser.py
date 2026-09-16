@@ -55,7 +55,7 @@ async def test_qr_request_assignment_reaches_technician_and_cannot_be_reassigned
 
             await login(technician, flow.tech.email)
             await technician.goto("http://127.0.0.1:8765/#requests")
-            await expect(technician.locator(f'[data-id="{request_id}"]')).to_be_visible()
+            await expect(technician.locator(f'button.mobile-info-card[data-id="{request_id}"]')).to_be_visible()
             await assert_no_horizontal_scroll(technician)
         finally:
             await browser.close()
