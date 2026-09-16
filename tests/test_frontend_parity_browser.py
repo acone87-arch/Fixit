@@ -24,8 +24,7 @@ async def login(page, email):
     await page.locator("#login-form button").click()
     from playwright.async_api import expect
     await expect(page.locator("#login-screen")).to_be_hidden()
-    if await page.locator("#onboarding-continue").count():
-        await page.locator("#onboarding-continue").click()
+    await page.locator("#onboarding-continue").click(timeout=15000)
 
 
 async def assert_no_horizontal_scroll(page):
