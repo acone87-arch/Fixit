@@ -197,6 +197,7 @@ def _list_item(request, equipment, type_name, site, client):
         site_name=site.name, equipment_name=equipment.name, equipment_type=type_name,
         manufacturer=equipment.manufacturer, model=equipment.model, serial_number=equipment.serial_number,
         assigned_technician_id=None, assigned_technician_name=None,
+        approval_target=request.approval_target,
         created_at=request.created_at, completed_at=request.completed_at,
     )
 
@@ -240,7 +241,8 @@ async def list_equipment(db: AsyncSession = Depends(get_db), user: CurrentUser =
     if site_ids is not None: query = query.where(Site.id.in_(site_ids))
     rows = (await db.execute(query)).all()
     return [{"id": item.id, "name": name or item.name, "manufacturer": item.manufacturer, "model": item.model,
-             "serial_number": item.serial_number, "status": item.status.value, "site_name": site.name,
+             "serial_number": item.serial_number, "inventory_number": item.inventory_number,
+             "status": item.status.value, "site_name": site.name,
              "primary_photo": {"download_url": f"/api/equipment/{item.id}/photo"} if photo else None}
             for item, name, site, photo in rows]
 

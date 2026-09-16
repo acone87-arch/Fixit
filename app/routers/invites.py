@@ -43,10 +43,14 @@ def _role_value(role: UserRole | str) -> str:
 
 
 def _out(invite: ClientInvite, raw_token: str | None = None) -> ClientInviteOut:
+    invite_status = invite.status.value if hasattr(invite.status, "value") else str(invite.status)
+    expires_now = datetime.now(invite.expires_at.tzinfo) if invite.expires_at.tzinfo else datetime.now()
+    if invite_status == "pending" and invite.expires_at <= expires_now:
+        invite_status = "expired"
     return ClientInviteOut(id=invite.id, client_id=invite.client_id, site_id=invite.site_id,
         target_role=_role_value(invite.target_role),
-        invited_email=invite.invited_email, status=invite.status.value if hasattr(invite.status, "value") else str(invite.status),
-        expires_at=invite.expires_at, accepted_at=invite.accepted_at, revoked_at=invite.revoked_at,
+        invited_email=invite.invited_email, status=invite_status,
+        created_at=invite.created_at, expires_at=invite.expires_at, accepted_at=invite.accepted_at, revoked_at=invite.revoked_at,
         join_url=_join_url(raw_token) if raw_token else None,
         qr_url=f"/client-portal/invites/{invite.id}/qr?token={raw_token}" if raw_token else None)
 

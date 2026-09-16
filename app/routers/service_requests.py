@@ -240,6 +240,7 @@ async def list_requests(db: AsyncSession = Depends(get_db), user: CurrentUser = 
             site_name=site.name, equipment_name=equipment.name, equipment_type=equipment_type,
             manufacturer=equipment.manufacturer, model=equipment.model, serial_number=equipment.serial_number,
             assigned_technician_id=request.assigned_technician_id, assigned_technician_name=technician_name,
+            approval_target=request.approval_target,
             created_at=request.created_at, completed_at=request.completed_at,
         )
         for request, equipment, equipment_type, site, client, technician_name in rows

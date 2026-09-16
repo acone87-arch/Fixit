@@ -46,7 +46,7 @@ async function registerPulseWorker() {
   if (!('serviceWorker' in navigator)) return null;
   const registrations = await navigator.serviceWorker.getRegistrations();
   await Promise.all(registrations.map(item => item.update().catch(() => null)));
-  return navigator.serviceWorker.register('/sw.js?v=20260909-5', { scope: '/' });
+  return navigator.serviceWorker.register('/sw.js?v=20260916-1', { scope: '/' });
 }
 
 async function enablePush() {
@@ -428,6 +428,28 @@ async function uploadEquipmentPhoto(equipmentId, file) {
   return api(`/equipment/${equipmentId}/photo`, { method: 'POST', body: form });
 }
 
+function humanError(error, fallback) {
+  const message = String(error?.message || '').trim();
+  if (!message || message.length > 240 || message.startsWith('[') || message.startsWith('{') || /internal server error/i.test(message)) return fallback;
+  return message;
+}
+
+async function uploadServiceRequestAttachment(requestId, kind, file) {
+  const form = new FormData();
+  const optimized = await optimizePhoto(file);
+  form.append('kind', kind);
+  form.append('file', optimized, optimized.name || 'request-photo.jpg');
+  return api(`/service-requests/${requestId}/attachments`, { method: 'POST', body: form });
+}
+
+async function uploadRepairAttachment(repairId, kind, file) {
+  const form = new FormData();
+  const payload = kind === 'document' ? file : await optimizePhoto(file);
+  form.append('kind', kind);
+  form.append('file', payload, payload.name || (kind === 'document' ? 'document.pdf' : `${kind}.jpg`));
+  return api(`/repairs/${repairId}/attachments`, { method: 'POST', body: form });
+}
+
 // ---------- Справочники (общие) ----------
 
 const EQUIPMENT_STATUS = {
@@ -677,10 +699,24 @@ async function renderClientPulse(content) {
 
 async function renderClientRequests(content) {
   const requests = await api('/client-portal/requests');
-  const cards = requests.length ? requests.map((item) => `<button class="client-request-card" data-client-request="${item.id}"><div><span>SR-${String(item.number).padStart(5,'0')}</span>${clientBadge(item.status)}</div><strong>${esc(item.title || item.description || 'Заявка')}</strong><p>${esc(item.equipment_name)} · ${esc(item.site_name || '')}</p><small>Создана: ${fmtDate(item.created_at)}</small></button>`).join('') : '<div class="client-empty">Нет активных заявок<br><small>✓ Всё оборудование работает</small></div>';
-  content.innerHTML = `<div class="page-header"><div><h1>Заявки</h1><div class="page-subtitle">Что происходит с вашим сервисом</div></div><button class="btn btn-primary" id="client-new-request">+ Создать</button></div><div class="client-filter"><button class="active">Все</button><button>Активные</button><button>Ожидают меня</button><button>Завершённые</button></div><div class="client-request-list">${cards}</div>`;
+  const filters = {
+    all: () => true,
+    active: (item) => !['completed', 'closed', 'cancelled'].includes(item.status),
+    approval: (item) => item.status === 'waiting_approval' && item.approval_target === 'client',
+    completed: (item) => item.status === 'completed',
+  };
+  const draw = (filter = 'all') => {
+    const visible = requests.filter(filters[filter] || filters.all);
+    content.querySelector('.client-request-list').innerHTML = visible.length ? visible.map((item) => `<button class="client-request-card" data-client-request="${item.id}"><div><span>SR-${String(item.number).padStart(5,'0')}</span>${clientBadge(item.status)}</div><strong>${esc(item.title || item.description || 'Заявка')}</strong><p>${esc(item.equipment_name)} · ${esc(item.site_name || '')}</p><small>Создана: ${fmtDate(item.created_at)}</small></button>`).join('') : '<div class="client-empty">В этой группе заявок нет</div>';
+    content.querySelectorAll('[data-client-request]').forEach((button) => button.addEventListener('click', () => navigateToServiceRequest(button.dataset.clientRequest)));
+  };
+  content.innerHTML = `<div class="page-header"><div><h1>Заявки</h1><div class="page-subtitle">Что происходит с вашим сервисом</div></div><button class="btn btn-primary" id="client-new-request">+ Создать</button></div><div class="client-filter" aria-label="Фильтр заявок"><button class="active" data-client-filter="all">Все</button><button data-client-filter="active">Активные</button><button data-client-filter="approval">Ожидают меня</button><button data-client-filter="completed">Завершённые</button></div><div class="client-request-list"></div>`;
   content.querySelector('#client-new-request').addEventListener('click', () => openClientRequestForm());
-  content.querySelectorAll('[data-client-request]').forEach((button) => button.addEventListener('click', () => navigateToServiceRequest(button.dataset.clientRequest)));
+  content.querySelectorAll('[data-client-filter]').forEach((button) => button.addEventListener('click', () => {
+    content.querySelectorAll('[data-client-filter]').forEach((item) => item.classList.toggle('active', item === button));
+    draw(button.dataset.clientFilter);
+  }));
+  draw();
 }
 
 function requestResultHtml(item) {
@@ -715,8 +751,10 @@ async function renderClientRequest(content, id) {
   const timeline = events.map((entry) => `<div class="client-timeline-item"><i></i><div><strong>${esc(entry.type === 'approval.rejected' ? 'Согласование отклонено' : entry.type === 'approval.approved' ? 'Работы согласованы' : CLIENT_STATUS[entry.details?.to] || entry.message)}</strong>${entry.details?.comment ? `<p>${esc(entry.details.comment)}</p>` : ''}<small>${fmtDate(entry.at)}</small></div></div>`).join('') || '<div class="client-empty">История появится после начала работы.</div>';
   const proposal = [...events].reverse().find((entry) => entry.type === 'request.waiting_approval')?.details?.approval || {};
   const approvalPhotos = (item.request_attachments || []).filter((photo) => photo.kind === 'approval');
+  const clientProblemPhotos = (item.request_attachments || []).filter((photo) => photo.kind === 'problem' && String(photo.media_type || '').startsWith('image/'));
+  const problemGallery = clientProblemPhotos.length ? `<div class="sr-photo-grid sr-request-photo-grid">${clientProblemPhotos.map((photo) => `<button type="button" class="sr-photo-thumb" data-client-request-photo="${photo.id}"><span>К заявке</span><img alt="Фото проблемы"></button>`).join('')}</div>` : '';
   const approval = item.status === 'waiting_approval' && item.approval_target === 'client' ? `<section class="client-approval"><span>ТРЕБУЕТСЯ СОГЛАСОВАНИЕ</span><h3>Сервис просит подтвердить работы</h3><p>Диагностика: ${esc(proposal.diagnostic || item.description || 'Не указана')}</p><p>Предлагаемые работы: ${esc(proposal.work || 'Не указаны')}</p><p>Запчасти: ${esc((proposal.parts || []).map((part) => `${part.name} ×${part.quantity}`).join(', ') || 'Не указаны')}</p>${proposal.comment ? `<p>${esc(proposal.comment)}</p>` : ''}<div class="sr-photo-grid">${approvalPhotos.map((photo) => `<button type="button" class="sr-photo-thumb" data-client-approval-photo="${photo.id}"><span>Фото для согласования</span><img alt="Фото для согласования"></button>`).join('')}</div><button class="btn btn-secondary" id="client-reject">Отклонить</button><button class="btn btn-primary" id="client-approve">Согласовать</button></section>` : '';
-  content.innerHTML = `<section class="client-request-detail"><button class="sr-back" id="client-back">← К заявкам</button><header><span>SR-${String(item.number).padStart(5,'0')}</span>${clientBadge(item.status)}</header><h1>${esc(item.title || item.description || 'Заявка')}</h1><section><h3>Оборудование</h3><strong>${esc(item.equipment_type || item.equipment_name)}</strong><p>${esc([item.manufacturer,item.model].filter(Boolean).join(' '))} · S/N ${esc(item.serial_number)}</p><small>${esc(item.site_name || '')}</small></section><section><h3>Проблема</h3><p>${esc(item.description || 'Описание не добавлено')}</p></section>${approval}${requestResultHtml(item)}<section><h3>Ход заявки</h3>${timeline}</section></section>`;
+  content.innerHTML = `<section class="client-request-detail"><button class="sr-back" id="client-back">← К заявкам</button><header><span>SR-${String(item.number).padStart(5,'0')}</span>${clientBadge(item.status)}</header><h1>${esc(item.title || item.description || 'Заявка')}</h1><section><h3>Оборудование</h3><strong>${esc(item.equipment_type || item.equipment_name)}</strong><p>${esc([item.manufacturer,item.model].filter(Boolean).join(' '))} · S/N ${esc(item.serial_number)}</p><small>${esc(item.site_name || '')}</small></section><section><h3>Проблема</h3><p>${esc(item.description || 'Описание не добавлено')}</p>${problemGallery}<button type="button" class="btn btn-secondary btn-sm" id="client-attachment-add">Добавить фото к заявке</button></section>${approval}${requestResultHtml(item)}<section><h3>Ход заявки</h3>${timeline}</section></section>`;
   bindRequestResult(content, (url) => activeClientPhotoUrls.push(url));
   content.querySelector('#client-back').addEventListener('click', () => location.hash = 'requests');
   content.querySelectorAll('[data-client-approval-photo]').forEach((button) => {
@@ -724,21 +762,33 @@ async function renderClientRequest(content, id) {
     apiBlob(photo.download_url).then((blob) => { const url = URL.createObjectURL(blob); activeClientPhotoUrls.push(url); button.querySelector('img').src = url; }).catch(() => { button.querySelector('span').textContent = 'Не удалось загрузить фото'; });
     button.addEventListener('click', () => openProtectedImage(photo.download_url, 'Фото для согласования'));
   });
+  content.querySelectorAll('[data-client-request-photo]').forEach((button) => {
+    const photo = clientProblemPhotos.find((item) => item.id === button.dataset.clientRequestPhoto);
+    apiBlob(photo.download_url).then((blob) => { const url = URL.createObjectURL(blob); activeClientPhotoUrls.push(url); button.querySelector('img').src = url; }).catch(() => { button.classList.add('is-unavailable'); });
+    button.addEventListener('click', () => openProtectedImage(photo.download_url, 'Фото проблемы'));
+  });
   const approve = async (action) => { const comment = action === 'rejected' ? prompt('Причина отказа (обязательно):') : prompt('Комментарий (необязательно):'); if (action === 'rejected' && !comment?.trim()) return; await api(`/client-portal/requests/${id}/approval`, { method: 'PATCH', body: JSON.stringify({ action, comment: comment || null }) }); await renderClientRequest(content, id); };
   content.querySelector('#client-approve')?.addEventListener('click', () => approve('approved'));
   content.querySelector('#client-reject')?.addEventListener('click', () => approve('rejected'));
+  content.querySelector('#client-attachment-add')?.addEventListener('click', () => openRequestAttachmentPicker(item, true));
 }
 
 async function renderClientEquipment(content) {
   const equipment = await api('/client-portal/equipment');
   const empty = state.me.role === 'client_site_user' ? '<div class="client-empty"><strong>На объекте пока нет оборудования</strong><br><small>Добавьте первую единицу, чтобы вести паспорт, QR и заявки.</small><br><button class="btn btn-primary" id="client-empty-add-equipment">Добавить оборудование</button></div>' : '<div class="client-empty">Нет оборудования на объекте</div>';
-  const cards = equipment.length ? equipment.map((item) => `<button class="client-equipment-card" data-client-equipment="${item.id}">${item.primary_photo ? `<img data-client-equipment-photo="${item.id}" alt="Фото оборудования">` : '<div class="client-equipment-placeholder">FIXIT</div>'}<div><strong>${esc([item.manufacturer,item.model].filter(Boolean).join(' ') || item.name)}</strong><span>${esc(item.name)}</span><small>S/N ${esc(item.serial_number)} · ${esc(item.site_name)}</small>${clientBadge(item.status === 'needs_repair' ? 'in_progress' : 'completed')}</div></button>`).join('') : empty;
   const addButton = state.me.role === 'client_site_user' ? '<button class="btn btn-primary" id="client-add-equipment">+ Добавить оборудование</button>' : '';
-  content.innerHTML = `<div class="page-header"><div><h1>Оборудование</h1><div class="page-subtitle">Моё оборудование и сервис</div></div>${addButton}</div><input class="client-search" placeholder="Поиск оборудования"><div class="client-equipment-list">${cards}</div>`;
+  const draw = (query = '') => {
+    const needle = query.trim().toLocaleLowerCase('ru-RU');
+    const visible = equipment.filter((item) => !needle || [item.name, item.manufacturer, item.model, item.serial_number, item.site_name, item.inventory_number].some((value) => String(value || '').toLocaleLowerCase('ru-RU').includes(needle)));
+    content.querySelector('.client-equipment-list').innerHTML = visible.length ? visible.map((item) => `<button class="client-equipment-card" data-client-equipment="${item.id}">${item.primary_photo ? `<img data-client-equipment-photo="${item.id}" alt="Фото оборудования">` : '<div class="client-equipment-placeholder">FIXIT</div>'}<div><strong>${esc([item.manufacturer,item.model].filter(Boolean).join(' ') || item.name)}</strong><span>${esc(item.name)}</span><small>S/N ${esc(item.serial_number)} · ${esc(item.site_name)}${item.inventory_number ? ` · Инв. № ${esc(item.inventory_number)}` : ''}</small>${clientBadge(item.status === 'needs_repair' ? 'in_progress' : 'completed')}</div></button>`).join('') : (needle ? '<div class="client-empty">Ничего не найдено. Проверьте модель, серийный номер или объект.</div>' : empty);
+    content.querySelectorAll('[data-client-equipment]').forEach((button) => button.addEventListener('click', () => openEquipmentPassport(button.dataset.clientEquipment)));
+    content.querySelectorAll('[data-client-equipment-photo]').forEach((image) => apiBlob(`/equipment/${image.dataset.clientEquipmentPhoto}/photo`).then((blob) => { const url = URL.createObjectURL(blob); activeClientPhotoUrls.push(url); image.src = url; }).catch(() => image.remove()));
+    content.querySelector('#client-empty-add-equipment')?.addEventListener('click', async () => { await ensureCustomers(true); await openCreateEquipmentModal(); });
+  };
+  content.innerHTML = `<div class="page-header"><div><h1>Оборудование</h1><div class="page-subtitle">Моё оборудование и сервис</div></div>${addButton}</div><label class="client-search-label" for="client-equipment-search">Поиск оборудования</label><input class="client-search" id="client-equipment-search" type="search" placeholder="Название, модель, S/N, объект или инв. №"><div class="client-equipment-list"></div>`;
   content.querySelector('#client-add-equipment')?.addEventListener('click', async () => { await ensureCustomers(true); await openCreateEquipmentModal(); });
-  content.querySelector('#client-empty-add-equipment')?.addEventListener('click', async () => { await ensureCustomers(true); await openCreateEquipmentModal(); });
-  content.querySelectorAll('[data-client-equipment]').forEach((button) => button.addEventListener('click', () => openEquipmentPassport(button.dataset.clientEquipment)));
-  content.querySelectorAll('[data-client-equipment-photo]').forEach((image) => apiBlob(`/equipment/${image.dataset.clientEquipmentPhoto}/photo`).then((blob) => { const url = URL.createObjectURL(blob); activeClientPhotoUrls.push(url); image.src = url; }).catch(() => image.remove()));
+  content.querySelector('#client-equipment-search').addEventListener('input', (event) => draw(event.target.value));
+  draw();
 }
 
 async function renderClientDocuments(content) {
@@ -769,6 +819,67 @@ async function openServiceRequest(id) {
   } catch (e) {
     toast(`Не удалось открыть заявку: ${e.message || 'неизвестная ошибка'}`, 'error');
   }
+}
+
+async function openTechnicianAssignment(item) {
+  if (item.status !== 'new' || !['owner', 'admin', 'dispatcher'].includes(state.me?.role)) return;
+  let technicians;
+  try {
+    technicians = (await api('/users')).filter((user) => user.role === 'technician' && user.is_active);
+  } catch (error) {
+    toast(humanError(error, 'Не удалось загрузить техников'), 'error');
+    return;
+  }
+  if (!technicians.length) return toast('Нет активных техников для назначения', 'error');
+  const backdrop = openModal('Назначить техника', `<div class="field"><label>Техник</label><select id="assignment-technician"><option value="">Выберите техника</option>${technicians.map((tech) => `<option value="${tech.id}">${esc(tech.full_name)}</option>`).join('')}</select></div><p class="modal-note">После назначения заявка появится у выбранного техника. Менять исполнителя после начала работ нельзя.</p>`, '<button class="btn btn-secondary" id="assignment-cancel">Отмена</button><button class="btn btn-primary" id="assignment-save">Назначить</button>');
+  backdrop.querySelector('#assignment-cancel').addEventListener('click', closeModal);
+  backdrop.querySelector('#assignment-save').addEventListener('click', async (event) => {
+    const technicianId = backdrop.querySelector('#assignment-technician').value;
+    if (!technicianId) return toast('Выберите техника', 'error');
+    event.currentTarget.disabled = true;
+    event.currentTarget.textContent = 'Назначение…';
+    try {
+      await api(`/service-requests/${item.id}/assign?technician_id=${encodeURIComponent(technicianId)}`, { method: 'PATCH' });
+      closeModal();
+      toast('Техник назначен');
+      await openServiceRequest(item.id);
+    } catch (error) {
+      event.currentTarget.disabled = false;
+      event.currentTarget.textContent = 'Назначить';
+      toast(humanError(error, 'Не удалось назначить техника'), 'error');
+    }
+  });
+}
+
+function openRequestAttachmentPicker(item, clientOnly = false) {
+  const choices = clientOnly ? [['problem', 'Фото проблемы']] : [
+    ['problem', 'Фото проблемы'],
+    ...(item.repair_id ? [['before', 'Фото до ремонта'], ['after', 'Фото после ремонта'], ['document', 'Документ PDF']] : []),
+  ];
+  const backdrop = openModal('Добавить файл или фото', `<div class="field"><label>Тип вложения</label><select id="attachment-kind">${choices.map(([value, label]) => `<option value="${value}">${label}</option>`).join('')}</select></div><div class="field"><label>Файл</label><input id="attachment-file" type="file" accept="image/*"></div><p class="modal-note">Подпись не добавляется этим действием: существующая серверная запись не является отдельным юридическим процессом электронной подписи.</p>`, '<button class="btn btn-secondary" id="attachment-cancel">Отмена</button><button class="btn btn-primary" id="attachment-save">Загрузить</button>');
+  const kind = backdrop.querySelector('#attachment-kind');
+  const file = backdrop.querySelector('#attachment-file');
+  const syncAccept = () => { file.accept = kind.value === 'document' ? 'application/pdf,.pdf' : 'image/*'; file.value = ''; };
+  kind.addEventListener('change', syncAccept);
+  backdrop.querySelector('#attachment-cancel').addEventListener('click', closeModal);
+  backdrop.querySelector('#attachment-save').addEventListener('click', async (event) => {
+    const selected = file.files?.[0];
+    if (!selected) return toast('Выберите файл', 'error');
+    event.currentTarget.disabled = true;
+    event.currentTarget.textContent = 'Загрузка…';
+    try {
+      if (kind.value === 'problem') await uploadServiceRequestAttachment(item.id, 'problem', selected);
+      else await uploadRepairAttachment(item.repair_id, kind.value, selected);
+      closeModal();
+      toast('Вложение добавлено');
+      if (clientOnly) await renderClientRequest(document.getElementById('content'), item.id);
+      else await openServiceRequest(item.id);
+    } catch (error) {
+      event.currentTarget.disabled = false;
+      event.currentTarget.textContent = 'Загрузить';
+      toast(humanError(error, 'Не удалось загрузить вложение'), 'error');
+    }
+  });
 }
 
 function renderServiceRequestDetail(content, item) {
@@ -813,15 +924,21 @@ function renderServiceRequestDetail(content, item) {
     const approvalPhotos = requestPhotos.filter((attachment) => attachment.kind === 'approval');
     const approvalContext = item.status === 'waiting_approval' ? `<section class="approval-context"><span>Требуется согласование</span><strong>${esc(item.equipment_name || 'Оборудование')}</strong><p>Проблема: ${esc(item.description || 'Не указана')}</p><p>Диагностика: ${esc(approval.diagnostic || 'Не указана')}</p><p>Предлагаемые работы: ${esc(approval.work || 'Не указаны')}</p><p>Запчасти: ${esc((approval.parts || []).map((part) => `${part.name} ×${part.quantity}`).join(', ') || 'Не выбраны')}</p><p>Комментарий мастера: ${esc(approval.comment || 'Не указан')}</p>${approvalPhotos.length ? `<p>Фотографии для согласования: ${approvalPhotos.length}</p><div class="sr-photo-grid sr-approval-photo-grid">${approvalPhotos.map((attachment) => `<button type="button" class="sr-photo-thumb" data-request-photo="${attachment.id}"><span>Для согласования</span><img alt="Фото для согласования"></button>`).join('')}</div>` : '<p>Фотографии не добавлены</p>'}</section>` : '';
     const approvalActions = item.status === 'waiting_approval' && item.approval_target === 'internal' && ['owner', 'admin', 'dispatcher'].includes(state.me?.role) ? '<button class="btn btn-secondary" id="approval-reject">Отклонить</button><button class="btn btn-primary" id="approval-approve">Согласовать</button>' : '';
+    const canAssign = item.status === 'new' && ['owner', 'admin', 'dispatcher'].includes(state.me?.role);
+    const assignment = `<div class="sr-assignment"><span>Назначенный техник</span><strong>${esc(item.assigned_technician_name || 'Не назначен')}</strong>${canAssign ? '<button type="button" class="btn btn-secondary btn-sm" id="request-assign-technician">Назначить техника</button>' : ''}</div>`;
+    const canAddAttachment = ['owner', 'admin', 'dispatcher'].includes(state.me?.role);
+    const attachmentAction = canAddAttachment ? '<button type="button" class="btn btn-secondary btn-sm" id="request-add-attachment">Добавить файл / фото</button>' : '';
     if (activeServiceRequestDetailCleanup) activeServiceRequestDetailCleanup();
     const objectUrls = new Set();
     activeServiceRequestDetailCleanup = () => {
       objectUrls.forEach((url) => URL.revokeObjectURL(url));
       objectUrls.clear();
     };
-    content.innerHTML = `<section class="service-request-screen"><button class="sr-back" id="request-detail-back">← <span>К заявкам</span></button><section class="service-request-detail"><header class="sr-detail-header"><div><span>SR-${String(item.number).padStart(5, '0')}</span><h2>Заявка на сервис</h2></div>${statusBadge}</header>${rejectionNotice}<section class="sr-equipment-hero">${equipmentPhoto}<div><span class="sr-kicker">${esc(item.equipment_type || item.equipment_name || 'Оборудование')}</span><h3>${esc([item.manufacturer, item.model].filter(Boolean).join(' ') || item.equipment_name || 'Оборудование')}</h3><p>S/N ${esc(item.serial_number || '—')}</p></div></section><section class="sr-detail-grid"><div><span>Клиент / объект</span><strong>${esc(item.client_name || 'Клиент не указан')}</strong><small>${esc(item.site_name || 'Объект не указан')}</small></div><div><span>Мастер</span><strong>${esc(item.assigned_technician_name || 'Не назначен')}</strong></div></section><section class="sr-problem"><span>Проблема</span><p>${esc(item.description || 'Без описания')}</p></section>${approvalContext}${requestResultHtml(item)}<section class="sr-photos"><h3>Фотографии</h3>${mediaGallery}</section><section class="sr-timeline"><h3>Ход заявки</h3>${history}</section>${approvalActions ? `<footer class="sr-detail-actions">${approvalActions}</footer>` : ''}</section></section>`;
+    content.innerHTML = `<section class="service-request-screen"><button class="sr-back" id="request-detail-back">← <span>К заявкам</span></button><section class="service-request-detail"><header class="sr-detail-header"><div><span>SR-${String(item.number).padStart(5, '0')}</span><h2>Заявка на сервис</h2></div>${statusBadge}</header>${rejectionNotice}<section class="sr-equipment-hero">${equipmentPhoto}<div><span class="sr-kicker">${esc(item.equipment_type || item.equipment_name || 'Оборудование')}</span><h3>${esc([item.manufacturer, item.model].filter(Boolean).join(' ') || item.equipment_name || 'Оборудование')}</h3><p>S/N ${esc(item.serial_number || '—')}</p></div></section><section class="sr-detail-grid"><div><span>Клиент / объект</span><strong>${esc(item.client_name || 'Клиент не указан')}</strong><small>${esc(item.site_name || 'Объект не указан')}</small></div>${assignment}</section><section class="sr-problem"><span>Проблема</span><p>${esc(item.description || 'Без описания')}</p>${attachmentAction}</section>${approvalContext}${requestResultHtml(item)}<section class="sr-photos"><h3>Фотографии</h3>${mediaGallery}</section><section class="sr-timeline"><h3>Ход заявки</h3>${history}</section>${approvalActions ? `<footer class="sr-detail-actions">${approvalActions}</footer>` : ''}</section></section>`;
     bindRequestResult(content, (url) => objectUrls.add(url));
     content.querySelector('#request-detail-back').addEventListener('click', () => { location.hash = 'requests'; });
+    content.querySelector('#request-assign-technician')?.addEventListener('click', () => openTechnicianAssignment(item));
+    content.querySelector('#request-add-attachment')?.addEventListener('click', () => openRequestAttachmentPicker(item));
     if (item.primary_photo) {
       apiBlob(`/equipment/${item.equipment_id}/photo`).then((blob) => {
         const image = content.querySelector('#sr-equipment-photo img');
@@ -1263,7 +1380,7 @@ async function ensureCustomers(force = false) {
 
 async function renderClients(content) {
   await ensureCustomers(true);
-  const canEdit = state.me.role !== 'technician';
+  const canEdit = ['owner', 'admin', 'dispatcher'].includes(state.me.role);
   const clientName = (id) => (state.clients.find((client) => client.id === id) || {}).name || '—';
   content.innerHTML = `
     <div class="page-header">
@@ -1320,7 +1437,7 @@ async function renderClientDetail(content, clientId, tab = 'overview') {
   const client = state.clients.find((item) => item.id === clientId);
   if (!client) { content.innerHTML = '<div class="section-loading">Клиент не найден</div>'; return; }
   const canManageUsers = ['owner', 'admin', 'dispatcher'].includes(state.me.role);
-  const canEditClient = ['admin', 'dispatcher'].includes(state.me.role);
+  const canEditClient = ['owner', 'admin', 'dispatcher'].includes(state.me.role);
   const canManageClientTeam = canManageUsers || state.me.role === 'client_admin';
   let accessCount = null;
   let accessCountError = null;
@@ -1334,7 +1451,8 @@ async function renderClientDetail(content, clientId, tab = 'overview') {
   }
   const usersTabLabel = accessCount === null ? 'Пользователи' : `Пользователи (${accessCount})`;
   const tabs = [['overview', 'Обзор'], ['sites', 'Объекты'], ['equipment', 'Оборудование'], ['users', canManageClientTeam ? usersTabLabel : 'Пользователи']];
-  const actions = ['owner','admin','dispatcher'].includes(state.me.role) ? `<div class="client-detail-actions">${canEditClient ? '<button class="btn btn-secondary" id="client-action-edit">Редактировать</button>' : ''}<button class="btn btn-secondary" id="client-action-site">+ Объект</button><button class="btn btn-secondary" id="client-action-user">+ Пользователь</button><button class="btn btn-primary" id="client-action-equipment">+ Оборудование</button></div>` : '';
+  const canCreateEquipment = ['owner', 'admin', 'dispatcher'].includes(state.me.role);
+  const actions = canEditClient || canCreateEquipment ? `<div class="client-detail-actions">${canEditClient ? '<button class="btn btn-secondary" id="client-action-edit">Редактировать</button><button class="btn btn-secondary" id="client-action-site">+ Объект</button><button class="btn btn-secondary" id="client-action-user">+ Пользователь</button>' : ''}${canCreateEquipment ? '<button class="btn btn-primary" id="client-action-equipment">+ Оборудование</button>' : ''}</div>` : '';
   content.innerHTML = `<section class="client-detail-screen"><button class="sr-back" id="client-detail-back">← Клиенты</button><header class="client-detail-hero"><div><span>КЛИЕНТ</span><h1>${esc(client.legal_name || client.name)}</h1><p>${client.is_active ? '● Активен' : '● Отключён'}</p></div>${actions}</header><div class="client-detail-meta"><div><span>ИНН</span><strong>${esc(client.tax_id || 'Не указан')}</strong></div><div><span>Контакт</span><strong>${esc(client.contact_name || 'Не указан')}</strong><small>${esc([client.contact_phone, client.contact_email].filter(Boolean).join(' · ') || 'Телефон и email не указаны')}</small></div></div><nav class="client-detail-tabs">${tabs.map(([key,label]) => `<button data-client-tab="${key}" class="${tab === key ? 'active' : ''}">${label}</button>`).join('')}</nav><div id="client-detail-panel"></div></section>`;
   content.querySelector('#client-detail-back').addEventListener('click', () => location.hash = 'clients');
   content.querySelectorAll('[data-client-tab]').forEach((button) => button.addEventListener('click', () => location.hash = `clients/${client.id}/${button.dataset.clientTab}`));
@@ -1401,8 +1519,10 @@ async function renderClientSiteDetail(content, client, siteId) {
   const [items, summary] = await Promise.all([api('/equipment'), api(`/clients/${client.id}/summary`)]);
   const equipment = items.filter((item) => item.site_id === site.id);
   const activeRequests = summary.sites?.[site.id]?.active_requests || 0;
-  content.innerHTML = `<section class="client-detail-screen"><button class="sr-back" id="client-site-back">← ${esc(client.legal_name || client.name)}</button><header class="client-detail-hero"><div><span>ОБЪЕКТ</span><h1>${esc(site.name)}</h1><p>${esc(site.address || 'Адрес не указан')}</p></div></header><div class="client-detail-meta"><div><span>КОНТАКТ</span><strong>${esc(site.contact_name || 'Не указан')}</strong><small>${esc(site.contact_phone || '')}</small></div><div><span>АКТИВНЫЕ ЗАЯВКИ</span><strong>${activeRequests}</strong><small>Оборудование: ${equipment.length}</small></div></div><section class="client-site-equipment"><h2>Оборудование на объекте</h2><div class="client-equipment-detail-list">${equipment.length ? equipment.map((item) => `<button class="client-equipment-detail-card" data-client-equipment="${item.id}"><span class="client-equipment-photo" data-client-equipment-photo="${item.id}">FIXIT</span><div><strong>${esc([item.manufacturer, item.model].filter(Boolean).join(' ') || item.name)}</strong><span>${esc(item.name || 'Оборудование')}</span><small>S/N ${esc(item.serial_number || '—')}</small>${badge(EQUIPMENT_STATUS, item.status)}</div></button>`).join('') : '<div class="client-empty">На объекте пока нет оборудования.</div>'}</div></section></section>`;
+  const editAction = ['owner', 'admin', 'dispatcher'].includes(state.me.role) ? '<button class="btn btn-secondary" id="client-site-edit">Редактировать объект</button>' : '';
+  content.innerHTML = `<section class="client-detail-screen"><button class="sr-back" id="client-site-back">← ${esc(client.legal_name || client.name)}</button><header class="client-detail-hero"><div><span>ОБЪЕКТ</span><h1>${esc(site.name)}</h1><p>${esc(site.address || 'Адрес не указан')}</p></div>${editAction}</header><div class="client-detail-meta"><div><span>КОНТАКТ</span><strong>${esc(site.contact_name || 'Не указан')}</strong><small>${esc([site.contact_phone, site.contact_email].filter(Boolean).join(' · '))}</small></div><div><span>АКТИВНЫЕ ЗАЯВКИ</span><strong>${activeRequests}</strong><small>Оборудование: ${equipment.length}</small></div></div><section class="client-site-equipment"><h2>Оборудование на объекте</h2><div class="client-equipment-detail-list">${equipment.length ? equipment.map((item) => `<button class="client-equipment-detail-card" data-client-equipment="${item.id}"><span class="client-equipment-photo" data-client-equipment-photo="${item.id}">FIXIT</span><div><strong>${esc([item.manufacturer, item.model].filter(Boolean).join(' ') || item.name)}</strong><span>${esc(item.name || 'Оборудование')}</span><small>S/N ${esc(item.serial_number || '—')}</small>${badge(EQUIPMENT_STATUS, item.status)}</div></button>`).join('') : '<div class="client-empty">На объекте пока нет оборудования.</div>'}</div></section></section>`;
   content.querySelector('#client-site-back').addEventListener('click', () => location.hash = `clients/${client.id}/sites`);
+  content.querySelector('#client-site-edit')?.addEventListener('click', () => openSiteEditModal(site, client));
   bindClientEquipmentCards(content);
 }
 
@@ -1419,15 +1539,25 @@ function bindClientEquipmentCards(container) {
 async function renderClientUsersPanel(panel, client) {
   panel.innerHTML = '<div class="section-loading">Загрузка пользователей…</div>';
   try {
-    const accesses = await api(`/client-portal/access?client_id=${encodeURIComponent(client.id)}`);
+    const [accesses, invites] = await Promise.all([
+      api(`/client-portal/access?client_id=${encodeURIComponent(client.id)}`),
+      api(`/client-portal/clients/${client.id}/invites`),
+    ]);
     const grouped = Object.values(accesses.reduce((result, access) => {
       const group = result[access.user_id] || (result[access.user_id] = { ...access, accesses: [] });
       group.accesses.push(access); return result;
     }, {}));
-    panel.innerHTML = `<div class="client-users-head"><div><span>КОМАНДА</span><p>Доступ к личному кабинету клиента и его объектам.</p></div><button class="btn btn-secondary" id="client-invite-manager">Пригласить менеджера</button><button class="btn btn-primary" id="client-invite-director">Подключить руководителя</button></div><div class="client-users-list">${grouped.length ? grouped.map((group) => `<article class="client-user-group"><header><div><strong>${esc(group.full_name)}</strong><small>${esc(group.email)}</small></div><span>${esc(clientRoleLabel(group.role))}</span></header><div class="client-user-scopes">${group.accesses.map((access) => `<div class="client-user-row ${access.is_active ? '' : 'is-disabled'}"><div><span>${esc(clientAccessLabel(access))}</span><small>${access.is_active ? 'Активен' : 'Отключён'}</small></div><button class="client-user-more" data-client-access-menu="${access.id}" aria-label="Действия для доступа">⋯</button></div>`).join('')}</div></article>`).join('') : '<div class="client-empty">У клиента пока нет пользователей кабинета</div>'}</div>`;
+    const statusLabels = { pending: 'Ожидает', accepted: 'Принято', revoked: 'Отозвано', expired: 'Истекло' };
+    const siteName = (siteId) => state.sites.find((site) => site.id === siteId)?.name || 'Объект';
+    panel.innerHTML = `<div class="client-users-head"><div><span>КОМАНДА</span><p>Пользователи, приглашения и сервисные техники клиента.</p></div><button class="btn btn-secondary" id="client-invite-manager">Пригласить менеджера</button><button class="btn btn-primary" id="client-invite-director">Подключить руководителя</button></div><section class="team-subsection"><h2>Пользователи</h2><div class="client-users-list">${grouped.length ? grouped.map((group) => `<article class="client-user-group"><header><div><strong>${esc(group.full_name)}</strong><small>${esc(group.email)}</small></div><span>${esc(clientRoleLabel(group.role))}</span></header><div class="client-user-scopes">${group.accesses.map((access) => `<div class="client-user-row ${access.is_active ? '' : 'is-disabled'}"><div><span>${esc(clientAccessLabel(access))}</span><small>${access.is_active ? 'Активен' : 'Отключён'}</small></div><button class="client-user-more" data-client-access-menu="${access.id}" aria-label="Действия для доступа">⋯</button></div>`).join('')}</div></article>`).join('') : '<div class="client-empty">У клиента пока нет пользователей кабинета</div>'}</div></section><section class="team-subsection"><h2>Приглашения</h2><div class="invite-list">${invites.length ? invites.map((invite) => `<article class="invite-row"><div><strong>${invite.target_role === 'client_admin' ? 'Руководитель' : 'Менеджер объекта'}</strong><span>${invite.site_id ? esc(siteName(invite.site_id)) : 'Все объекты'}${invite.invited_email ? ` · ${esc(invite.invited_email)}` : ''}</span><small>Создано: ${fmtDate(invite.created_at)} · До: ${fmtDate(invite.expires_at)}</small></div><span class="invite-status invite-status-${esc(invite.status)}">${esc(statusLabels[invite.status] || invite.status)}</span>${invite.status === 'pending' ? `<button class="btn btn-secondary btn-sm" data-invite-revoke="${invite.id}">Отозвать</button>` : ''}</article>`).join('') : '<div class="client-empty">Приглашений пока нет. Ссылка и QR показываются только сразу после создания.</div>'}</div><p class="team-note">Из соображений безопасности готовую ссылку нельзя открыть повторно: Fixit хранит только hash токена. Для новой ссылки создайте новое приглашение.</p></section>`;
     const refresh = () => renderClientDetail(document.getElementById('content'), client.id, 'users');
     panel.querySelector('#client-invite-manager').addEventListener('click', () => openClientInviteModal(client, 'site-manager'));
     panel.querySelector('#client-invite-director').addEventListener('click', () => openClientInviteModal(client, 'director'));
+    panel.querySelectorAll('[data-invite-revoke]').forEach((button) => button.addEventListener('click', async () => {
+      button.disabled = true;
+      try { await api(`/client-portal/invites/${button.dataset.inviteRevoke}/revoke`, { method: 'POST' }); toast('Приглашение отозвано'); await refresh(); }
+      catch (error) { button.disabled = false; toast(humanError(error, 'Не удалось отозвать приглашение'), 'error'); }
+    }));
     panel.querySelectorAll('[data-client-access-menu]').forEach((button) => button.addEventListener('click', () => {
       const access = accesses.find((item) => item.id === button.dataset.clientAccessMenu);
       if (access) openClientAccessActions(client, access, refresh, false);
@@ -1474,7 +1604,7 @@ async function openClientUsersModal(client) {
 
 async function openClientUserEditor(client, access = null, done = () => {}, reopenModal = true) {
   let users = [];
-  try { users = await api('/users'); } catch (error) { return toast(error.message, 'error'); }
+  try { if (!access) users = await api('/users'); } catch (error) { return toast(error.message, 'error'); }
   const clientUsers = users.filter((item) => ['client_admin', 'client_site_user'].includes(item.role));
   const sites = state.sites.filter((site) => site.client_id === client.id && site.is_active);
   const backdrop = openModal(access ? 'Изменить доступ' : 'Добавить пользователя', `
@@ -1615,6 +1745,24 @@ function openCreateSiteModal(preselectedClientId = null) {
       closeModal(); toast('Объект создан'); await router();
       if (['owner', 'admin'].includes(state.me.role)) await openInventoryBatches(createdSite.id);
     } catch (e) { toast(e.message, 'error'); }
+  });
+}
+
+function openSiteEditModal(site, client) {
+  if (!['owner', 'admin', 'dispatcher'].includes(state.me.role)) return;
+  const backdrop = openModal('Редактировать объект', `<form id="site-edit-form"><div class="field"><label>Клиент</label><input value="${esc(client.legal_name || client.name)}" disabled></div><div class="field"><label>Название объекта</label><input id="f-site-name" value="${esc(site.name)}" required></div><div class="field"><label>Адрес</label><input id="f-site-address" value="${esc(site.address || '')}"></div><div class="field-row"><div class="field"><label>Контактное лицо</label><input id="f-site-contact" value="${esc(site.contact_name || '')}"></div><div class="field"><label>Телефон</label><input id="f-site-phone" value="${esc(site.contact_phone || '')}"></div></div><div class="field"><label>Email</label><input type="email" id="f-site-email" value="${esc(site.contact_email || '')}"></div><div class="field"><label><input type="checkbox" id="f-site-active" ${site.is_active ? 'checked' : ''}> Объект активен</label></div></form>`, '<button class="btn btn-secondary" id="modal-cancel">Отмена</button><button class="btn btn-primary" id="modal-save">Сохранить</button>');
+  backdrop.querySelector('#modal-cancel').addEventListener('click', closeModal);
+  backdrop.querySelector('#modal-save').addEventListener('click', async (event) => {
+    const name = backdrop.querySelector('#f-site-name').value.trim();
+    if (name.length < 2) return toast('Укажите название объекта', 'error');
+    event.currentTarget.disabled = true;
+    event.currentTarget.textContent = 'Сохранение…';
+    try {
+      await api(`/sites/${site.id}`, { method: 'PATCH', body: JSON.stringify({ name, address: backdrop.querySelector('#f-site-address').value.trim() || null, contact_name: backdrop.querySelector('#f-site-contact').value.trim() || null, contact_phone: backdrop.querySelector('#f-site-phone').value.trim() || null, contact_email: backdrop.querySelector('#f-site-email').value.trim() || null, is_active: backdrop.querySelector('#f-site-active').checked }) });
+      await ensureCustomers(true);
+      closeModal(); toast('Объект обновлён');
+      await renderClientSiteDetail(document.getElementById('content'), client, site.id);
+    } catch (error) { event.currentTarget.disabled = false; event.currentTarget.textContent = 'Сохранить'; toast(humanError(error, 'Не удалось обновить объект'), 'error'); }
   });
 }
 
@@ -2325,18 +2473,21 @@ async function openClientInviteModal(client, kind) {
   emailInput.value = '';
   backdrop.querySelector('#modal-cancel').addEventListener('click', closeModal);
   backdrop.querySelector('#modal-save').addEventListener('click', async () => {
+    const saveButton = backdrop.querySelector('#modal-save');
     const site_id = manager ? backdrop.querySelector('#invite-site').value : null;
     if (manager && !site_id) return toast('Выберите объект', 'error');
     const invited_email = emailInput.value.trim();
     if (invited_email && !emailInput.checkValidity()) {
       return toast('Укажите корректный email или оставьте поле пустым', 'error');
     }
+    saveButton.disabled = true;
+    saveButton.textContent = 'Создание…';
     try {
       const invite = await api(`/client-portal/clients/${client.id}/invites/${kind}`, {method:'POST', body: JSON.stringify({site_id, invited_email: invited_email || null})});
       backdrop.querySelector('#modal-body').innerHTML = `<p>Скопируйте ссылку или покажите QR сотруднику. Она действует до ${fmtDate(invite.expires_at)} и принимается один раз.</p><div class="field"><label>Ссылка-приглашение</label><input value="${esc(invite.join_url)}" readonly id="invite-url"></div><div id="invite-qr"></div><button class="btn btn-primary" id="copy-invite">Скопировать ссылку</button>`;
       apiBlob(invite.qr_url).then((blob) => { const url = URL.createObjectURL(blob); activeClientPhotoUrls.push(url); backdrop.querySelector('#invite-qr').innerHTML = `<img src="${url}" alt="QR для приглашения">`; }).catch(() => null);
       backdrop.querySelector('#copy-invite').addEventListener('click', async () => { await navigator.clipboard.writeText(invite.join_url); toast('Ссылка скопирована'); });
-    } catch (error) { toast(error.message, 'error'); }
+    } catch (error) { saveButton.disabled = false; saveButton.textContent = 'Создать безопасную ссылку'; toast(humanError(error, 'Не удалось создать приглашение'), 'error'); }
   });
 }
 

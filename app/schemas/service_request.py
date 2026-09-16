@@ -70,6 +70,7 @@ class ServiceRequestListItem(BaseModel):
     serial_number: str
     assigned_technician_id: uuid.UUID | None = None
     assigned_technician_name: str | None = None
+    approval_target: str = "internal"
     created_at: datetime
     completed_at: datetime | None = None
 

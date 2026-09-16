@@ -113,6 +113,7 @@ class ClientInviteOut(BaseModel):
     target_role: str
     invited_email: EmailStr | None = None
     status: str
+    created_at: datetime
     expires_at: datetime
     accepted_at: datetime | None = None
     revoked_at: datetime | None = None
