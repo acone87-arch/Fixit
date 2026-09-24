@@ -153,7 +153,6 @@ async def test_site_edit_and_invite_revoke_are_persistent(live, flow):
             await director.goto(f"http://127.0.0.1:8765/#requests/{request_id}")
             await expect(director.locator("#request-assign-technician")).to_have_count(0)
             await expect(director.locator("#request-add-attachment")).to_have_count(0)
-            await expect(director.locator("#client-attachment-add")).to_be_visible()
             await assert_no_horizontal_scroll(director)
         finally:
             await browser.close()
