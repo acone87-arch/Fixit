@@ -26,6 +26,7 @@ class EquipmentBase(BaseModel):
     model: str | None = None
     serial_number: str | None
     location: str | None = None
+    location_details: str | None = Field(default=None, max_length=500)
 
 
 class EquipmentCreate(EquipmentBase):
@@ -42,6 +43,7 @@ class EquipmentUpdate(BaseModel):
     model: str | None = Field(default=None, max_length=255)
     serial_number: str | None = Field(default=None, min_length=1, max_length=255)
     location: str | None = Field(default=None, max_length=255)
+    location_details: str | None = Field(default=None, max_length=500)
     expected_version: int | None = Field(default=None, ge=1)
 
 
@@ -52,6 +54,7 @@ class EquipmentInventoryComplete(BaseModel):
     model: str | None = Field(default=None, max_length=255)
     serial_number: str = Field(min_length=1, max_length=255)
     location: str | None = Field(default=None, max_length=255)
+    location_details: str | None = Field(default=None, max_length=500)
     expected_version: int = Field(ge=1)
 
 

@@ -49,6 +49,29 @@ cp .env.example .env   # и поправить DATABASE_URL/SECRET_KEY под с
 Нужен Postgres (можно поднять только `db` из docker-compose.yml этого проекта:
 `docker compose up db`).
 
+### Локальные targeted tests
+
+Создай отдельную тестовую базу в локальном Compose Postgres (не используй
+production DB):
+
+```bash
+docker compose exec db psql -U fsm -d fsm -c "CREATE ROLE pilot LOGIN PASSWORD 'pilot-ci-only';"
+docker compose exec db psql -U fsm -d fsm -c "CREATE DATABASE fixit_test OWNER pilot;"
+```
+
+Установи dev-зависимости и Chromium Playwright в `.venv`, затем запускай
+целевые PostgreSQL и browser acceptance tests (команда задаёт изолированный CI
+DSN сама):
+
+```bash
+python -m venv .venv
+.venv/bin/python -m pip install -r requirements-dev.txt
+.venv/bin/python -m playwright install chromium
+.venv/bin/python scripts/test_location_workflow.py
+```
+
+В Windows используй `.venv\Scripts\python.exe` вместо `.venv/bin/python`.
+
 Таблицы: быстрее всего через `python scripts/bootstrap_db.py` (см. описание в
 разделе Docker выше — та же логика, просто без `docker compose exec`). Для
 реального проекта источник правды — Alembic-миграции:

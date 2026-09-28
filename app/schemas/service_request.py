@@ -82,7 +82,7 @@ class ServiceRequestDetail(BaseModel):
     description: str | None; priority: str; assigned_technician_id: uuid.UUID | None; assigned_technician_name: str | None
     status: str; created_at: datetime; completed_at: datetime | None; approval_target: str = "internal"; repair_id: uuid.UUID | None = None
     parts_used: list[dict] = []; outcome: str | None = None; history: list[dict] = []
-    site_address: str | None = None; contact_name: str | None = None; contact_phone: str | None = None
+    site_address: str | None = None; equipment_location_details: str | None = None; contact_name: str | None = None; contact_phone: str | None = None
     equipment_type: str | None = None; manufacturer: str | None = None; model: str | None = None; equipment_status: str | None = None; equipment_version: int | None = None
     attachments: list[dict] = []
     request_attachments: list[dict] = []

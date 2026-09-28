@@ -5,6 +5,8 @@ from PIL import Image
 from pathlib import Path
 
 import pytest
+from app.models.core import Equipment
+from app.models.customer import Site
 from test_onboarding_postgres import pg, PASSWORD, auth
 from test_onboarding_browser import live
 from test_request_workflow_postgres import flow, new_request, start, APPROVAL
@@ -17,6 +19,12 @@ pytestmark = [pytest.mark.asyncio, pytest.mark.skipif(os.getenv('FIXIT_RUN_BROWS
 async def test_pulse_approval_payload_and_dispatcher_result(live, flow, target):
     from playwright.async_api import async_playwright, expect
     request_id = await new_request(flow)
+    async with flow.sessions() as db:
+        equipment = await db.get(Equipment, flow.equipment[0].id)
+        equipment.location_details = 'Прачечная, корпус 2, 1 этаж, помещение 14 за техническим коридором'
+        site = await db.get(Site, flow.sites[0].id)
+        site.address = 'г. Уфа, ул. Кувыкина, 98, корпус эксплуатационно-технического обслуживания, вход со двора'
+        await db.commit()
     await start(flow, request_id)
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch()
@@ -29,6 +37,43 @@ async def test_pulse_approval_payload_and_dispatcher_result(live, flow, target):
             await expect(page.locator('#login-screen')).to_be_hidden()
             await page.locator('#onboarding-continue').click(timeout=15000)
             await page.goto(f'http://127.0.0.1:8765/#requests/{request_id}')
+            await expect(page.locator('.tech-request-place')).to_contain_text('г. Уфа, ул. Кувыкина, 98')
+            await expect(page.locator('.tech-request-place')).to_contain_text('Прачечная, корпус 2, 1 этаж')
+            await expect(page.locator('.tech-request-place a')).to_have_text('Маршрут')
+            overflow = await page.evaluate("""() => ({
+              width: document.documentElement.clientWidth,
+              scrollWidth: document.documentElement.scrollWidth,
+              offenders: [...document.querySelectorAll('*')]
+                .map((element) => ({element, rect: element.getBoundingClientRect()}))
+                .filter(({rect}) => rect.right > document.documentElement.clientWidth + 1)
+                .slice(0, 12)
+                .map(({element, rect}) => ({tag: element.tagName, className: element.className?.toString(), left: rect.left, right: rect.right, text: element.innerText?.slice(0, 70)}))
+            })""")
+            assert overflow['scrollWidth'] <= overflow['width'], str(overflow)
+            await expect(page.locator('.tech-request-section').nth(0)).to_contain_text('Оборудование')
+            # The workplace block must remain useful for every optional address/location combination.
+            for address, location, expect_route in [
+                ('г. Уфа, ул. Кувыкина, 98', None, True),
+                (None, 'Складской корпус, дальняя зона, уровень 2', False),
+                (None, None, False),
+            ]:
+                async with flow.sessions() as db:
+                    equipment = await db.get(Equipment, flow.equipment[0].id)
+                    equipment.location_details = location
+                    site = await db.get(Site, flow.sites[0].id)
+                    site.address = address
+                    await db.commit()
+                await page.reload()
+                place = page.locator('.tech-request-place')
+                if address:
+                    await expect(place).to_contain_text(address)
+                else:
+                    await expect(place.locator('a[href^="https://maps.google.com/"]')).to_have_count(0)
+                if location:
+                    await expect(place).to_contain_text(location)
+                else:
+                    await expect(place.locator('.location-details')).to_have_count(0)
+                await expect(place.locator('a[href^="https://maps.google.com/"]')).to_have_count(1 if expect_route else 0)
             await page.locator('#request-diagnostic').fill(APPROVAL['diagnostic'])
             await page.locator('#request-work').fill(APPROVAL['work'])
             await page.locator('#request-comment').fill(APPROVAL['comment'])

@@ -26,7 +26,8 @@ async def batch(f, quantity=2, **overrides):
 
 def details(f, row, **overrides):
     return dict(equipment_type_id=f.kind.id, manufacturer='Karcher', model='BD 50',
-        serial_number='INVENTORY-'+row['id'][:8], location='Этаж 2', expected_version=row['version'], **overrides)
+        serial_number='INVENTORY-'+row['id'][:8], location='Этаж 2',
+        location_details='Прачечная, корпус 2, 1 этаж', expected_version=row['version'], **overrides)
 
 
 async def complete(f, row, body=None, user=None):
@@ -39,6 +40,7 @@ async def test_batch_retries_pdf_and_empty_equipment_identities(pg):
     assert len(rows) == 9
     assert len({row['public_qr_token'] for row in rows}) == 9
     assert all(row['inventory_pending'] and row['serial_number'] is None and row['equipment_type_id'] is None for row in rows)
+    assert all(row['location_details'] is None for row in rows)
     responses = await asyncio.gather(*[pg.http.post('/api/equipment-inventory/batches', headers=auth(pg.owner,pg.org), json=payload) for _ in range(4)])
     assert all(r.status_code == 201 and r.json()['id'] == created['id'] for r in responses)
     async with pg.sessions() as db:
@@ -107,6 +109,7 @@ async def test_completion_concurrency_and_duplicate_serial_rollback(pg):
     responses=await asyncio.gather(complete(pg,row,body), complete(pg,row,{**body,'model':'Other'}))
     assert sorted(r.status_code for r in responses) == [200,409]
     saved=next(r.json() for r in responses if r.status_code==200)
+    assert saved['location_details']=='Прачечная, корпус 2, 1 этаж'
     duplicate=await complete(pg,rows[1],{**details(pg,rows[1]),'serial_number':saved['serial_number']})
     assert duplicate.status_code==409
     async with pg.sessions() as db:
@@ -129,10 +132,11 @@ async def test_full_admin_edit_and_existing_service_chain(flow):
     saved=done.json()
     assert (saved['id'],saved['public_qr_token'])==(row['id'],row['public_qr_token'])
     changes=dict(manufacturer='Новый производитель',model='Новая модель',serial_number='UPDATED-001',
-        equipment_type_id=f.kind.id,location='Мойка',site_id=str(f.sites[0].id),status='working',expected_version=saved['version'])
+        equipment_type_id=f.kind.id,location='Мойка',location_details='Прачечная, корпус 2, 1 этаж',site_id=str(f.sites[0].id),status='working',expected_version=saved['version'])
     edited=await f.http.patch(f"/api/equipment/{row['id']}",headers=auth(f.owner,f.org),json=changes)
     assert edited.status_code==200,edited.text
     assert edited.json()['public_qr_token']==row['public_qr_token']
+    assert edited.json()['location_details']=='Прачечная, корпус 2, 1 этаж'
     assert (await f.http.patch(f"/api/equipment/{row['id']}",headers=auth(f.owner,f.org),json=changes)).status_code==409
     assert (await f.http.patch(f"/api/equipment/{row['id']}",headers=auth(f.owner,f.org),json={'public_qr_token':str(uuid.uuid4())})).status_code==422
     public=await f.http.get(f"/api/public/equipment/{row['public_qr_token']}")

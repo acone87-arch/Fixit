@@ -110,6 +110,7 @@ class Equipment(Base):
         Enum(EquipmentStatus, name="equipment_status"), default=EquipmentStatus.working
     )
     location: Mapped[str | None] = mapped_column(String(255))
+    location_details: Mapped[str | None] = mapped_column(String(500))
     # Optimistic concurrency: техник при офлайн-синке присылает версию, с которой
     # начинал работу. Если она разошлась с текущей — значит, пока он был офлайн,
     # кто-то ещё поменял оборудование (например, диспетчер или другой техник).
