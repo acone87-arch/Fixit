@@ -103,6 +103,7 @@ async def test_admin_edits_all_card_details_without_changing_qr(live):
             await page.locator('#inventory-model').fill('Исправленная модель')
             await page.locator('#inventory-serial').fill('EDITED-SERIAL')
             await page.locator('#inventory-location').fill('Второй этаж')
+            await page.locator('#inventory-location-details').fill('Прачечная, корпус 2, 1 этаж')
             await page.locator('#inventory-edit-site').select_option(str(f.sites[1].id))
             await page.locator('#inventory-status').select_option('mothballed')
             await page.locator('#inventory-save').click()
@@ -112,6 +113,7 @@ async def test_admin_edits_all_card_details_without_changing_qr(live):
                 assert saved.public_qr_token==uuid.UUID(row['public_qr_token'])
                 assert saved.manufacturer=='Изменённый производитель' and saved.model=='Исправленная модель'
                 assert saved.serial_number=='EDITED-SERIAL' and saved.location=='Второй этаж'
+                assert saved.location_details=='Прачечная, корпус 2, 1 этаж'
                 assert saved.equipment_type_id!=f.kind.id and saved.name=='Подметальная машина'
                 assert saved.site_id==f.sites[1].id and saved.status.value=='mothballed'
         finally:

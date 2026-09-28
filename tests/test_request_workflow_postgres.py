@@ -238,6 +238,13 @@ async def test_waiting_parts_completion_and_cancellation_guards(flow):
 
 async def test_completion_timestamp_and_retry(flow):
     request_id = await new_request(flow)
+    async with flow.sessions() as db:
+        equipment = await db.get(Equipment, flow.equipment[0].id)
+        equipment.location_details = 'Прачечная, корпус 2, 1 этаж'
+        await db.commit()
+    before_work = await flow.http.get(f'/api/service-requests/{request_id}', headers=flow.manager_headers)
+    assert before_work.json()['site_address'] == flow.sites[0].address
+    assert before_work.json()['equipment_location_details'] == 'Прачечная, корпус 2, 1 этаж'
     await start(flow, request_id)
     body = repair_body(flow, request_id)
     first = await sync(flow, body)

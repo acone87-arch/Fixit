@@ -280,7 +280,7 @@ async def update_equipment(
         await _equipment_for_user(equipment_id, db, user)
     changes = payload.model_dump(exclude_unset=True)
     expected_version = changes.pop('expected_version', None)
-    detail_fields = {'equipment_type_id', 'manufacturer', 'model', 'serial_number', 'location'}
+    detail_fields = {'equipment_type_id', 'manufacturer', 'model', 'serial_number', 'location', 'location_details'}
     if detail_fields.intersection(changes):
         if user.role not in {UserRole.owner, UserRole.admin}:
             raise HTTPException(403, 'Полное редактирование доступно администратору')
