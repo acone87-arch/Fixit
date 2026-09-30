@@ -123,6 +123,16 @@ jobs:
           printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
 
+      - name: Sample SSH backend routing
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          for attempt in $(seq 1 8); do
+            backend="$(ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=yes -o "HostKeyAlias=$VPS_HOST" "$VPS_USER@$AISALE_DEPLOY_IP" 'printf "%s " "$(hostname -f)"; sha256sum /etc/machine-id | cut -c1-12' 2>&1 | tr -d '\r')"
+            echo "SSH backend sample $attempt: $backend"
+          done
+
       - name: Package isolated app source
         run: tar -czf aisale.source.tgz -C aisale .
 
