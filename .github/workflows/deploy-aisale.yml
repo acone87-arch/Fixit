@@ -46,10 +46,13 @@ jobs:
 
           deploy_addresses = ipv4_addresses(host)
           domain_addresses = ipv4_addresses("aisale.fixitpulse.ru")
-          matches = bool(deploy_addresses & domain_addresses)
-          print(f"VPS host resolves to the public aisale server: {matches}")
+          matches = sorted(deploy_addresses & domain_addresses)
+          print(f"VPS and public domain share an IPv4 address: {bool(matches)}")
+          print(f"Public domain has {len(domain_addresses)} IPv4 address(es)")
           if not matches:
               raise SystemExit("VPS_HOST and aisale.fixitpulse.ru resolve to different IPv4 addresses; refusing deployment.")
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
+              env_file.write(f"AISALE_DEPLOY_IP={matches[0]}\n")
           PY
 
       - name: Validate deployment secrets
@@ -129,8 +132,8 @@ jobs:
           VPS_USER: ${{ secrets.VPS_USER }}
           RELEASE_SHA: ${{ github.sha }}
         run: |
-          scp -o BatchMode=yes -o StrictHostKeyChecking=yes aisale.runtime.env "$VPS_USER@$VPS_HOST:/tmp/aisale.env.$RELEASE_SHA"
-          scp -o BatchMode=yes -o StrictHostKeyChecking=yes aisale.source.tgz "$VPS_USER@$VPS_HOST:/tmp/aisale.source.$RELEASE_SHA.tgz"
+          scp -o BatchMode=yes -o StrictHostKeyChecking=yes -o "HostKeyAlias=$VPS_HOST" aisale.runtime.env "$VPS_USER@$AISALE_DEPLOY_IP:/tmp/aisale.env.$RELEASE_SHA"
+          scp -o BatchMode=yes -o StrictHostKeyChecking=yes -o "HostKeyAlias=$VPS_HOST" aisale.source.tgz "$VPS_USER@$AISALE_DEPLOY_IP:/tmp/aisale.source.$RELEASE_SHA.tgz"
           rm -f aisale.runtime.env
 
       - name: Deploy isolated app and HTTPS
@@ -139,7 +142,7 @@ jobs:
           VPS_USER: ${{ secrets.VPS_USER }}
           RELEASE_SHA: ${{ github.sha }}
         run: |
-          ssh -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" "bash -s -- '$RELEASE_SHA'" <<'REMOTE'
+          ssh -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=yes -o "HostKeyAlias=$VPS_HOST" "$VPS_USER@$AISALE_DEPLOY_IP" "bash -s -- '$RELEASE_SHA'" <<'REMOTE'
           set -euo pipefail
           release_sha="$1"
           deploy_user="$(id -un)"
@@ -202,7 +205,7 @@ jobs:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
         run: |
-          ssh -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" 'bash -s' <<'REMOTE'
+          ssh -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=yes -o "HostKeyAlias=$VPS_HOST" "$VPS_USER@$AISALE_DEPLOY_IP" 'bash -s' <<'REMOTE'
           set +e
           echo '--- Deployment host network ---' >&2
           hostname -f >&2
