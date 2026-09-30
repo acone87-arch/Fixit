@@ -263,6 +263,12 @@ jobs:
                       active=False
           print("Exact AISale Nginx server blocks: "+str(len(blocks)))
           for index, block in enumerate(blocks, 1): print("AISale block "+str(index)+": https="+("yes" if "listen 443" in block else "no")+"; dedicated_cert="+("yes" if "aisale-fixitpulse-dns/fullchain.pem" in block else "no"))' >&2
+          echo '--- Nginx include configuration ---' >&2
+          sudo -n grep -nE 'include .*conf\.d|include .*sites-enabled' /etc/nginx/nginx.conf >&2
+          sudo -n nginx -T 2>/dev/null | grep '^# configuration file' | head -n 30 >&2
+          echo '--- Installed AISale vhost file ---' >&2
+          sudo -n ls -l /etc/nginx/sites-enabled/aisale.conf /etc/nginx/conf.d/aisale.conf 2>&1 >&2
+          sudo -n sed -E 's/aisale\.fixitpulse\.ru/[AISale domain]/g' /etc/nginx/sites-enabled/aisale.conf 2>&1 >&2
           REMOTE
 
       - name: Diagnose public DNS and client routes
