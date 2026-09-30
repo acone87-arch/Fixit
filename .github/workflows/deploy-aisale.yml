@@ -252,6 +252,17 @@ jobs:
           else
             echo 'Active Nginx config uses the dedicated AISale certificate: no' >&2
           fi
+          sudo -n nginx -T 2>/dev/null | python3 -c 'import re,sys; lines=sys.stdin.readlines(); blocks=[]; active=False; depth=0; buf=[]
+          for line in lines:
+              if not active and re.match("\\s*server\\s*{", line): active=True; depth=0; buf=[]
+              if active:
+                  buf.append(line); depth += line.count("{")-line.count("}")
+                  if depth == 0:
+                      block="".join(buf)
+                      if re.search("server_name[^;]*aisale\\.fixitpulse\\.ru", block): blocks.append(block)
+                      active=False
+          print("Exact AISale Nginx server blocks: "+str(len(blocks)))
+          for index, block in enumerate(blocks, 1): print("AISale block "+str(index)+": https="+("yes" if "listen 443" in block else "no")+"; dedicated_cert="+("yes" if "aisale-fixitpulse-dns/fullchain.pem" in block else "no"))' >&2
           REMOTE
 
       - name: Diagnose public DNS and client routes
