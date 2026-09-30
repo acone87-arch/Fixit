@@ -176,6 +176,13 @@ jobs:
           sudo -n install -m 644 deploy/aisale-https.conf /etc/nginx/sites-enabled/aisale.conf
           sudo -n nginx -t
           sudo -n systemctl reload nginx
+          if ! sudo -n nginx -T 2>&1 | grep -Fq 'server_name aisale.fixitpulse.ru;'; then
+            echo 'The aisale virtual host is not present in the active Nginx configuration.' >&2
+            exit 1
+          fi
+          echo 'The aisale virtual host is loaded by Nginx.'
+          local_http_location="$(curl -sSI --noproxy '*' --connect-timeout 10 --max-time 20 --resolve aisale.fixitpulse.ru:80:127.0.0.1 http://aisale.fixitpulse.ru/ | awk 'tolower($1) == "location:" { print $2 }' | tr -d '\r')"
+          echo "Local HTTP redirect target: ${local_http_location:-<none>}"
           curl -fsS --noproxy '*' --connect-timeout 10 --max-time 20 --resolve aisale.fixitpulse.ru:443:127.0.0.1 https://aisale.fixitpulse.ru/api/health >/dev/null
           REMOTE
 
