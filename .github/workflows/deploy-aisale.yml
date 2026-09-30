@@ -217,6 +217,24 @@ jobs:
           echo "Public route serves the AISale certificate: $([ -n "$local_fp" ] && [ "$local_fp" = "$public_fp" ] && echo yes || echo no)" >&2
           REMOTE
 
+      - name: Diagnose public DNS and client routes
+        run: |
+          python - <<'PY'
+          import socket
+          host = "aisale.fixitpulse.ru"
+          for family, label in ((socket.AF_INET, "A/IPv4"), (socket.AF_INET6, "AAAA/IPv6")):
+              try:
+                  values = sorted({item[4][0] for item in socket.getaddrinfo(host, 443, family, socket.SOCK_STREAM)})
+              except socket.gaierror:
+                  values = []
+              print(f"Public DNS {label}: {', '.join(values) if values else '<no record>'}")
+          PY
+          set +e
+          for family in -4 -6; do
+            echo "--- External TLS route $family ---"
+            curl "$family" -sv --connect-timeout 8 --max-time 12 https://aisale.fixitpulse.ru/api/health -o /dev/null 2>&1 | grep -E 'Trying |Connected to |subjectAltName|SSL certificate|certificate|curl: \('
+          done
+
       - name: Verify public HTTPS
         run: |
           curl -fsS --connect-timeout 10 --max-time 20 https://aisale.fixitpulse.ru/api/health
