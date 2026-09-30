@@ -184,8 +184,8 @@ jobs:
           sudo -n install -m 644 deploy/aisale-https.conf /etc/nginx/sites-enabled/aisale.conf
           sudo -n nginx -t
           sudo -n systemctl reload nginx
-          echo "Deployment host marker: $(sha256sum /etc/machine-id | cut -c1-12)"
-          sudo -n ls -l /etc/nginx/sites-enabled/aisale.conf
+          echo "Deployment host marker: $(sha256sum /etc/machine-id | cut -c1-12)" >&2
+          sudo -n ls -l /etc/nginx/sites-enabled/aisale.conf >&2
           if ! sudo -n nginx -T 2>&1 | grep -Fq 'server_name aisale.fixitpulse.ru;'; then
             echo 'The aisale virtual host is not present in the active Nginx configuration.' >&2
             exit 1
