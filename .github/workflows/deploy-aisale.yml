@@ -205,6 +205,16 @@ jobs:
           printf '\n' | timeout 10 openssl s_client -servername aisale.fixitpulse.ru -connect aisale.fixitpulse.ru:443 2>/dev/null | openssl x509 -noout -subject -issuer -ext subjectAltName >&2
           echo '--- Active Nginx host names and listeners ---' >&2
           sudo -n nginx -T 2>/dev/null | grep -E 'server_name |listen .*443|ssl_certificate ' | head -n 60 >&2
+          echo '--- Nginx sockets ---' >&2
+          sudo -n ss -ltnp '( sport = :80 or sport = :443 )' >&2
+          echo '--- AISale virtual-host block ---' >&2
+          sudo -n nginx -T 2>/dev/null | sed -n '/server_name aisale.fixitpulse.ru;/,+18p' | sed -E 's/aisale\.fixitpulse\.ru/[AISale domain]/g' >&2
+          echo '--- Certificate route comparison ---' >&2
+          local_fp="$(printf '\n' | timeout 10 openssl s_client -servername aisale.fixitpulse.ru -connect 127.0.0.1:443 2>/dev/null | openssl x509 -noout -fingerprint -sha256 2>/dev/null | cut -d= -f2)"
+          public_fp="$(printf '\n' | timeout 10 openssl s_client -servername aisale.fixitpulse.ru -connect aisale.fixitpulse.ru:443 2>/dev/null | openssl x509 -noout -fingerprint -sha256 2>/dev/null | cut -d= -f2)"
+          echo "Loopback certificate fingerprint present: $([ -n "$local_fp" ] && echo yes || echo no)" >&2
+          echo "Public route certificate fingerprint present: $([ -n "$public_fp" ] && echo yes || echo no)" >&2
+          echo "Public route serves the AISale certificate: $([ -n "$local_fp" ] && [ "$local_fp" = "$public_fp" ] && echo yes || echo no)" >&2
           REMOTE
 
       - name: Verify public HTTPS
