@@ -227,7 +227,7 @@ jobs:
           egress_ip="$(curl -4 -fsS --connect-timeout 5 --max-time 10 https://checkip.amazonaws.com | tr -d '\r\n')"
           echo "Server DNS A record equals its public egress IP: $([ -n "$dns_ip" ] && [ "$dns_ip" = "$egress_ip" ] && echo yes || echo no)" >&2
           interface_ip="$(ip -o -4 addr show dev eth0 scope global | awk 'NR == 1 { sub(/\/.*/, "", $4); print $4 }')"
-          python - "$interface_ip" "$egress_ip" <<'PY' >&2
+          python3 - "$interface_ip" "$egress_ip" <<'PY' >&2
           import ipaddress, sys
           try:
               interface = ipaddress.ip_address(sys.argv[1])
@@ -242,10 +242,15 @@ jobs:
           else
             echo 'Server /etc/hosts overrides AISale DNS: no' >&2
           fi
-          if sudo -n openssl x509 -in /etc/letsencrypt/live/aisale.fixitpulse.ru/fullchain.pem -noout -ext subjectAltName 2>/dev/null | grep -Fq 'DNS:aisale.fixitpulse.ru'; then
-            echo 'Installed AISale certificate contains its DNS name: yes' >&2
+          if sudo -n openssl x509 -in /etc/letsencrypt/live/aisale-fixitpulse-dns/fullchain.pem -noout -ext subjectAltName 2>/dev/null | grep -Fq 'DNS:aisale.fixitpulse.ru'; then
+            echo 'Dedicated AISale certificate contains its DNS name: yes' >&2
           else
-            echo 'Installed AISale certificate contains its DNS name: no' >&2
+            echo 'Dedicated AISale certificate contains its DNS name: no' >&2
+          fi
+          if sudo -n nginx -T 2>/dev/null | grep -Fq '/etc/letsencrypt/live/aisale-fixitpulse-dns/fullchain.pem'; then
+            echo 'Active Nginx config uses the dedicated AISale certificate: yes' >&2
+          else
+            echo 'Active Nginx config uses the dedicated AISale certificate: no' >&2
           fi
           REMOTE
 
