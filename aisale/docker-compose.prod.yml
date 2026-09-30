@@ -1,0 +1,37 @@
+name: aisale
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: measurer
+      POSTGRES_USER: measurer
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in aisale/.env}
+    volumes:
+      - aisale_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U measurer -d measurer"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    env_file: [.env]
+    environment:
+      DATABASE_URL: postgresql+psycopg://measurer:${POSTGRES_PASSWORD}@postgres:5432/measurer
+    volumes:
+      - aisale_photos:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3100:3000"
+    depends_on: [backend]
+volumes:
+  aisale_postgres:
+  aisale_photos:

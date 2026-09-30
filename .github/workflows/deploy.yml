@@ -5,6 +5,9 @@ on:
     branches: [main]
   push:
     branches: [main, codex/pilot-release-p0-5]
+    paths-ignore:
+      - "aisale/**"
+      - ".github/workflows/deploy-aisale.yml"
   workflow_dispatch:
 
 permissions:
