@@ -167,7 +167,8 @@ jobs:
           fi
 
           sudo -n install -d -m 755 /var/www/letsencrypt/.well-known/acme-challenge
-          sudo -n install -m 644 deploy/aisale-http.conf /etc/nginx/sites-enabled/aisale.conf
+          sudo -n install -m 644 deploy/aisale-http.conf /etc/nginx/conf.d/aisale.conf
+          sudo -n rm -f /etc/nginx/sites-enabled/aisale.conf
           sudo -n nginx -t
           sudo -n systemctl reload nginx
           cert_path=/etc/letsencrypt/live/aisale-fixitpulse-dns
@@ -181,11 +182,11 @@ jobs:
             echo 'The configured AISale certificate still does not cover the domain.' >&2
             exit 1
           fi
-          sudo -n install -m 644 deploy/aisale-https.conf /etc/nginx/sites-enabled/aisale.conf
+          sudo -n install -m 644 deploy/aisale-https.conf /etc/nginx/conf.d/aisale.conf
           sudo -n nginx -t
           sudo -n systemctl reload nginx
           echo "Deployment host marker: $(sha256sum /etc/machine-id | cut -c1-12)" >&2
-          sudo -n ls -l /etc/nginx/sites-enabled/aisale.conf >&2
+          sudo -n ls -l /etc/nginx/conf.d/aisale.conf >&2
           if ! sudo -n nginx -T 2>&1 | grep -Fq 'server_name aisale.fixitpulse.ru;'; then
             echo 'The aisale virtual host is not present in the active Nginx configuration.' >&2
             exit 1
@@ -271,7 +272,7 @@ jobs:
           sudo -n nginx -T 2>/dev/null | grep '^# configuration file' | head -n 30 >&2
           echo '--- Installed AISale vhost file ---' >&2
           sudo -n ls -l /etc/nginx/sites-enabled/aisale.conf /etc/nginx/conf.d/aisale.conf 2>&1 >&2
-          sudo -n sed -E 's/aisale\.fixitpulse\.ru/[AISale domain]/g' /etc/nginx/sites-enabled/aisale.conf 2>&1 >&2
+          sudo -n sed -E 's/aisale\.fixitpulse\.ru/[AISale domain]/g' /etc/nginx/conf.d/aisale.conf 2>&1 >&2
           REMOTE
 
       - name: Diagnose public DNS and client routes
