@@ -25,6 +25,33 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Verify deployment host matches the public domain
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+        run: |
+          python - <<'PY'
+          import os
+          import socket
+          from ipaddress import ip_address
+
+          host = os.environ["VPS_HOST"].strip()
+          def ipv4_addresses(name):
+              try:
+                  return {item[4][0] for item in socket.getaddrinfo(name, None, socket.AF_INET)}
+              except socket.gaierror:
+                  try:
+                      return {str(ip_address(name))}
+                  except ValueError:
+                      return set()
+
+          deploy_addresses = ipv4_addresses(host)
+          domain_addresses = ipv4_addresses("aisale.fixitpulse.ru")
+          matches = bool(deploy_addresses & domain_addresses)
+          print(f"VPS host resolves to the public aisale server: {matches}")
+          if not matches:
+              raise SystemExit("VPS_HOST and aisale.fixitpulse.ru resolve to different IPv4 addresses; refusing deployment.")
+          PY
+
       - name: Validate deployment secrets
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
