@@ -186,6 +186,27 @@ jobs:
           curl -fsS --noproxy '*' --connect-timeout 10 --max-time 20 --resolve aisale.fixitpulse.ru:443:127.0.0.1 https://aisale.fixitpulse.ru/api/health >/dev/null
           REMOTE
 
+      - name: Diagnose public routing from the deployment host
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" 'bash -s' <<'REMOTE'
+          set +e
+          echo '--- Deployment host network ---' >&2
+          hostname -f >&2
+          ip -4 -brief address show scope global >&2
+          printf 'Outbound public IPv4: ' >&2
+          curl -4 -fsS --connect-timeout 5 --max-time 10 https://checkip.amazonaws.com 2>&1 | tr -d '\n' >&2
+          echo >&2
+          echo '--- Public HTTP response ---' >&2
+          curl -sSI --noproxy '*' --connect-timeout 5 --max-time 10 http://aisale.fixitpulse.ru/ 2>&1 | sed -n '1,7p' >&2
+          echo '--- Public TLS certificate ---' >&2
+          printf '\n' | timeout 10 openssl s_client -servername aisale.fixitpulse.ru -connect aisale.fixitpulse.ru:443 2>/dev/null | openssl x509 -noout -subject -issuer -ext subjectAltName >&2
+          echo '--- Active Nginx host names and listeners ---' >&2
+          sudo -n nginx -T 2>/dev/null | grep -E 'server_name |listen .*443|ssl_certificate ' | head -n 60 >&2
+          REMOTE
+
       - name: Verify public HTTPS
         run: |
           curl -fsS --connect-timeout 10 --max-time 20 https://aisale.fixitpulse.ru/api/health
