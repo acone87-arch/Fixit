@@ -2,7 +2,7 @@ name: Deploy aisale
 
 on:
   push:
-    branches: [main]
+    branches: [codex/aisale-deploy]
     paths:
       - "aisale/**"
       - ".github/workflows/deploy-aisale.yml"
@@ -92,6 +92,9 @@ jobs:
           printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
 
+      - name: Package isolated app source
+        run: tar -czf aisale.source.tgz -C aisale .
+
       - name: Upload private environment
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
@@ -99,6 +102,7 @@ jobs:
           RELEASE_SHA: ${{ github.sha }}
         run: |
           scp -o BatchMode=yes -o StrictHostKeyChecking=yes aisale.runtime.env "$VPS_USER@$VPS_HOST:/tmp/aisale.env.$RELEASE_SHA"
+          scp -o BatchMode=yes -o StrictHostKeyChecking=yes aisale.source.tgz "$VPS_USER@$VPS_HOST:/tmp/aisale.source.$RELEASE_SHA.tgz"
           rm -f aisale.runtime.env
 
       - name: Deploy isolated app and HTTPS
@@ -110,26 +114,27 @@ jobs:
           ssh -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=yes "$VPS_USER@$VPS_HOST" "bash -s -- '$RELEASE_SHA'" <<'REMOTE'
           set -euo pipefail
           release_sha="$1"
-          cd /opt/fixit
-          git fetch origin "$release_sha"
-          git archive "$release_sha" aisale | tar -x -C /opt/fixit
-          install -d -m 700 /opt/fixit/aisale
-          install -m 600 "/tmp/aisale.env.$release_sha" /opt/fixit/aisale/.env
+          deploy_user="$(id -un)"
+          deploy_group="$(id -gn)"
+          sudo -n install -d -o "$deploy_user" -g "$deploy_group" -m 700 /opt/aisale
+          tar -xzf "/tmp/aisale.source.$release_sha.tgz" -C /opt/aisale
+          rm -f "/tmp/aisale.source.$release_sha.tgz"
+          install -m 600 "/tmp/aisale.env.$release_sha" /opt/aisale/.env
           rm -f "/tmp/aisale.env.$release_sha"
-          cd /opt/fixit/aisale
+          cd /opt/aisale
 
-          docker compose -f docker-compose.prod.yml build
-          docker compose -f docker-compose.prod.yml up -d --remove-orphans
+          docker compose --project-name aisale -f docker-compose.prod.yml build
+          docker compose --project-name aisale -f docker-compose.prod.yml up -d --remove-orphans
           healthy=false
           for attempt in $(seq 1 30); do
-            if docker compose -f docker-compose.prod.yml exec -T backend python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3).read()" >/dev/null 2>&1; then
+            if docker compose --project-name aisale -f docker-compose.prod.yml exec -T backend python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3).read()" >/dev/null 2>&1; then
               healthy=true
               break
             fi
             sleep 2
           done
           if [ "$healthy" != true ]; then
-            docker compose -f docker-compose.prod.yml logs --tail=100 backend frontend
+            docker compose --project-name aisale -f docker-compose.prod.yml logs --tail=100 backend frontend
             exit 1
           fi
 

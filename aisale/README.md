@@ -26,7 +26,7 @@
 
 ## Пилотный деплой aisale
 
-Production-конфигурация изолирована от FixitPulse: собственные контейнеры и тома PostgreSQL/фото, frontend доступен на сервере только через `127.0.0.1:3100`, а Nginx обслуживает `https://aisale.fixitpulse.ru`. Workflow `.github/workflows/deploy-aisale.yml` разворачивает только каталог `aisale/` и получает TLS-сертификат через существующий Certbot.
+Production-конфигурация изолирована от FixitPulse: приложение разворачивается в отдельный `/opt/aisale`, получает собственный Docker Compose project `aisale` и отдельные тома PostgreSQL/фото. Порт сайта — только `127.0.0.1:3100`; Nginx добавляет отдельный виртуальный хост `aisale.fixitpulse.ru`, не заменяя конфигурацию FixitPulse. Workflow `.github/workflows/deploy-aisale.yml` передаёт на сервер архив только этого приложения и получает TLS-сертификат через существующий Certbot. Текущая настройка запускает деплой из ветки `codex/aisale-deploy`; в `main` Fixit изменения не вливаются.
 
 Для запуска workflow в GitHub Actions Secrets должны быть заданы `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`, `VPS_KNOWN_HOSTS` (секреты текущего Fixit-деплоя) и `AISALE_POSTGRES_PASSWORD`, `AISALE_ADMIN_USERNAME`, `AISALE_ADMIN_PASSWORD`, `AISALE_AI_API_KEY`, `AISALE_AI_PROJECT_ID`, `AISALE_TELEGRAM_BOT_TOKEN`, `AISALE_TELEGRAM_CHAT_ID`. Пароль админки должен быть уникальным; известный demo-пароль workflow отклонит.
 
