@@ -170,12 +170,13 @@ jobs:
           sudo -n install -m 644 deploy/aisale-http.conf /etc/nginx/sites-enabled/aisale.conf
           sudo -n nginx -t
           sudo -n systemctl reload nginx
-          if ! sudo -n openssl x509 -in /etc/letsencrypt/live/aisale.fixitpulse.ru/fullchain.pem -noout -ext subjectAltName 2>/dev/null | grep -Fq 'DNS:aisale.fixitpulse.ru'; then
-            echo 'Existing TLS certificate does not cover the AISale hostname; requesting a replacement.' >&2
-            sudo -n certbot certonly --webroot -w /var/www/letsencrypt --non-interactive --agree-tos --register-unsafely-without-email --force-renewal --cert-name aisale.fixitpulse.ru -d aisale.fixitpulse.ru
+          cert_path=/etc/letsencrypt/live/aisale-fixitpulse-dns
+          if ! sudo -n openssl x509 -in "$cert_path/fullchain.pem" -noout -ext subjectAltName 2>/dev/null | grep -Fq 'DNS:aisale.fixitpulse.ru'; then
+            echo 'Requesting a dedicated TLS certificate for aisale.fixitpulse.ru.' >&2
+            sudo -n certbot certonly --webroot -w /var/www/letsencrypt --non-interactive --agree-tos --register-unsafely-without-email --cert-name aisale-fixitpulse-dns -d aisale.fixitpulse.ru
           fi
-          sudo -n openssl x509 -in /etc/letsencrypt/live/aisale.fixitpulse.ru/fullchain.pem -noout -ext subjectAltName
-          if ! sudo -n openssl x509 -in /etc/letsencrypt/live/aisale.fixitpulse.ru/fullchain.pem -noout -ext subjectAltName 2>/dev/null | grep -Fq 'DNS:aisale.fixitpulse.ru'; then
+          sudo -n openssl x509 -in "$cert_path/fullchain.pem" -noout -ext subjectAltName
+          if ! sudo -n openssl x509 -in "$cert_path/fullchain.pem" -noout -ext subjectAltName 2>/dev/null | grep -Fq 'DNS:aisale.fixitpulse.ru'; then
             sudo -n certbot certificates
             echo 'The configured AISale certificate still does not cover the domain.' >&2
             exit 1
