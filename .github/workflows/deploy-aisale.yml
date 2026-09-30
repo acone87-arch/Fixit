@@ -226,6 +226,17 @@ jobs:
           dns_ip="$(getent ahostsv4 aisale.fixitpulse.ru | awk 'NR == 1 { print $1 }')"
           egress_ip="$(curl -4 -fsS --connect-timeout 5 --max-time 10 https://checkip.amazonaws.com | tr -d '\r\n')"
           echo "Server DNS A record equals its public egress IP: $([ -n "$dns_ip" ] && [ "$dns_ip" = "$egress_ip" ] && echo yes || echo no)" >&2
+          interface_ip="$(ip -o -4 addr show dev eth0 scope global | awk 'NR == 1 { sub(/\/.*/, "", $4); print $4 }')"
+          python - "$interface_ip" "$egress_ip" <<'PY' >&2
+          import ipaddress, sys
+          try:
+              interface = ipaddress.ip_address(sys.argv[1])
+              egress = ipaddress.ip_address(sys.argv[2])
+              print(f"Deployment NIC has a public IPv4 address: {'yes' if interface.is_global else 'no'}")
+              print(f"Deployment NIC equals outbound public IPv4: {'yes' if interface == egress else 'no'}")
+          except ValueError:
+              print("Deployment NIC address could not be classified")
+          PY
           if grep -Eq '(^|[[:space:]])aisale\.fixitpulse\.ru([[:space:]]|$)' /etc/hosts; then
             echo 'Server /etc/hosts overrides AISale DNS: yes' >&2
           else
