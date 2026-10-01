@@ -142,9 +142,14 @@ jobs:
           VPS_USER: ${{ secrets.VPS_USER }}
           RELEASE_SHA: ${{ github.sha }}
         run: |
-          ssh -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=yes -o "HostKeyAlias=$VPS_HOST" "$VPS_USER@$AISALE_DEPLOY_IP" "bash -s -- '$RELEASE_SHA'" <<'REMOTE'
+          ssh -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=yes -o "HostKeyAlias=$VPS_HOST" "$VPS_USER@$AISALE_DEPLOY_IP" "bash -s -- '$RELEASE_SHA' '$AISALE_DEPLOY_IP'" <<'REMOTE'
           set -euo pipefail
           release_sha="$1"
+          public_ipv4="$2"
+          if [[ ! "$public_ipv4" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+            echo 'The resolved AISale public address is not IPv4.' >&2
+            exit 1
+          fi
           deploy_user="$(id -un)"
           deploy_group="$(id -gn)"
           sudo -n install -d -o "$deploy_user" -g "$deploy_group" -m 700 /opt/aisale
@@ -170,7 +175,8 @@ jobs:
           fi
 
           sudo -n install -d -m 755 /var/www/letsencrypt/.well-known/acme-challenge
-          sudo -n install -m 644 deploy/aisale-http.conf /etc/nginx/conf.d/aisale.conf
+          sed "s/__AISale_PUBLIC_IPV4__/$public_ipv4/g" deploy/aisale-http.conf | sudo -n tee /etc/nginx/conf.d/aisale.conf >/dev/null
+          sudo -n chmod 644 /etc/nginx/conf.d/aisale.conf
           sudo -n rm -f /etc/nginx/sites-enabled/aisale.conf
           sudo -n nginx -t
           sudo -n systemctl reload nginx
@@ -185,7 +191,8 @@ jobs:
             echo 'The configured AISale certificate still does not cover the domain.' >&2
             exit 1
           fi
-          sudo -n install -m 644 deploy/aisale-https.conf /etc/nginx/conf.d/aisale.conf
+          sed "s/__AISale_PUBLIC_IPV4__/$public_ipv4/g" deploy/aisale-https.conf | sudo -n tee /etc/nginx/conf.d/aisale.conf >/dev/null
+          sudo -n chmod 644 /etc/nginx/conf.d/aisale.conf
           sudo -n nginx -t
           sudo -n systemctl reload nginx
           if ! sudo -n nginx -T 2>&1 | grep -Fq 'ssl_certificate /etc/letsencrypt/live/aisale-fixitpulse-dns/fullchain.pem;'; then
@@ -193,9 +200,16 @@ jobs:
             exit 1
           fi
           curl -q -fsS --noproxy '*' --connect-timeout 10 --max-time 20 --resolve aisale.fixitpulse.ru:443:127.0.0.1 https://aisale.fixitpulse.ru/api/health >/dev/null
+          if curl -q -fsS --noproxy '*' --connect-timeout 10 --max-time 20 --resolve "aisale.fixitpulse.ru:443:$public_ipv4" https://aisale.fixitpulse.ru/api/health >/dev/null; then
+            echo 'The public IPv4 listener serves the AISale HTTPS vhost.'
+          else
+            echo 'The public IPv4 listener did not return the AISale HTTPS vhost; checking from the GitHub runner.' >&2
+          fi
           REMOTE
 
       - name: Verify public HTTPS
         run: |
+          echo 'Certificate presented by the public AISale endpoint:'
+          timeout 10 openssl s_client -connect aisale.fixitpulse.ru:443 -servername aisale.fixitpulse.ru -showcerts </dev/null 2>/dev/null | openssl x509 -noout -subject -issuer -fingerprint -sha256 -ext subjectAltName
           curl -q -fsS --connect-timeout 10 --max-time 20 https://aisale.fixitpulse.ru/api/health
           curl -q -fsS --connect-timeout 10 --max-time 20 https://aisale.fixitpulse.ru/ >/dev/null
