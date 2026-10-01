@@ -123,6 +123,11 @@ jobs:
           printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
 
+      - name: Run backend tests without production credentials
+        run: |
+          docker build --file aisale/backend/Dockerfile --tag aisale-backend-check ./aisale/backend
+          docker run --rm -e AI_API_KEY= -e TELEGRAM_BOT_TOKEN= -e TELEGRAM_CHAT_ID= aisale-backend-check python -m pytest tests -q
+
       - name: Package isolated app source
         run: tar -czf aisale.source.tgz -C aisale .
 

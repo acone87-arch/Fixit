@@ -184,3 +184,37 @@ def test_web_happy_path_creates_and_books_one_lead():
         app.dependency_overrides.clear()
         test_db.close()
         Base.metadata.drop_all(test_engine)
+
+
+def test_free_text_message_keeps_all_customer_requirements(monkeypatch):
+    from fastapi.testclient import TestClient
+    from main import app, db_session, seed
+
+    monkeypatch.delenv("AI_API_KEY", raising=False)
+    test_engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(test_engine)
+    test_db = Session(test_engine, expire_on_commit=False)
+    seed(test_db)
+    app.dependency_overrides[db_session] = lambda: test_db
+    try:
+        with TestClient(app) as client:
+            session_id = client.post("/api/sessions", json={"channel": "web", "utm": {}}).json()["session_id"]
+            client.post(f"/api/sessions/{session_id}/messages", json={"text": "Утеплить"})
+            client.post(f"/api/sessions/{session_id}/messages", json={"text": "Продолжить без фото"})
+            response = client.post(f"/api/sessions/{session_id}/messages", json={
+                "text": "Хочу пользоваться круглый год, лоджия примерно 4 м, нужна отделка, свет и две розетки",
+            })
+            assert response.status_code == 200, response.text
+            payload = response.json()
+            fields = payload["estimate_state"]
+            assert fields["usage_mode"]["value"] == "year_round"
+            assert fields["glazing_mode"]["value"] == "warm"
+            assert fields["approx_length_m"]["value"] == 4
+            assert fields["interior_finish"]["value"] == "simple"
+            assert fields["lighting"]["value"] is True
+            assert fields["sockets_count"]["value"] == 2
+            assert "Когда планируете" in payload["assistant_message"]
+    finally:
+        app.dependency_overrides.clear()
+        test_db.close()
+        Base.metadata.drop_all(test_engine)

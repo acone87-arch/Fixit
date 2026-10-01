@@ -487,6 +487,8 @@ def quick_reply_fields(text: str, session: ChatSession) -> dict | None:
         return {"approx_length_m": 4}
     if lower in ("≈6 м", "≈6м", "6 м"):
         return {"approx_length_m": 6}
+    if lower == "как продолжение комнаты":
+        return {"usage_mode": "year_round", "glazing_mode": "warm"}
     if "круглый год" in lower or "зимой" in lower:
         return {"usage_mode": "year_round", "glazing_mode": "warm"}
     if "весной" in lower:
@@ -680,55 +682,22 @@ async def send_message(session_id: str, req: TextRequest, db: Session = Depends(
         emit(db, "handoff_requested", session.channel, session.id)
         db.commit()
         return {"assistant_message": answer, "next_action": "request_contact", "stage": session.current_stage}
-    if lower in ("застеклить", "заменить старое остекление", "утеплить", "сделать под ключ"):
-        fields, _ = await extract_fields(text)
-        if "под ключ" in lower:
-            fields["interior_finish"] = "full"
-        if "утепл" in lower:
-            fields["insulation"] = True
-    elif lower in ("не знаю", "пока не знаю") and session.current_stage == "DIMENSIONS":
-        fields = {"size_unknown": True}
-    elif lower == "пока не знаю" and session.current_stage == "INTENT":
-        fields = {"intent": "undecided"}
-    elif lower == "пока не знаю" and session.current_stage == "REQUIREMENTS":
-        fields = {"usage_mode": "undecided"}
-    elif lower == "пока не знаю" and session.current_stage == "OPTIONS":
-        if value(session.state or {}, "interior_finish") is None:
-            fields = {"interior_finish": "undecided"}
-        elif value(session.state or {}, "other_requests") is None:
-            fields = {"other_requests": "undecided"}
-        else:
-            fields = {"desired_timeline": "researching"}
-    elif lower == "продолжить без фото":
-        fields = {"photos_skipped": True}
-    elif lower in ("только остекление",):
-        fields = {"interior_finish": "none"}
-    elif "простая отделка" in lower:
-        fields = {"interior_finish": "simple"}
-    elif "под ключ" in lower:
-        fields = {"intent": "glazing", "interior_finish": "full"}
-    elif "≈3" in lower or "3 м" in lower:
-        fields = {"approx_length_m": 3}
-    elif "≈4" in lower or "4 м" in lower:
-        fields = {"approx_length_m": 4}
-    elif "≈6" in lower or "6 м" in lower:
-        fields = {"approx_length_m": 6}
-    elif "круглый год" in lower or "зимой" in lower:
-        fields = {"usage_mode": "year_round", "glazing_mode": "warm"}
-    elif "весной" in lower:
-        fields = {"usage_mode": "seasonal"}
-    elif "летом" in lower:
-        fields = {"usage_mode": "summer"}
-    elif any(x in lower for x in ("срочно", "скорее")):
-        fields = {"desired_timeline": "asap"}
-    elif "месяц" in lower:
-        fields = {"desired_timeline": "month"}
-    elif "1–3" in lower or "1-3" in lower:
-        fields = {"desired_timeline": "1-3 months"}
-    elif "узнаю цену" in lower:
-        fields = {"desired_timeline": "researching"}
+    quick_reply_texts = {
+        "застеклить", "заменить старое остекление", "утеплить", "сделать под ключ",
+        "не знаю", "пока не знаю", "продолжить без фото", "только остекление",
+        "простая отделка", "полностью под ключ", "≈3 м", "≈3м", "3 м", "≈4 м",
+        "≈4м", "4 м", "≈6 м", "≈6м", "6 м", "круглый год", "хранение / летом",
+        "весной и осенью", "как продолжение комнаты", "как можно скорее",
+        "в течение месяца", "1–3 месяца", "1-3 месяца", "просто узнаю цену",
+        "ничего", "свет", "розетки", "шкаф", "подоконник",
+    }
+    quick_fields = quick_reply_fields(text, session)
+    if lower in quick_reply_texts and quick_fields is not None:
+        fields = quick_fields
     else:
-        fields, _ = await extract_fields(text, session.photo_keys)
+        # Extract all facts from a free-text answer in one pass. Photos are analyzed
+        # when uploaded; do not resend them to Vision on every chat message.
+        fields, _ = await extract_fields(text)
     merge_state(session, fields)
     question = next_question(session)
     if question:
