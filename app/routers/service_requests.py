@@ -19,7 +19,7 @@ from app.services.client_portal import CLIENT_ROLES, client_scope, ensure_client
 from app.services.service_request_workflow import decide_approval as workflow_decide_approval, locked_request, transition
 from app.services.access_policy import ensure_service_request_access
 from app.services.media import image_response, normalize_image
-from app.services.push_service import notify_dispatchers, notify_request_assigned
+from app.services.push_service import notify_client_approvers, notify_dispatchers, notify_request_assigned
 
 router = APIRouter(prefix="/api/service-requests", tags=["service requests"])
 UPLOAD_ROOT = Path("uploads")
@@ -261,8 +261,11 @@ async def update_status(request_id: uuid.UUID, payload: ServiceRequestStatusUpda
                      approval=details.get("approval"), reason=details.get("reason"), note=payload.note)
     await db.commit(); await db.refresh(request)
     result = await serialize(db, request, user.organization_id)
-    if request.status == "waiting_approval" and request.approval_target == "internal":
-        await notify_dispatchers(db, request, f"SR-{request.number:05d} ожидает внутреннего согласования")
+    if request.status == "waiting_approval":
+        if request.approval_target == "internal":
+            await notify_dispatchers(db, request, f"SR-{request.number:05d} ожидает внутреннего согласования")
+        elif request.approval_target == "client":
+            await notify_client_approvers(db, request, f"SR-{request.number:05d}: подтвердите работы")
     return result
 
 

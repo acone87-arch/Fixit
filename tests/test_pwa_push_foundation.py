@@ -27,8 +27,7 @@ def test_push_deep_link_is_internal_and_request_specific():
 def test_push_api_keeps_device_subscription_in_current_tenant_only():
     source = (ROOT / "app/routers/push.py").read_text(encoding="utf-8")
     assert "PushSubscription.endpoint == payload.endpoint" in source
-    assert "item.user_id != user.id or item.organization_id != user.organization_id" in source
-    assert "HTTP_409_CONFLICT" in source
+    assert "item.user_id, item.organization_id = user.id, user.organization_id" in source
     assert "PushSubscription.user_id == user.id" in source
     assert "PushSubscription.organization_id == user.organization_id" in source
 
@@ -100,3 +99,20 @@ def test_onboarding_skips_completed_device_steps_using_browser_and_backend_state
     assert "/push/state?endpoint=${encodeURIComponent(subscription.endpoint)}" in source
     assert "endpoint: str | None = Query" in push_router
     assert "PushSubscription.endpoint == endpoint" in push_router
+
+
+def test_profile_reports_real_push_states_and_can_disconnect_or_reconnect():
+    source = (ROOT / "app/static/app.js").read_text(encoding="utf-8")
+    for state in ("unsupported", "denied", "enabled", "available", "disconnected", "unconfigured", "error"):
+        assert state in source
+    assert "disablePush" in source and "/push/unsubscribe" in source
+    assert "existing?.options?.applicationServerKey" in source
+
+
+def test_client_approval_assignment_and_completion_are_wired_to_push():
+    requests = (ROOT / "app/routers/service_requests.py").read_text(encoding="utf-8")
+    sync = (ROOT / "app/routers/sync.py").read_text(encoding="utf-8")
+    assert "notify_request_assigned" in requests
+    assert "notify_client_approvers" in requests
+    assert "notify_dispatchers" in requests
+    assert "request.status == \"completed\"" in sync and "notify_dispatchers" in sync

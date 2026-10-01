@@ -10,6 +10,14 @@ class Settings(BaseSettings):
     vapid_public_key: str | None = None
     vapid_private_key: str | None = None
     vapid_subject: str | None = None
+    password_reset_expire_minutes: int = 30
+    password_reset_debug: bool = False
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_username: str | None = None
+    smtp_password: str | None = None
+    smtp_from: str | None = None
+    smtp_starttls: bool = True
     # Comma-separated values keep the production .env readable and avoid JSON
     # syntax in shell-managed deployment configuration.
     allowed_origins: str = "http://localhost:8000,http://127.0.0.1:8000"

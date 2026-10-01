@@ -1,4 +1,4 @@
-from app.models.core import Equipment, EquipmentAttachment, EquipmentType, Task, Ticket, User  # noqa: F401
+from app.models.core import Equipment, EquipmentAttachment, EquipmentType, PasswordResetToken, Task, Ticket, User  # noqa: F401
 from app.models.customer import Client, Site, ClientUserAccess, ClientInvite, TechnicianClientAccess  # noqa: F401
 from app.models.organization import AuditEvent, Organization, OrganizationMembership  # noqa: F401
 from app.models.repair import Repair, RepairAttachment, RepairPart, SyncLog, SyncOperation  # noqa: F401

@@ -13,7 +13,16 @@
 <link rel="manifest" href="/static/manifest.webmanifest">
 <link rel="icon" href="/static/icons/fixit-192.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/static/icons/fixit-180.png">
-<link rel="stylesheet" href="/static/styles.css?v=20260929-1">
+<script>
+(() => {
+  const theme = localStorage.getItem('fixit-theme') || 'system';
+  const size = localStorage.getItem('fixit-text-size') || 'standard';
+  document.documentElement.dataset.themeChoice = theme;
+  document.documentElement.dataset.theme = theme === 'system' ? (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark') : theme;
+  document.documentElement.dataset.textSize = size;
+})();
+</script>
+<link rel="stylesheet" href="/static/styles.css?v=20261002-3">
 </head>
 <body>
 
@@ -28,14 +37,15 @@
     <div id="login-error" class="login-error hidden"></div>
     <form id="login-form">
       <div class="field">
-        <label>Email</label>
+        <label for="login-email">Email</label>
         <input type="email" id="login-email" required autocomplete="username">
       </div>
       <div class="field">
-        <label>Пароль</label>
+        <label for="login-password">Пароль</label>
         <input type="password" id="login-password" required autocomplete="current-password">
       </div>
       <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center">Войти</button>
+      <button type="button" class="login-forgot" id="forgot-password-btn">Забыли пароль?</button>
     </form>
     <p class="login-helper">Доступ к Fixit выдаёт ваша сервисная команда. Получили приглашение или QR-код — используйте ссылку из приглашения или отсканируйте QR. Нет доступа? Обратитесь к администратору сервисной команды.</p>
     <div id="join-form-host"></div>
@@ -68,8 +78,8 @@
   <div class="more-menu hidden" id="more-menu"></div>
 </div>
 
-<script src="/static/offline/engine.js?v=20260909-5"></script>
+<script src="/static/offline/engine.js?v=20261002-3"></script>
 <script src="/static/inventory.js?v=20260929-1"></script>
-  <script src="/static/app.js?v=20260929-1"></script>
+  <script src="/static/app.js?v=20261002-3"></script>
 </body>
 </html>
