@@ -207,7 +207,7 @@ jobs:
           sudo -n nginx -t
           sudo -n systemctl reload nginx
           sudo -n nginx -T 2>&1 | grep -E '^[[:space:]]*(listen .*(:80|:443)|server_name |ssl_certificate )' | tail -n 80
-          curl -q -fsS --noproxy '*' --connect-timeout 10 --max-time 20 --resolve aisale.fixitpulse.ru:443:127.0.0.1 https://aisale.fixitpulse.ru/api/health
+          curl -q -fsS --noproxy '*' --connect-timeout 10 --max-time 20 --resolve "aisale.fixitpulse.ru:443:$public_ipv4" https://aisale.fixitpulse.ru/api/health
           REMOTE
 
       - name: Inspect VPS TLS routing
