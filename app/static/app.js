@@ -21,14 +21,16 @@ let deferredInstallPrompt = null;
 let installationCompletedThisSession = false;
 
 function applyAppearance(theme = localStorage.getItem('fixit-theme') || 'system', textSize = localStorage.getItem('fixit-text-size') || 'standard') {
-  const resolvedTheme = theme === 'system' ? (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark') : theme;
-  document.documentElement.dataset.themeChoice = theme;
-  document.documentElement.dataset.theme = resolvedTheme;
-  document.documentElement.dataset.textSize = textSize;
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', resolvedTheme === 'light' ? '#F3F7FC' : '#0B1220');
+  const resolvedTheme = theme === 'system' ? (window.matchMedia?.('(prefers-color-scheme: light)').matches ? 'light' : 'dark') : theme;
+  if (typeof document !== 'undefined') {
+    document.documentElement.dataset.themeChoice = theme;
+    document.documentElement.dataset.theme = resolvedTheme;
+    document.documentElement.dataset.textSize = textSize;
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', resolvedTheme === 'light' ? '#F3F7FC' : '#0B1220');
+  }
 }
 applyAppearance();
-matchMedia('(prefers-color-scheme: light)').addEventListener?.('change', () => {
+window.matchMedia?.('(prefers-color-scheme: light)').addEventListener?.('change', () => {
   if ((localStorage.getItem('fixit-theme') || 'system') === 'system') applyAppearance();
 });
 
