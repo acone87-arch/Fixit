@@ -199,6 +199,14 @@ jobs:
             echo 'The aisale virtual host is not present in the active Nginx configuration.' >&2
             exit 1
           fi
+          echo 'VPS listeners on HTTP and HTTPS:'
+          sudo -n ss -ltnp '( sport = :80 or sport = :443 )' || true
+          echo 'Loaded Nginx listen, server_name, and certificate directives:'
+          sudo -n nginx -T 2>&1 | grep -E '^[[:space:]]*(listen .*(:80|:443)|server_name |ssl_certificate )' | tail -n 80 || true
+          echo 'TLS certificate selected by SNI on loopback:'
+          timeout 10 openssl s_client -connect 127.0.0.1:443 -servername aisale.fixitpulse.ru </dev/null 2>/dev/null | openssl x509 -noout -subject -issuer -fingerprint -sha256 -ext subjectAltName || true
+          echo 'TLS certificate selected by SNI on the VPS public IPv4:'
+          timeout 10 openssl s_client -connect "$public_ipv4:443" -servername aisale.fixitpulse.ru </dev/null 2>/dev/null | openssl x509 -noout -subject -issuer -fingerprint -sha256 -ext subjectAltName || true
           curl -q -fsS --noproxy '*' --connect-timeout 10 --max-time 20 --resolve aisale.fixitpulse.ru:443:127.0.0.1 https://aisale.fixitpulse.ru/api/health >/dev/null
           if curl -q -fsS --noproxy '*' --connect-timeout 10 --max-time 20 --resolve "aisale.fixitpulse.ru:443:$public_ipv4" https://aisale.fixitpulse.ru/api/health >/dev/null; then
             echo 'The public IPv4 listener serves the AISale HTTPS vhost.'
