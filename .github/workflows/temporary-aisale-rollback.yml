@@ -1,0 +1,56 @@
+name: Temporary AISale VPS rollback
+on:
+  push:
+    branches: [codex/aisale-deploy]
+    paths: ['.github/workflows/temporary-aisale-rollback.yml']
+permissions:
+  contents: read
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    environment: aisale-pilot
+    timeout-minutes: 10
+    steps:
+      - name: Verify VPS host matches AISale DNS
+        id: host
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+        run: |
+          python - <<'PY'
+          import os,socket
+          def ips(n):
+           try: return {x[4][0] for x in socket.getaddrinfo(n,None,socket.AF_INET)}
+           except OSError: return set()
+          a=sorted(ips(os.environ['VPS_HOST'].strip()) & ips('aisale.fixitpulse.ru'))
+          if not a: raise SystemExit('VPS host mismatch; refusing connection')
+          open(os.environ['GITHUB_OUTPUT'],'a').write('ip='+a[0]+'\n')
+          PY
+      - name: Configure SSH
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+        run: |
+          for name in VPS_SSH_KEY VPS_KNOWN_HOSTS; do if [ -z "${!name}" ]; then echo "Missing $name" >&2; exit 1; fi; done
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
+      - name: Stop AISale and restore Fixit Nginx
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_IP: ${{ steps.host.outputs.ip }}
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=yes -o "HostKeyAlias=$VPS_HOST" "$VPS_USER@$VPS_IP" 'bash -se' <<'REMOTE'
+          set -euo pipefail
+          d=/opt/aisale
+          if [ -d "$d" ]; then [ "$(realpath "$d")" = "$d" ] && [ -f "$d/docker-compose.prod.yml" ] || exit 1; docker compose --project-name aisale -f "$d/docker-compose.prod.yml" down --remove-orphans; fi
+          for c in /etc/nginx/sites-enabled/aisale.conf /etc/nginx/conf.d/aisale.conf; do if sudo -n test -f "$c"; then sudo -n grep -q 'aisale.fixitpulse.ru' "$c" || exit 1; sudo -n rm -f -- "$c"; fi; done
+          sudo -n nginx -t
+          sudo -n systemctl reload nginx
+          if [ -d "$d" ]; then [ "$(realpath "$d")" = "$d" ] && [ -f "$d/docker-compose.prod.yml" ] || exit 1; sudo -n rm -rf -- "$d"; fi
+          if sudo -n nginx -T 2>&1 | grep -q 'aisale.fixitpulse.ru'; then exit 1; fi
+          echo 'AISale stopped and removed; Docker volumes preserved; Fixit Nginx reloaded.'
+          REMOTE
+      - name: Verify Fixit Pulse HTTPS
+        run: curl -fsS --connect-timeout 10 --max-time 25 https://fixitpulse.ru/health
