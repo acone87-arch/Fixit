@@ -215,6 +215,26 @@ jobs:
           fi
           REMOTE
 
+      - name: Inspect VPS TLS routing
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=yes -o "HostKeyAlias=$VPS_HOST" "$VPS_USER@$AISALE_DEPLOY_IP" "bash -s -- '$AISALE_DEPLOY_IP'" <<'REMOTE'
+          set -euo pipefail
+          public_ipv4="$1"
+          echo '=== Host listeners ==='
+          sudo -n ss -ltnp '( sport = :80 or sport = :443 )'
+          echo '=== Active Nginx virtual hosts ==='
+          sudo -n nginx -T 2>&1 | grep -E '^[[:space:]]*(listen .*(:80|:443)|server_name |ssl_certificate )' | tail -n 80
+          echo '=== Configured AISale certificate ==='
+          sudo -n openssl x509 -in /etc/letsencrypt/live/aisale-fixitpulse-dns/fullchain.pem -noout -subject -issuer -fingerprint -sha256 -ext subjectAltName
+          echo '=== Certificate selected on loopback ==='
+          timeout 10 openssl s_client -connect 127.0.0.1:443 -servername aisale.fixitpulse.ru </dev/null 2>/dev/null | openssl x509 -noout -subject -issuer -fingerprint -sha256 -ext subjectAltName
+          echo '=== Certificate selected on VPS public address ==='
+          timeout 10 openssl s_client -connect "$public_ipv4:443" -servername aisale.fixitpulse.ru </dev/null 2>/dev/null | openssl x509 -noout -subject -issuer -fingerprint -sha256 -ext subjectAltName
+          REMOTE
+
       - name: Verify public HTTPS
         run: |
           echo 'Certificate presented by the public AISale endpoint:'
