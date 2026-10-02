@@ -40,3 +40,28 @@ class LoginRequest(BaseModel):
     email: EmailStr
     password: str
     organization_slug: str | None = None
+
+
+class PasswordChangeRequest(BaseModel):
+    current_password: str
+    new_password: str
+    confirmation: str
+
+
+class PasswordResetRequest(BaseModel):
+    email: EmailStr
+
+
+class PasswordResetRequestOut(BaseModel):
+    message: str
+    preview_url: str | None = None
+
+
+class PasswordResetComplete(BaseModel):
+    token: str
+    new_password: str
+    confirmation: str
+
+
+class PasswordResetState(BaseModel):
+    valid: bool

@@ -61,6 +61,8 @@ async def get_current_user(
     user = await db.get(User, user_id)
     if not user or not user.is_active:
         raise credentials_error
+    if payload.get("av", 0) != user.auth_version:
+        raise credentials_error
     membership_query = select(OrganizationMembership).where(
         OrganizationMembership.user_id == user_id,
         OrganizationMembership.is_active.is_(True),

@@ -1,13 +1,11 @@
 """A4 sheets, eight 90 x 60 mm labels with permanent /e/ URLs."""
 from io import BytesIO
 
-import qrcode
 from reportlab.lib.units import mm
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen.canvas import Canvas
-from reportlab.lib.utils import ImageReader
-from reportlab.pdfbase.pdfmetrics import stringWidth
 
+from app.services.equipment_label_pdf import EquipmentLabel, draw_equipment_label
 from app.services.service_act_pdf import _font_name
 
 
@@ -28,26 +26,8 @@ def build_inventory_pdf(site_name, batch_id, labels, base_url):
             canvas.drawRightString(195*mm, 12*mm, f'{index // 8 + 1} / {(len(labels) + 7) // 8}')
         column, row = index % 2, (index % 8) // 2
         x, y = (15 + column*90)*mm, (208 - row*63)*mm
-        canvas.setStrokeColorRGB(.7, .7, .7)
-        canvas.setDash(2, 3)
-        canvas.rect(x, y, 90*mm, 60*mm)
-        canvas.setDash()
-        url = f'{base_url}/e/{token}'
-        qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_M, border=4, box_size=10)
-        qr.add_data(url); qr.make(fit=True)
-        image = qr.make_image().convert('RGB')
-        canvas.drawImage(ImageReader(image), x+3*mm, y+11*mm, 40*mm, 40*mm)
-        canvas.setFont(font, 11)
-        canvas.drawString(x+46*mm, y+43*mm, 'FIXIT')
-        canvas.setFont(font, 10)
-        canvas.drawString(x+46*mm, y+35*mm, f'№ {number:03d}')
-        canvas.setFont(font, 7)
-        canvas.drawString(x+46*mm, y+28*mm, f'Партия {batch_id[:8]}')
-        title = str(site_name)
-        while stringWidth(title, font, 8) > 81*mm:
-            title = title[:-2] + '…'
-        canvas.setFont(font, 8)
-        canvas.drawString(x+4*mm, y+5*mm, title)
-        canvas.linkURL(url, (x+3*mm, y+11*mm, x+43*mm, y+51*mm), relative=0)
+        draw_equipment_label(canvas, x=x, y=y, label=EquipmentLabel(
+            token=token, site_name=str(site_name), inventory_number=number, batch_id=batch_id,
+        ), base_url=base_url)
     canvas.save()
     return stream.getvalue()

@@ -31,6 +31,24 @@ async def assert_no_horizontal_scroll(page):
     assert await page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth")
 
 
+async def test_profile_opens_from_sidebar_identity_without_separate_nav_item(live, flow):
+    from playwright.async_api import async_playwright, expect
+    async with async_playwright() as playwright:
+        browser = await playwright.chromium.launch()
+        page = await browser.new_page(viewport={"width": 1440, "height": 900})
+        try:
+            await login(page, flow.owner.email)
+            await expect(page.locator('#nav [data-route="profile"]')).to_have_count(0)
+            identity = page.locator("#user-profile-btn")
+            await expect(identity).to_contain_text(flow.owner.full_name)
+            await identity.click()
+            await expect(page).to_have_url("http://127.0.0.1:8765/#profile")
+            await expect(page.get_by_role("heading", name="Профиль и настройки")).to_be_visible()
+            await expect(identity).to_have_attribute("aria-current", "page")
+        finally:
+            await browser.close()
+
+
 async def test_qr_request_assignment_reaches_technician_and_cannot_be_reassigned(live, flow):
     from playwright.async_api import async_playwright, expect
     created = await qr(flow)

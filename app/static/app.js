@@ -20,6 +20,20 @@ let activeClientPhotoUrls = [];
 let deferredInstallPrompt = null;
 let installationCompletedThisSession = false;
 
+function applyAppearance(theme = localStorage.getItem('fixit-theme') || 'system', textSize = localStorage.getItem('fixit-text-size') || 'standard') {
+  const resolvedTheme = theme === 'system' ? (window.matchMedia?.('(prefers-color-scheme: light)').matches ? 'light' : 'dark') : theme;
+  if (typeof document !== 'undefined') {
+    document.documentElement.dataset.themeChoice = theme;
+    document.documentElement.dataset.theme = resolvedTheme;
+    document.documentElement.dataset.textSize = textSize;
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', resolvedTheme === 'light' ? '#F3F7FC' : '#0B1220');
+  }
+}
+applyAppearance();
+window.matchMedia?.('(prefers-color-scheme: light)').addEventListener?.('change', () => {
+  if ((localStorage.getItem('fixit-theme') || 'system') === 'system') applyAppearance();
+});
+
 const isStandalone = () => window.matchMedia?.('(display-mode: standalone)').matches || window.navigator.standalone === true;
 const isIos = () => /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.MSStream;
 const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
@@ -46,7 +60,7 @@ async function registerPulseWorker() {
   if (!('serviceWorker' in navigator)) return null;
   const registrations = await navigator.serviceWorker.getRegistrations();
   await Promise.all(registrations.map(item => item.update().catch(() => null)));
-  return navigator.serviceWorker.register('/sw.js?v=20260916-1', { scope: '/' });
+  return navigator.serviceWorker.register('/sw.js?v=20261002-4', { scope: '/' });
 }
 
 async function enablePush() {
@@ -57,10 +71,34 @@ async function enablePush() {
     if (permission !== 'granted') { renderNav(); return permission === 'denied' ? 'denied' : 'dismissed'; }
     const key = await api('/push/public-key');
     const registration = await registerPulseWorker();
-    const subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(key.public_key) });
+    const expectedKey = urlBase64ToUint8Array(key.public_key);
+    const existing = await registration.pushManager.getSubscription();
+    const currentKey = existing?.options?.applicationServerKey ? new Uint8Array(existing.options.applicationServerKey) : null;
+    if (existing && (!currentKey || currentKey.length !== expectedKey.length || currentKey.some((value, index) => value !== expectedKey[index]))) {
+      await existing.unsubscribe();
+    }
+    const current = await registration.pushManager.getSubscription();
+    const subscription = current || await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: expectedKey });
     await api('/push/subscribe', { method: 'POST', body: JSON.stringify(subscription.toJSON()) });
     toast('Уведомления включены'); renderNav(); return 'enabled';
   } catch (error) { toast(error.message || 'Не удалось включить уведомления', 'error'); return 'error'; }
+}
+
+async function disablePush() {
+  if (!pushSupported()) return 'unsupported';
+  try {
+    const registration = await navigator.serviceWorker.getRegistration('/');
+    const subscription = await registration?.pushManager.getSubscription();
+    if (subscription) {
+      await api('/push/unsubscribe', { method: 'POST', body: JSON.stringify({ endpoint: subscription.endpoint }) });
+      await subscription.unsubscribe();
+    }
+    toast('Уведомления выключены');
+    return 'disabled';
+  } catch (error) {
+    toast(error.message || 'Не удалось выключить уведомления', 'error');
+    return 'error';
+  }
 }
 
 async function removePushSubscription(token) {
@@ -129,8 +167,9 @@ async function currentPushState() {
     const subscription = await registration?.pushManager.getSubscription();
     if (!subscription) return { state: 'available' };
     const remote = await api(`/push/state?endpoint=${encodeURIComponent(subscription.endpoint)}`);
-    return remote.configured && remote.subscribed ? { state: 'enabled' } : { state: 'available' };
-  } catch (_) { return { state: 'available' }; }
+    if (!remote.configured) return { state: 'unconfigured', subscription };
+    return remote.subscribed ? { state: 'enabled', subscription } : { state: 'disconnected', subscription };
+  } catch (error) { return { state: 'error', error }; }
 }
 
 async function requestPwaInstall() {
@@ -328,7 +367,7 @@ function closeModal() {
   const el = document.querySelector('.modal-backdrop');
   if (el) {
     el.querySelectorAll('[data-object-url]').forEach((node) => {
-      const url = node.getAttribute('src') || node.getAttribute('href');
+      const url = node.getAttribute('src') || node.getAttribute('href') || node.getAttribute('data');
       if (url?.startsWith('blob:')) URL.revokeObjectURL(url);
     });
     el.remove();
@@ -504,6 +543,8 @@ function renderNav() {
   });
   document.getElementById('user-name').textContent = state.me.full_name;
   document.getElementById('user-role').textContent = ROLE_LABEL[state.me.role] || state.me.role;
+  document.getElementById('user-profile-btn').classList.toggle('active', state.route === 'profile');
+  document.getElementById('user-profile-btn').setAttribute('aria-current', state.route === 'profile' ? 'page' : 'false');
   renderMobileNav(items);
 }
 
@@ -520,7 +561,7 @@ function renderMobileNav(items) {
     <button class="mobile-nav-item ${state.route === route ? 'active' : ''}" data-mobile-route="${route}">
       <span class="mobile-nav-icon icon-${icon}"></span><span>${label}</span>
     </button>`).join('');
-  moreMenu.innerHTML = `<div class="more-menu-head"><span>Разделы</span><button id="more-close-btn">Закрыть</button></div>${pwaControls()}${items
+  moreMenu.innerHTML = `<div class="more-menu-head"><span>Разделы</span><button id="more-close-btn">Закрыть</button></div>${items
     .filter(([route]) => !['pulse', 'requests', 'equipment'].includes(route))
     .map(([route, label]) => `<button data-more-route="${route}">${esc(label)}<span>→</span></button>`).join('')}
     <button id="more-offline-btn">Очередь отправки<span>→</span></button>
@@ -545,7 +586,7 @@ function renderMobileNav(items) {
   });
   moreMenu.querySelector('.pwa-dismiss-btn')?.addEventListener('click', () => { localStorage.setItem('fixit-install-dismissed', '1'); renderNav(); });
   moreMenu.querySelector('.pwa-push-btn')?.addEventListener('click', enablePush);
-  document.getElementById('mobile-profile-btn').onclick = () => moreMenu.classList.toggle('hidden');
+  document.getElementById('mobile-profile-btn').onclick = () => { moreMenu.classList.add('hidden'); location.hash = 'profile'; };
 }
 
 async function openOfflineQueue() {
@@ -628,6 +669,77 @@ function openQrQuickAction() {
   startCamera();
 }
 
+async function renderProfile(content) {
+  const theme = localStorage.getItem('fixit-theme') || 'system';
+  const textSize = localStorage.getItem('fixit-text-size') || 'standard';
+  content.innerHTML = `<section class="profile-screen">
+    <header class="page-header"><div><h1>Профиль и настройки</h1><div class="page-subtitle">Личные данные, внешний вид, приложение и безопасность</div></div></header>
+    <div class="profile-grid">
+      <section class="settings-card profile-identity"><span class="settings-kicker">УЧЁТНАЯ ЗАПИСЬ</span><h2>${esc(state.me.full_name)}</h2>
+        <dl><div><dt>Email</dt><dd>${esc(state.me.email)}</dd></div><div><dt>Телефон</dt><dd>${esc(state.me.phone || 'Не указан')}</dd></div><div><dt>Роль</dt><dd>${esc(ROLE_LABEL[state.me.role] || state.me.role)}</dd></div></dl>
+      </section>
+      <section class="settings-card"><span class="settings-kicker">ВНЕШНИЙ ВИД</span><h2>Интерфейс</h2><p>Настройки сохраняются на этом устройстве и не отключают масштабирование браузера.</p>
+        <div class="field"><label for="profile-theme">Тема</label><select id="profile-theme"><option value="system" ${theme === 'system' ? 'selected' : ''}>Как в системе</option><option value="light" ${theme === 'light' ? 'selected' : ''}>Светлая</option><option value="dark" ${theme === 'dark' ? 'selected' : ''}>Тёмная</option></select></div>
+        <div class="field"><label for="profile-text-size">Размер текста</label><select id="profile-text-size"><option value="standard" ${textSize === 'standard' ? 'selected' : ''}>Стандартный</option><option value="large" ${textSize === 'large' ? 'selected' : ''}>Крупный</option><option value="xlarge" ${textSize === 'xlarge' ? 'selected' : ''}>Очень крупный</option></select></div>
+      </section>
+      <section class="settings-card profile-app-card"><span class="settings-kicker">ПРИЛОЖЕНИЕ И УВЕДОМЛЕНИЯ</span><h2>Это устройство</h2>
+        <div class="device-setting" id="profile-install-state" aria-live="polite"><div class="status-loader" aria-hidden="true"></div><div><strong>Проверяем установку…</strong><p>Определяем возможности браузера.</p></div></div>
+        <div class="device-setting" id="profile-push-state" aria-live="polite"><div class="status-loader" aria-hidden="true"></div><div><strong>Проверяем уведомления…</strong><p>Сверяем разрешение браузера и подписку.</p></div></div>
+      </section>
+      <section class="settings-card profile-security-card"><span class="settings-kicker">БЕЗОПАСНОСТЬ</span><h2>Сменить пароль</h2><p>После смены пароля все действующие сеансы завершатся.</p>
+        <form id="password-change-form"><div class="field"><label for="current-password">Текущий пароль</label><input id="current-password" type="password" autocomplete="current-password" required></div><div class="field"><label for="new-password">Новый пароль</label><input id="new-password" type="password" autocomplete="new-password" minlength="10" required><small>Не менее 10 символов, включая букву и цифру.</small></div><div class="field"><label for="confirm-password">Повторите новый пароль</label><input id="confirm-password" type="password" autocomplete="new-password" minlength="10" required></div><div class="form-error hidden" id="password-change-error" role="alert"></div><button class="btn btn-primary" type="submit">Сменить пароль</button></form>
+      </section>
+    </div>
+  </section>`;
+
+  content.querySelector('#profile-theme').addEventListener('change', (event) => {
+    localStorage.setItem('fixit-theme', event.target.value); applyAppearance(event.target.value, localStorage.getItem('fixit-text-size') || 'standard');
+  });
+  content.querySelector('#profile-text-size').addEventListener('change', (event) => {
+    localStorage.setItem('fixit-text-size', event.target.value); applyAppearance(localStorage.getItem('fixit-theme') || 'system', event.target.value);
+  });
+  content.querySelector('#password-change-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const button = event.currentTarget.querySelector('button[type="submit"]');
+    const error = content.querySelector('#password-change-error');
+    error.classList.add('hidden'); button.disabled = true; button.textContent = 'Сохраняем…';
+    try {
+      await api('/auth/password/change', { method: 'POST', body: JSON.stringify({ current_password: content.querySelector('#current-password').value, new_password: content.querySelector('#new-password').value, confirmation: content.querySelector('#confirm-password').value }) });
+      toast('Пароль изменён. Войдите снова.'); await logout();
+    } catch (reason) { error.textContent = reason.message || 'Не удалось сменить пароль'; error.classList.remove('hidden'); button.disabled = false; button.textContent = 'Сменить пароль'; }
+  });
+
+  const installHost = content.querySelector('#profile-install-state');
+  if (isStandalone() || installationCompletedThisSession) {
+    installHost.innerHTML = '<span class="status-mark status-good">✓</span><div><strong>Приложение установлено</strong><p>Fixit открыт как приложение на этом устройстве.</p></div>';
+  } else if (deferredInstallPrompt) {
+    installHost.innerHTML = '<span class="status-mark">＋</span><div><strong>Можно установить</strong><p>Приложение появится на главном экране и будет открываться отдельно.</p><button class="btn btn-secondary" id="profile-install">Установить приложение</button></div>';
+    installHost.querySelector('#profile-install').addEventListener('click', async () => { await requestPwaInstall(); if (state.route === 'profile') renderProfile(content); });
+  } else if (isIos()) {
+    installHost.innerHTML = '<span class="status-mark">i</span><div><strong>Установка через меню iPhone</strong><p>В Safari нажмите «Поделиться», затем «На экран Домой».</p></div>';
+  } else {
+    installHost.innerHTML = '<span class="status-mark status-muted">—</span><div><strong>Установка сейчас недоступна</strong><p>Браузер не предложил установку. Fixit продолжает работать во вкладке; для установки используйте актуальный Chrome или Edge по HTTPS.</p></div>';
+  }
+
+  const pushHost = content.querySelector('#profile-push-state');
+  const push = await currentPushState();
+  if (state.route !== 'profile' || !document.body.contains(pushHost)) return;
+  const pushViews = {
+    unsupported: ['status-muted', '—', 'Уведомления не поддерживаются', 'Этот браузер или устройство не поддерживает Web Push.', ''],
+    denied: ['status-bad', '!', 'Уведомления запрещены браузером', 'Разрешите уведомления в настройках сайта, затем вернитесь и проверьте снова.', '<button class="btn btn-secondary" id="profile-push-refresh">Проверить снова</button>'],
+    enabled: ['status-good', '✓', 'Уведомления включены', 'Разрешение выдано, подписка браузера сохранена на сервере.', '<button class="btn btn-ghost" id="profile-push-disable">Выключить</button>'],
+    available: ['', '＋', 'Уведомления выключены', 'Включение начнётся только после нажатия кнопки.', '<button class="btn btn-secondary" id="profile-push-enable">Включить уведомления</button>'],
+    disconnected: ['status-bad', '!', 'Подписка не подключена', 'Разрешение есть, но сервер не видит подписку этого браузера.', '<button class="btn btn-secondary" id="profile-push-enable">Подключить снова</button>'],
+    unconfigured: ['status-bad', '!', 'Сервер push не настроен', 'Администратору нужно проверить VAPID-параметры.', '<button class="btn btn-secondary" id="profile-push-enable">Повторить подключение</button>'],
+    error: ['status-bad', '!', 'Ошибка проверки', 'Не удалось сверить подписку. Проверьте сеть и повторите.', '<button class="btn btn-secondary" id="profile-push-refresh">Повторить</button>'],
+  };
+  const [cls, mark, title, description, action] = pushViews[push.state] || pushViews.error;
+  pushHost.innerHTML = `<span class="status-mark ${cls}">${mark}</span><div><strong>${title}</strong><p>${description}</p>${action}</div>`;
+  pushHost.querySelector('#profile-push-enable')?.addEventListener('click', async () => { await enablePush(); if (state.route === 'profile') renderProfile(content); });
+  pushHost.querySelector('#profile-push-disable')?.addEventListener('click', async () => { await disablePush(); if (state.route === 'profile') renderProfile(content); });
+  pushHost.querySelector('#profile-push-refresh')?.addEventListener('click', () => renderProfile(content));
+}
+
 async function router() {
   closeImageLightbox();
   activeClientPhotoUrls.forEach((url) => URL.revokeObjectURL(url));
@@ -640,7 +752,7 @@ async function router() {
   state.clientId = route === 'clients' && routeId ? routeId : null;
   state.clientTab = state.clientId ? (routeTab || 'overview') : null;
   state.clientSiteId = state.clientTab === 'sites' && routeChildId ? routeChildId : null;
-  const allowedRoutes = (NAV[state.me?.role] || []).map(([key]) => key);
+  const allowedRoutes = [...(NAV[state.me?.role] || []).map(([key]) => key), 'profile'];
   if (!allowedRoutes.includes(state.route) && state.route !== 'inventory') {
     state.route = defaultRoute;
     history.replaceState(null, '', `#${defaultRoute}`);
@@ -670,6 +782,7 @@ async function router() {
     else if (state.me.role.startsWith('client_') && state.route === 'documents') await renderClientDocuments(content);
     else if (state.route === 'warehouse') await renderWarehouse(content);
     else if (state.route === 'users') await renderUsers(content);
+    else if (state.route === 'profile') await renderProfile(content);
     else content.innerHTML = '<div class="section-loading">Раздел не найден</div>';
   } catch (e) {
     content.innerHTML = `<div class="section-loading">Не удалось загрузить раздел: ${esc(e.message)}</div>`;
@@ -2045,7 +2158,7 @@ async function openEquipmentPassport(id) {
       return `<article class="equipment-history-card${entry.service_request_id ? ' is-clickable' : ''}${entry.legacy ? ' is-legacy' : ''}" ${entry.service_request_id ? `data-history-request="${entry.service_request_id}" tabindex="0" role="link"` : ''}><header class="equipment-history-card-head"><time>${fmtDate(entry.completed_at || entry.occurred_at)}</time>${requestBadge(entry)}<strong>${number}${entry.service_request_id ? ' ›' : ''}</strong></header><h3>${esc(title)}</h3>${fields}${parts}${photos}${technician}</article>`;
     }).join('') || '<div class="passport-empty"><strong>История обслуживания</strong><br>Ремонтов ещё не было.</div>';
     const documents = passport.documents.map((document) => `<button class="passport-document" data-document-kind="${esc(document.kind)}" data-repair-id="${document.repair_id || ''}" data-attachment-id="${document.attachment_id || ''}"><span class="passport-document-icon">${document.kind === 'service_act' ? 'PDF' : document.kind === 'before' || document.kind === 'after' ? 'Фото' : 'Файл'}</span><span><strong>${esc(document.title)}</strong><small>${fmtDate(document.created_at)}${document.media_type ? ` · ${esc(document.media_type)}` : ''}</small></span><b>↓</b></button>`).join('') || '<div class="passport-empty">Фотографии и сервисные акты появятся здесь после выполнения работ.</div>';
-    const qrFilename = `QR — ${String(passport.model || equipmentTypeName).replace(/[<>:"/\\|?*\x00-\x1F]/g, '_')}.svg`;
+    const qrFilename = `QR — ${String(passport.model || equipmentTypeName).replace(/[<>:"/\\|?*\x00-\x1F]/g, '_')}.pdf`;
     const primaryAction = passport.active_request
       ? `<button class="btn btn-primary" id="passport-primary-request">Открыть заявку SR-${String(passport.active_request.number).padStart(5, '0')}</button>`
       : (isStaff || isClient) ? '<button class="btn btn-primary" id="passport-create-request">Создать заявку</button>' : '';
@@ -2064,7 +2177,7 @@ async function openEquipmentPassport(id) {
         ${passport.active_request ? `<div class="passport-active-request passport-top-request"><div><span>Активная заявка SR-${String(passport.active_request.number).padStart(5, '0')}</span><strong>${esc(passport.active_request.title)}</strong><small>${esc(passport.active_request.assigned_technician_name || 'Мастер ещё не назначен')}</small></div>${requestBadge(passport.active_request)}</div>` : ''}</div>
       </div>
       <nav class="passport-tabs" aria-label="Разделы паспорта"><button class="active" data-passport-tab="overview">Обзор</button><button data-passport-tab="history">История</button><button data-passport-tab="documents">Документы <span>${passport.documents.length}</span></button></nav>
-      <section data-passport-panel="overview"><div class="passport-overview-grid"><div class="passport-data"><span>Серийный номер</span><strong class="mono">${esc(passport.serial_number)}</strong></div>${passport.inventory_number ? `<div class="passport-data"><span>Инвентарный номер</span><strong>${esc(passport.inventory_number)}</strong></div>` : ''}<div class="passport-data"><span>Текущий статус</span>${badge(EQUIPMENT_STATUS, passport.status)}</div></div>${passport.active_request ? '' : '<div class="passport-no-request">Активных заявок нет — оборудование готово к работе.</div>'}<div class="passport-qr"><img src="${qrObjectUrl}" data-object-url alt="QR-код оборудования"><div><span>QR оборудования</span><p>Используйте для быстрого открытия паспорта и обращения в сервис.</p><button class="btn btn-ghost btn-sm" id="passport-qr-download-inline">Скачать QR</button></div></div></section>
+      <section data-passport-panel="overview"><div class="passport-overview-grid"><div class="passport-data"><span>Серийный номер</span><strong class="mono">${esc(passport.serial_number)}</strong></div>${passport.inventory_number ? `<div class="passport-data"><span>Инвентарный номер</span><strong>${esc(passport.inventory_number)}</strong></div>` : ''}<div class="passport-data"><span>Текущий статус</span>${badge(EQUIPMENT_STATUS, passport.status)}</div></div>${passport.active_request ? '' : '<div class="passport-no-request">Активных заявок нет — оборудование готово к работе.</div>'}<div class="passport-qr"><object data="${qrObjectUrl}" data-object-url type="application/pdf" aria-label="Печатная QR-этикетка оборудования"></object><div><span>Печатная QR-этикетка</span><p>Формат 90 × 60 мм совпадает с этикетками массовой печати.</p><button class="btn btn-ghost btn-sm" id="passport-qr-download-inline">Скачать PDF</button></div></div></section>
       <section class="hidden" data-passport-panel="history"><div class="equipment-history"><h3>История обслуживания</h3>${history}</div></section>
       <section class="hidden" data-passport-panel="documents"><div class="passport-documents">${documents}</div></section>
     </section>`, `<span class="passport-footer-action">${primaryAction}</span>${isStaff ? '<button class="btn btn-primary" id="passport-manage">Редактировать карточку</button>' : ''}<button class="btn btn-secondary" id="passport-close">Закрыть</button>`);
@@ -2438,6 +2551,53 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
   }
 });
 
+async function showForgotPassword() {
+  const host = document.getElementById('join-form-host');
+  const login = document.getElementById('login-form');
+  login.classList.add('hidden');
+  document.getElementById('login-error').classList.add('hidden');
+  host.innerHTML = `<section class="login-flow"><button class="login-back" id="password-back">← Ко входу</button><h2>Восстановить пароль</h2><p>Укажите email. Ответ будет одинаковым независимо от наличия учётной записи.</p><form id="forgot-password-form"><div class="field"><label for="forgot-email">Email</label><input id="forgot-email" type="email" autocomplete="email" required></div><button class="btn btn-primary" type="submit">Отправить инструкцию</button></form><div id="forgot-result" class="login-result hidden" role="status"></div></section>`;
+  host.querySelector('#password-back').addEventListener('click', () => { host.innerHTML = ''; login.classList.remove('hidden'); });
+  host.querySelector('#forgot-password-form').addEventListener('submit', async (event) => {
+    event.preventDefault(); const form = event.currentTarget; const button = form.querySelector('button'); button.disabled = true; button.textContent = 'Отправляем…';
+    try {
+      const result = await api('/auth/password/reset/request', { method: 'POST', body: JSON.stringify({ email: host.querySelector('#forgot-email').value.trim() }) });
+      const output = host.querySelector('#forgot-result');
+      output.innerHTML = `<strong>Запрос принят</strong><p>${esc(result.message)}</p>${result.preview_url ? `<a href="${esc(result.preview_url)}">Открыть локальную ссылку восстановления</a>` : ''}`;
+      output.classList.remove('hidden'); form.classList.add('hidden');
+    } catch (error) { toast(error.message || 'Не удалось отправить запрос', 'error'); button.disabled = false; button.textContent = 'Отправить инструкцию'; }
+  });
+}
+
+async function showResetPassword(rawToken) {
+  const host = document.getElementById('join-form-host');
+  const login = document.getElementById('login-form');
+  document.getElementById('login-screen').classList.remove('hidden');
+  document.getElementById('app').classList.add('hidden');
+  login.classList.add('hidden');
+  host.innerHTML = '<section class="login-flow"><div class="status-loader"></div><p>Проверяем ссылку…</p></section>';
+  try {
+    const stateResult = await api(`/auth/password/reset/validate?token=${encodeURIComponent(rawToken)}`);
+    if (!stateResult.valid) throw new Error('Ссылка недействительна, истекла или уже использована.');
+    host.innerHTML = `<section class="login-flow"><h2>Новый пароль</h2><p>После сохранения все прежние сеансы будут завершены.</p><form id="reset-password-form"><div class="field"><label for="reset-new-password">Новый пароль</label><input id="reset-new-password" type="password" autocomplete="new-password" minlength="10" required><small>Не менее 10 символов, включая букву и цифру.</small></div><div class="field"><label for="reset-confirm-password">Повторите пароль</label><input id="reset-confirm-password" type="password" autocomplete="new-password" minlength="10" required></div><div class="form-error hidden" id="reset-password-error" role="alert"></div><button class="btn btn-primary" type="submit">Сохранить пароль</button></form></section>`;
+    host.querySelector('#reset-password-form').addEventListener('submit', async (event) => {
+      event.preventDefault(); const button = event.currentTarget.querySelector('button'); const errorHost = host.querySelector('#reset-password-error'); errorHost.classList.add('hidden'); button.disabled = true;
+      try {
+        await api('/auth/password/reset/complete', { method: 'POST', body: JSON.stringify({ token: rawToken, new_password: host.querySelector('#reset-new-password').value, confirmation: host.querySelector('#reset-confirm-password').value }) });
+        localStorage.removeItem('token'); state.token = null; state.me = null; history.replaceState(null, '', '/');
+        host.innerHTML = '<section class="login-result"><strong>Пароль изменён</strong><p>Теперь войдите с новым паролем.</p><button class="btn btn-primary" id="reset-login">Перейти ко входу</button></section>';
+        host.querySelector('#reset-login').addEventListener('click', () => { host.innerHTML = ''; login.classList.remove('hidden'); });
+      } catch (error) { errorHost.textContent = error.message || 'Не удалось изменить пароль'; errorHost.classList.remove('hidden'); button.disabled = false; }
+    });
+  } catch (error) {
+    host.innerHTML = `<section class="login-result"><strong>Ссылка не работает</strong><p>${esc(error.message)}</p><button class="btn btn-primary" id="reset-request-new">Запросить новую ссылку</button></section>`;
+    host.querySelector('#reset-request-new').addEventListener('click', showForgotPassword);
+  }
+}
+
+document.getElementById('forgot-password-btn').addEventListener('click', showForgotPassword);
+
+document.getElementById('user-profile-btn').addEventListener('click', () => { location.hash = 'profile'; });
 document.getElementById('logout-btn').addEventListener('click', logout);
 
 async function showJoinScreen(token) {
@@ -2492,6 +2652,8 @@ async function openClientInviteModal(client, kind) {
   });
 }
 
+const resetMatch = location.hash.match(/^#reset-password\/(.+)$/);
 const joinMatch = location.pathname.match(/^\/join\/([^/]+)$/);
-if (joinMatch && !state.token) { document.getElementById('login-screen').classList.remove('hidden'); showJoinScreen(joinMatch[1]); }
+if (resetMatch) { showResetPassword(resetMatch[1]); }
+else if (joinMatch && !state.token) { document.getElementById('login-screen').classList.remove('hidden'); showJoinScreen(joinMatch[1]); }
 else boot();

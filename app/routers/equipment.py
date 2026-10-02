@@ -1,9 +1,6 @@
 import uuid
-from io import BytesIO
 from pathlib import Path
 
-import qrcode
-import qrcode.image.svg
 from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import select
@@ -13,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.core.deps import CurrentUser, get_current_user, require_roles
 from app.database import get_db
-from app.models.core import Equipment, EquipmentAttachment, EquipmentType, Task, Ticket, User, UserRole
+from app.models.core import Equipment, EquipmentAttachment, EquipmentInventoryBatch, EquipmentType, Task, Ticket, User, UserRole
 from app.models.customer import Client, Site, TechnicianClientAccess
 from app.models.repair import Repair, RepairAttachment, RepairPart
 from app.models.service_request import ServiceRequest, ServiceRequestAttachment, ServiceRequestEvent
@@ -34,6 +31,7 @@ from app.schemas.equipment import (
 from app.services.client_portal import CLIENT_ROLES, client_scope, ensure_client_equipment
 from app.services.access_policy import ensure_equipment_access
 from app.services.media import image_response, normalize_image
+from app.services.equipment_label_pdf import EquipmentLabel, build_single_label_pdf
 
 router = APIRouter(prefix="/api/equipment", tags=["equipment"])
 types_router = APIRouter(prefix="/api/equipment-types", tags=["equipment"])
@@ -528,8 +526,13 @@ async def get_passport(equipment_id: uuid.UUID, db: AsyncSession = Depends(get_d
 async def equipment_qr(equipment_id: uuid.UUID, db: AsyncSession = Depends(get_db),
                        user: CurrentUser = Depends(get_current_user)):
     equipment = await _equipment_for_user(equipment_id, db, user)
-    public_url = f"{settings.public_app_url.rstrip('/')}/e/{equipment.public_qr_token}"
-    image = qrcode.make(public_url, image_factory=qrcode.image.svg.SvgPathImage, border=2)
-    buffer = BytesIO()
-    image.save(buffer)
-    return Response(buffer.getvalue(), media_type="image/svg+xml")
+    site = await db.get(Site, equipment.site_id)
+    batch = await db.get(EquipmentInventoryBatch, equipment.inventory_batch_id) if equipment.inventory_batch_id else None
+    content = await run_in_threadpool(build_single_label_pdf, EquipmentLabel(
+        token=str(equipment.public_qr_token), site_name=site.name if site else "Объект не указан",
+        equipment_name=equipment.name or None, inventory_number=equipment.inventory_number,
+        batch_id=str(batch.id) if batch else None,
+    ), settings.public_app_url)
+    return Response(content, media_type="application/pdf", headers={
+        "Content-Disposition": f'attachment; filename="fixit-qr-{equipment.id}.pdf"', "Cache-Control": "no-store",
+    })

@@ -53,8 +53,9 @@ async def send_to_user(db: AsyncSession, *, user_id: uuid.UUID, organization_id:
             status_code = getattr(getattr(exc, "response", None), "status_code", None)
             if status_code in {404, 410}:
                 subscription.is_active = False
-                await db.commit()
             logger.warning("Web Push delivery failed for subscription %s: %s", subscription.id, type(exc).__name__)
+    if any(not subscription.is_active for subscription in subscriptions):
+        await db.commit()
 
 
 async def notify_request_assigned(db: AsyncSession, request, equipment_name: str, client_name: str | None) -> None:
@@ -75,3 +76,31 @@ async def notify_dispatchers(db: AsyncSession, request, body: str) -> None:
     for user_id in recipients:
         await send_to_user(db, user_id=user_id, organization_id=request.organization_id,
                            title="Заявка требует внимания", body=body, url=safe_request_url(request.id))
+
+
+async def notify_client_approvers(db: AsyncSession, request, body: str) -> None:
+    """Notify only client representatives whose saved scope contains the equipment site."""
+    from app.models.core import Equipment, UserRole
+    from app.models.customer import ClientUserAccess, Site
+    from app.models.organization import OrganizationMembership
+    scope = (await db.execute(select(Site.client_id, Equipment.site_id).join(
+        Equipment, Equipment.site_id == Site.id,
+    ).where(Equipment.id == request.equipment_id, Equipment.organization_id == request.organization_id))).first()
+    if not scope:
+        return
+    client_id, site_id = scope
+    recipients = (await db.scalars(select(ClientUserAccess.user_id).join(
+        OrganizationMembership,
+        (OrganizationMembership.user_id == ClientUserAccess.user_id) &
+        (OrganizationMembership.organization_id == ClientUserAccess.organization_id),
+    ).where(
+        ClientUserAccess.organization_id == request.organization_id,
+        ClientUserAccess.client_id == client_id,
+        ClientUserAccess.is_active.is_(True),
+        OrganizationMembership.is_active.is_(True),
+        OrganizationMembership.role.in_([UserRole.client_admin, UserRole.client_site_user]),
+        (ClientUserAccess.site_id.is_(None)) | (ClientUserAccess.site_id == site_id),
+    ).distinct())).all()
+    for user_id in recipients:
+        await send_to_user(db, user_id=user_id, organization_id=request.organization_id,
+                           title="Нужно согласование", body=body, url=safe_request_url(request.id))

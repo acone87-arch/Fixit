@@ -45,12 +45,14 @@ async def subscribe(payload: PushSubscriptionIn, db: AsyncSession = Depends(get_
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Push пока не настроен")
     p256dh, auth = _keys(payload)
     item = await db.scalar(select(PushSubscription).where(PushSubscription.endpoint == payload.endpoint))
-    if item and (item.user_id != user.id or item.organization_id != user.organization_id):
-        raise HTTPException(status.HTTP_409_CONFLICT, "Устройство связано с другой учётной записью")
     if not item:
         item = PushSubscription(user_id=user.id, organization_id=user.organization_id, endpoint=payload.endpoint, p256dh=p256dh, auth=auth)
         db.add(item)
     else:
+        # A browser endpoint identifies the current browser subscription, not a
+        # permanent account. Explicit subscribe is proof of control and must be
+        # able to recover after logout, an offline unsubscribe, or account switch.
+        item.user_id, item.organization_id = user.id, user.organization_id
         item.p256dh, item.auth, item.is_active, item.last_seen_at = p256dh, auth, True, datetime.now(timezone.utc)
     await db.commit()
 

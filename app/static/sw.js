@@ -1,9 +1,12 @@
 // Root-scoped Fixit Pulse worker: preserves the durable offline repair engine.
-importScripts('/static/offline/engine.js?v=20260909-5');
-const SHELL_CACHE = 'fixit-pulse-shell-v15';
-const SHELL = ['/static/inventory.js?v=20260929-1', '/', '/static/styles.css?v=20260929-1', '/static/app.js?v=20260929-1', '/static/offline/engine.js?v=20260909-5', '/static/icons/fixit-192.png', '/static/icons/fixit-512.png', '/static/icons/fixit-512-maskable.png'];
+importScripts('/static/offline/engine.js?v=20261002-4');
+const SHELL_CACHE = 'fixit-pulse-shell-v16';
+const SHELL = ['/static/inventory.js?v=20260929-1', '/', '/static/styles.css?v=20261002-4', '/static/app.js?v=20261002-4', '/static/offline/engine.js?v=20261002-4', '/static/icons/fixit-192.png', '/static/icons/fixit-512.png', '/static/icons/fixit-512-maskable.png'];
 self.addEventListener('install', (event) => event.waitUntil(caches.open(SHELL_CACHE).then((cache) => cache.addAll(SHELL)).then(() => self.skipWaiting())));
-self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));
+self.addEventListener('activate', (event) => event.waitUntil(Promise.all([
+  self.clients.claim(),
+  caches.keys().then((keys) => Promise.all(keys.filter((key) => key.startsWith('fixit-pulse-shell-') && key !== SHELL_CACHE).map((key) => caches.delete(key)))),
+])));
 self.addEventListener('sync', (event) => {
   if (event.tag === 'fixit-sync-repairs') event.waitUntil(self.FixitOffline.sync({ token: null }));
 });
