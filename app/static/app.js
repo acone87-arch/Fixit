@@ -60,7 +60,7 @@ async function registerPulseWorker() {
   if (!('serviceWorker' in navigator)) return null;
   const registrations = await navigator.serviceWorker.getRegistrations();
   await Promise.all(registrations.map(item => item.update().catch(() => null)));
-  return navigator.serviceWorker.register('/sw.js?v=20261002-3', { scope: '/' });
+  return navigator.serviceWorker.register('/sw.js?v=20261002-4', { scope: '/' });
 }
 
 async function enablePush() {
@@ -510,27 +510,27 @@ const NAV = {
   owner: [
     ['pulse', 'Pulse'], ['requests', 'Заявки'],
     ['clients', 'Клиенты и объекты'], ['equipment', 'Оборудование'],
-    ['warehouse', 'Склад'], ['users', 'Пользователи'], ['profile', 'Профиль и настройки'],
+    ['warehouse', 'Склад'], ['users', 'Пользователи'],
   ],
   admin: [
     ['pulse', 'Pulse'], ['requests', 'Заявки'],
     ['clients', 'Клиенты и объекты'],
     ['equipment', 'Оборудование'],
     ['warehouse', 'Склад и запчасти'],
-    ['users', 'Пользователи'], ['profile', 'Профиль и настройки'],
+    ['users', 'Пользователи'],
   ],
   dispatcher: [
     ['pulse', 'Pulse'], ['requests', 'Заявки'],
     ['clients', 'Клиенты и объекты'],
     ['equipment', 'Оборудование'],
-    ['warehouse', 'Склад и запчасти'], ['profile', 'Профиль и настройки'],
+    ['warehouse', 'Склад и запчасти'],
   ],
   technician: [
     ['pulse', 'Pulse'], ['requests', 'Мои заявки'], ['equipment', 'Оборудование'],
-    ['warehouse', 'Мой склад'], ['profile', 'Профиль и настройки'],
+    ['warehouse', 'Мой склад'],
   ],
-  client_admin: [['pulse', 'Главная'], ['requests', 'Заявки'], ['equipment', 'Оборудование'], ['clients', 'Команда'], ['documents', 'Документы'], ['profile', 'Профиль и настройки']],
-  client_site_user: [['pulse', 'Главная'], ['requests', 'Заявки'], ['equipment', 'Оборудование'], ['documents', 'Документы'], ['profile', 'Профиль и настройки']],
+  client_admin: [['pulse', 'Главная'], ['requests', 'Заявки'], ['equipment', 'Оборудование'], ['clients', 'Команда'], ['documents', 'Документы']],
+  client_site_user: [['pulse', 'Главная'], ['requests', 'Заявки'], ['equipment', 'Оборудование'], ['documents', 'Документы']],
 };
 
 function renderNav() {
@@ -543,6 +543,8 @@ function renderNav() {
   });
   document.getElementById('user-name').textContent = state.me.full_name;
   document.getElementById('user-role').textContent = ROLE_LABEL[state.me.role] || state.me.role;
+  document.getElementById('user-profile-btn').classList.toggle('active', state.route === 'profile');
+  document.getElementById('user-profile-btn').setAttribute('aria-current', state.route === 'profile' ? 'page' : 'false');
   renderMobileNav(items);
 }
 
@@ -750,7 +752,7 @@ async function router() {
   state.clientId = route === 'clients' && routeId ? routeId : null;
   state.clientTab = state.clientId ? (routeTab || 'overview') : null;
   state.clientSiteId = state.clientTab === 'sites' && routeChildId ? routeChildId : null;
-  const allowedRoutes = (NAV[state.me?.role] || []).map(([key]) => key);
+  const allowedRoutes = [...(NAV[state.me?.role] || []).map(([key]) => key), 'profile'];
   if (!allowedRoutes.includes(state.route) && state.route !== 'inventory') {
     state.route = defaultRoute;
     history.replaceState(null, '', `#${defaultRoute}`);
@@ -2595,6 +2597,7 @@ async function showResetPassword(rawToken) {
 
 document.getElementById('forgot-password-btn').addEventListener('click', showForgotPassword);
 
+document.getElementById('user-profile-btn').addEventListener('click', () => { location.hash = 'profile'; });
 document.getElementById('logout-btn').addEventListener('click', logout);
 
 async function showJoinScreen(token) {

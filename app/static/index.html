@@ -22,7 +22,7 @@
   document.documentElement.dataset.textSize = size;
 })();
 </script>
-<link rel="stylesheet" href="/static/styles.css?v=20261002-3">
+<link rel="stylesheet" href="/static/styles.css?v=20261002-4">
 </head>
 <body>
 
@@ -59,10 +59,10 @@
     <div class="brand-caption">SERVICE OPERATIONS</div>
     <nav id="nav"></nav>
     <div class="sidebar-footer">
-      <div class="sidebar-user">
+      <button type="button" class="sidebar-user" id="user-profile-btn" aria-label="Открыть профиль и настройки">
         <strong id="user-name">—</strong>
         <span id="user-role">—</span>
-      </div>
+      </button>
       <button class="logout-btn" id="logout-btn">Выйти</button>
     </div>
   </div>
@@ -70,7 +70,7 @@
     <header class="app-topbar"><span>Сервисная платформа</span><div><i></i> Live operations</div></header>
     <header class="mobile-topbar">
       <div class="brand"><img class="brand-mark" src="/static/icons/fixit-hidden-x.svg" alt=""><strong>FI<span>X</span>IT</strong><em>PULSE</em></div>
-      <button class="mobile-profile" id="mobile-profile-btn" aria-label="Меню пользователя"><span></span></button>
+      <button class="mobile-profile" id="mobile-profile-btn" aria-label="Открыть профиль и настройки"><span></span></button>
     </header>
     <div id="content"></div>
   </div>
@@ -78,8 +78,8 @@
   <div class="more-menu hidden" id="more-menu"></div>
 </div>
 
-<script src="/static/offline/engine.js?v=20261002-3"></script>
+<script src="/static/offline/engine.js?v=20261002-4"></script>
 <script src="/static/inventory.js?v=20260929-1"></script>
-  <script src="/static/app.js?v=20261002-3"></script>
+  <script src="/static/app.js?v=20261002-4"></script>
 </body>
 </html>
