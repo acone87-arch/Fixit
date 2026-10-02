@@ -31,6 +31,27 @@ async def assert_no_horizontal_scroll(page):
     assert await page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth")
 
 
+async def test_light_theme_uses_light_operational_surfaces_on_mobile(live, flow):
+    from playwright.async_api import async_playwright, expect
+    await new_request(flow)
+    async with async_playwright() as playwright:
+        browser = await playwright.chromium.launch()
+        page = await browser.new_page(viewport={"width": 390, "height": 844})
+        await page.add_init_script("localStorage.setItem('fixit-theme', 'light')")
+        try:
+            await login(page, flow.owner.email)
+            await expect(page.locator("html")).to_have_attribute("data-theme", "light")
+            await expect(page.locator(".pulse-command")).to_have_css("color", "rgb(17, 32, 56)")
+            await expect(page.locator(".metric-card").first).to_have_css("color", "rgb(17, 32, 56)")
+            await expect(page.locator(".mobile-nav")).to_have_css("background-color", "rgba(255, 255, 255, 0.95)")
+            await page.goto("http://127.0.0.1:8765/#requests")
+            await expect(page.locator(".mobile-info-card").first).to_have_css("background-color", "rgb(255, 255, 255)")
+            await expect(page.locator(".mobile-info-card").first).to_have_css("color", "rgb(17, 32, 56)")
+            await assert_no_horizontal_scroll(page)
+        finally:
+            await browser.close()
+
+
 async def test_profile_opens_from_sidebar_identity_without_separate_nav_item(live, flow):
     from playwright.async_api import async_playwright, expect
     async with async_playwright() as playwright:

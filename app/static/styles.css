@@ -364,6 +364,165 @@ html[data-theme="light"] .btn-secondary { background:#E6EFFB; color:#173B69; } h
 html[data-theme="light"] .login-card { background:#FFFFFF; border-color:#CBD8E8; color:#112038; } html[data-theme="light"] .login-screen { background:radial-gradient(circle at 70% 20%,#DCEAFF 0,#EEF4FB 42%,#DDE8F5 100%); }
 html[data-theme="light"] .more-menu { background:#FFFFFF; color:#112038; } html[data-theme="light"] .more-menu button { color:#284B78; border-color:#D3DFED; }
 
+/* Light theme: complete surface system for Pulse, mobile cards and workspaces. */
+html[data-theme="light"] {
+  --light-surface:#FFFFFF;
+  --light-surface-soft:#F6F9FD;
+  --light-border:#C9D7E8;
+  --light-text:#112038;
+  --light-muted:#526A89;
+  --light-blue:#2468B5;
+  --light-green:#147A55;
+}
+html[data-theme="light"] .pulse-command {
+  color:var(--light-text);
+  border-color:#B9CCE3;
+  background:linear-gradient(135deg,#FFFFFF 0%,#EDF5FF 56%,#E5F7F0 100%);
+  box-shadow:0 18px 42px rgba(31,55,88,.13);
+}
+html[data-theme="light"] .pulse-command::before { background:linear-gradient(90deg,transparent,rgba(36,104,181,.07)); }
+html[data-theme="light"] .pulse-command-copy h1 { color:var(--light-text) !important; }
+html[data-theme="light"] .pulse-command-copy p { color:var(--light-muted) !important; }
+html[data-theme="light"] .pulse-command .eyebrow { color:var(--light-blue); }
+html[data-theme="light"] .pulse-command-live { background:rgba(255,255,255,.78); border-color:#BFD2E7; box-shadow:0 8px 24px rgba(31,55,88,.09); }
+html[data-theme="light"] .pulse-command-live b { color:var(--light-text); }
+html[data-theme="light"] .pulse-command-live small { color:var(--light-muted) !important; }
+html[data-theme="light"] .pulse-orbit { border-color:rgba(36,104,181,.14); }
+
+html[data-theme="light"] .metric-card {
+  color:var(--light-text);
+  border-color:var(--light-border);
+  background:var(--light-surface);
+  box-shadow:0 10px 28px rgba(31,55,88,.09);
+}
+html[data-theme="light"] .metric-card::after { border-color:rgba(36,104,181,.045); }
+html[data-theme="light"] .metric-card:hover { border-color:#8FAED2; box-shadow:0 14px 32px rgba(31,55,88,.13); }
+html[data-theme="light"] .metric-card .metric-label,
+html[data-theme="light"] .metric-card small { color:var(--light-muted) !important; }
+html[data-theme="light"] .metric-card strong { color:var(--light-text); }
+html[data-theme="light"] .metric-new { border-left-color:#4A90FF; background:linear-gradient(145deg,#FFFFFF,#F0F6FF); }
+html[data-theme="light"] .metric-dark { border-color:#BED9CE; background:linear-gradient(145deg,#FFFFFF,#EDF8F3); }
+html[data-theme="light"] .metric-alert { border-color:#F0C5C0; border-left-color:#E56154; background:linear-gradient(145deg,#FFFFFF,#FFF2F0); }
+html[data-theme="light"] .metric-alert strong { color:#B63C31; }
+html[data-theme="light"] .metric-accent { border-color:#9CCDE8; background:linear-gradient(145deg,#EAF4FF,#DDF7EC); }
+html[data-theme="light"] .metric-accent .metric-label,
+html[data-theme="light"] .metric-accent small { color:#315E69 !important; }
+
+html[data-theme="light"] .quick-action-grid button,
+html[data-theme="light"] .pulse-panel,
+html[data-theme="light"] .mobile-info-card,
+html[data-theme="light"] .passport-context div,
+html[data-theme="light"] .passport-document,
+html[data-theme="light"] .passport-photo,
+html[data-theme="light"] .sr-assignment {
+  color:var(--light-text);
+  border-color:var(--light-border);
+  background:var(--light-surface);
+  box-shadow:0 8px 24px rgba(31,55,88,.07);
+}
+html[data-theme="light"] .quick-action-grid button:hover { border-color:#7FA6D5; background:#F1F6FD; }
+html[data-theme="light"] .section-caption,
+html[data-theme="light"] .quick-action-grid small,
+html[data-theme="light"] .pulse-row small,
+html[data-theme="light"] .mobile-card-meta,
+html[data-theme="light"] .request-card-detail,
+html[data-theme="light"] .request-outcome { color:var(--light-muted) !important; }
+html[data-theme="light"] .pulse-row { color:var(--light-text); border-color:#D7E1ED; }
+html[data-theme="light"] .pulse-row:hover { background:#F4F8FD; }
+html[data-theme="light"] .pulse-row strong { color:var(--light-text); }
+html[data-theme="light"] .request-number,
+html[data-theme="light"] .request-card-detail .assigned-master,
+html[data-theme="light"] .assigned-master { color:var(--light-green); }
+html[data-theme="light"] .mobile-info-card > strong { color:var(--light-text); }
+html[data-theme="light"] .mobile-card-meta,
+html[data-theme="light"] .request-card-detail { border-color:#D7E1ED; }
+
+html[data-theme="light"] .badge-good { color:#116B49; background:#E4F5ED; }
+html[data-theme="light"] .badge-warn { color:#AE3C32; background:#FCEBE8; }
+html[data-theme="light"] .badge-idle { color:#53677E; background:#EAF0F6; }
+html[data-theme="light"] .badge-amber { color:#885B00; background:#FFF2D7; }
+
+html[data-theme="light"] .mobile-topbar {
+  border-color:#CBD8E8;
+  background:rgba(255,255,255,.92);
+  box-shadow:0 6px 24px rgba(31,55,88,.08);
+}
+html[data-theme="light"] .mobile-topbar .brand strong { color:var(--light-text); }
+html[data-theme="light"] .mobile-profile { border-color:#BCD0E6; background:#F4F8FD; }
+html[data-theme="light"] .mobile-nav {
+  border-color:#C8D6E6;
+  background:rgba(255,255,255,.95);
+  box-shadow:0 -10px 32px rgba(31,55,88,.13);
+}
+html[data-theme="light"] .mobile-nav-item { color:#62758D; }
+html[data-theme="light"] .mobile-nav-item.active { color:#1E6FCC; }
+html[data-theme="light"] .icon-pulse { box-shadow:inset 0 0 0 4px #FFFFFF; }
+
+html[data-theme="light"] .ticket-assignment label { color:var(--light-muted); }
+html[data-theme="light"] :where(.ticket-assign,.assign-select,.site-picker-trigger,.client-detail-tabs button,.client-filter button) {
+  color:#274D78;
+  border-color:#B8CBE0;
+  background:#F5F9FE;
+}
+html[data-theme="light"] :where(.ticket-assign,.assign-select) option { color:var(--light-text); background:#FFFFFF; }
+
+html[data-theme="light"] .tech-request-workspace { background:#F3F7FC; }
+html[data-theme="light"] .tech-request-header { border-color:#C3D4E7; background:linear-gradient(140deg,#FFFFFF,#EAF3FD); }
+html[data-theme="light"] .tech-request-back { color:#315E91; border-color:#AFC5DE; background:#FFFFFF; }
+html[data-theme="light"] .tech-request-header span { color:var(--light-blue); }
+html[data-theme="light"] .tech-request-header h1,
+html[data-theme="light"] .tech-request-section h2,
+html[data-theme="light"] .tech-request-part > span b,
+html[data-theme="light"] .tech-request-timeline strong { color:var(--light-text); }
+html[data-theme="light"] .tech-request-meta div,
+html[data-theme="light"] .tech-request-work textarea,
+html[data-theme="light"] .tech-request-work input,
+html[data-theme="light"] .tech-request-photo-grid figure,
+html[data-theme="light"] .tech-request-saved-photo-grid button,
+html[data-theme="light"] .equipment-photo-picker-preview { color:var(--light-text); border-color:var(--light-border); background:#FFFFFF; }
+html[data-theme="light"] .tech-request-section,
+html[data-theme="light"] .tech-request-part,
+html[data-theme="light"] .tech-request-timeline { border-color:#D4DFEB; }
+html[data-theme="light"] .tech-request-section p,
+html[data-theme="light"] .tech-request-section h3,
+html[data-theme="light"] .tech-request-meta small,
+html[data-theme="light"] .tech-request-part small,
+html[data-theme="light"] .tech-request-timeline small { color:var(--light-muted) !important; }
+html[data-theme="light"] .tech-request-meta strong { color:var(--light-text); }
+html[data-theme="light"] .tech-request-workspace footer { border-color:#C3D4E7; background:rgba(255,255,255,.96); }
+
+html[data-theme="light"] .service-request-detail { color:var(--light-text); }
+html[data-theme="light"] .sr-detail-header > div > span,
+html[data-theme="light"] .sr-kicker,
+html[data-theme="light"] .sr-location-details,
+html[data-theme="light"] .tech-request-place .location-details { color:var(--light-blue); }
+html[data-theme="light"] .sr-equipment-hero h3,
+html[data-theme="light"] .sr-detail-grid strong,
+html[data-theme="light"] .sr-workplace > strong,
+html[data-theme="light"] .sr-assignment strong,
+html[data-theme="light"] .sr-timeline-entry strong,
+html[data-theme="light"] .sr-timeline-entry p { color:var(--light-text); }
+html[data-theme="light"] .sr-equipment-hero p,
+html[data-theme="light"] .sr-workplace p,
+html[data-theme="light"] .sr-workplace small,
+html[data-theme="light"] .sr-problem p,
+html[data-theme="light"] .sr-timeline-entry small,
+html[data-theme="light"] .sr-timeline-entry time { color:var(--light-muted) !important; }
+html[data-theme="light"] .sr-equipment-placeholder,
+html[data-theme="light"] .tech-request-equipment-placeholder,
+html[data-theme="light"] .passport-photo-frame { color:#617892; border-color:var(--light-border); background:#EEF4FA; }
+html[data-theme="light"] .sr-detail-actions { background:#FFFFFF !important; }
+
+html[data-theme="light"] :where(.passport-context strong,.passport-document strong,.passport-photo>div:last-child>span,.equipment-timeline-item strong,.client-mobile-card strong,.site-mobile-card strong,.client-site-equipment h2,.client-site-card,.client-equipment-detail-card strong,.client-user-row strong) { color:var(--light-text); }
+html[data-theme="light"] :where(.passport-context small,.passport-context span,.passport-document small,.passport-photo p,.equipment-timeline-item p,.equipment-timeline-meta,.client-mobile-card small,.client-mobile-card span,.client-mobile-card p,.site-mobile-card p,.site-mobile-card small,.client-equipment-detail-card span,.client-equipment-detail-card small,.client-user-row span,.client-user-row small) { color:var(--light-muted) !important; }
+html[data-theme="light"] :where(.client-mobile-card,.site-mobile-card,.client-user-row,.passport-no-request,.client-user-group>header) { color:var(--light-text); border-color:var(--light-border); background:#FFFFFF; }
+
+@media (max-width:767px) {
+  html[data-theme="light"] .modal-backdrop:has(.service-request-detail) { background:#F3F7FC; }
+  html[data-theme="light"] .modal:has(.service-request-detail) { background:#FFFFFF; }
+  html[data-theme="light"] .modal:has(.service-request-detail) .modal-actions { background:#FFFFFF; }
+}
+
 html[data-text-size="large"] body { font-size:16px; } html[data-text-size="large"] :where(p,span,small,strong,label,button,input,select,textarea,td,th,dt,dd,a) { font-size:max(1em,12px); }
 html[data-text-size="xlarge"] body { font-size:18px; } html[data-text-size="xlarge"] :where(p,span,small,strong,label,button,input,select,textarea,td,th,dt,dd,a) { font-size:max(1em,14px); line-height:1.45; } html[data-text-size="xlarge"] h1 { font-size:clamp(27px,5vw,38px); } html[data-text-size="xlarge"] h2 { font-size:clamp(21px,4vw,30px); }
 html[data-text-size="large"] :where(.btn,.nav-item,.mobile-nav-item),html[data-text-size="xlarge"] :where(.btn,.nav-item,.mobile-nav-item) { min-height:44px; white-space:normal; }

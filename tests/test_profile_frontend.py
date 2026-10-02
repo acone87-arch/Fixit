@@ -29,3 +29,21 @@ def test_large_text_and_keyboard_accessibility_rules_are_present():
     assert ":focus-visible" in styles
     assert "overflow-x:hidden" in styles
     assert "prefers-reduced-motion" in styles
+
+
+def test_light_theme_covers_operational_cards_and_mobile_navigation():
+    styles = (ROOT / "app/static/styles.css").read_text(encoding="utf-8")
+    required_light_surfaces = (
+        '.pulse-command',
+        '.metric-card',
+        '.mobile-info-card',
+        '.pulse-panel',
+        '.mobile-topbar',
+        '.mobile-nav',
+        '.tech-request-workspace',
+        '.service-request-detail',
+    )
+    for selector in required_light_surfaces:
+        assert f'html[data-theme="light"] {selector}' in styles
+    assert "--light-text:#112038" in styles
+    assert "--light-muted:#526A89" in styles
