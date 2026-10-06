@@ -69,6 +69,10 @@ jobs:
         run: node tests/durable_queue_browser_test.js
       - name: Run request queue browser acceptance
         run: node tests/request_queue_browser_test.js
+      - name: Audit theme contrast in real browser
+        env:
+          FIXIT_CONTRAST_SCREENSHOTS: '1'
+        run: node tests/theme_contrast_browser_test.js
       - name: Restore a real PostgreSQL and media backup in isolation
         run: bash scripts/ci_backup_restore_drill.sh
       - name: Save release acceptance results
