@@ -123,7 +123,11 @@ async function audit(page) {
         for(const route of routes) await inspect(`${theme}/${width}/${role}/${route}`,async()=>{
           await page.evaluate(route=>{history.replaceState(null,'','#'+route); return router();},route);
           assert.equal(await page.locator('#content').innerText().then(t=>/Не удалось загрузить раздел/.test(t)),false,route);
-          if(role==='owner'&&route==='requests'&&width!==320&&process.env.FIXIT_CONTRAST_SCREENSHOTS) {
+          if(route==='requests'&&width===320) {
+            const overflow=await page.evaluate(()=>[...document.querySelectorAll('.mobile-nav-item,.mobile-info-card,.client-request-card')].filter(el=>{const r=el.getBoundingClientRect();return r.width&&(r.right>innerWidth+1||r.left<0||el.scrollWidth>el.clientWidth+1)}).map(el=>el.className));
+            assert.deepEqual(overflow,[],`${theme}/${role}: large text overflow`);
+          }
+          if(role==='owner'&&route==='requests'&&process.env.FIXIT_CONTRAST_SCREENSHOTS) {
             fs.mkdirSync('test-results',{recursive:true});
             await page.screenshot({path:`test-results/readable-requests-${theme}-${width}.png`,fullPage:true});
           }
