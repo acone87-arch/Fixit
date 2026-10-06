@@ -544,4 +544,70 @@ html[data-theme="light"] .request-queue-controls label { color:var(--light-text)
 html[data-theme="light"] .request-queue-controls select { color:var(--light-text); background:#FFFFFF; border-color:var(--light-border); }
 @media (max-width:767px) { .request-queue-controls { display:grid; grid-template-columns:minmax(0,1fr); }.request-queue-controls .btn { justify-self:start; }.client-filter { flex-wrap:wrap; } }
 html[data-theme="light"] .settings-kicker { color:#245FA8; }
+
+/* Native controls and secondary screens share the resolved appearance palette. */
+html { --control-bg:#111c30; --control-ink:#EAF1FF; }
+html[data-theme="light"] { --control-bg:#FFFFFF; --control-ink:#112038; }
+html select :is(option,optgroup) { color:var(--control-ink); background:var(--control-bg); }
+html :is(input,select,textarea) { color-scheme:inherit; }
+html[data-theme] input::placeholder,html[data-theme] textarea::placeholder { color:var(--ink-soft); opacity:1; }
+html[data-theme="light"] :is(input,select,textarea) { color:var(--control-ink); background-color:var(--control-bg); border-color:var(--line); }
+button { background-color:transparent; }
+.brand-caption { color:#8DA5C8; }
+.metric-accent .metric-label,.metric-accent small { color:#07101F; }
+html[data-theme="dark"] .metric-accent strong { color:#07101F; }
+html[data-theme="light"] .client-approval > span { color:var(--ink-soft); }
+
+html[data-theme="light"] .app-topbar { color:var(--light-muted); }
+html[data-theme="light"] .app-topbar div { color:#173B69; background:#E6EFFB; border-color:var(--light-border); }
+html[data-theme="light"] th { color:#425A76; background:#EAF1FA; }
+html[data-theme="light"] :where(.eyebrow,.text-link,.sr-back,.login-forgot,.login-back,.client-kicker,.client-users-head>div>span,.client-detail-hero>div>span,.passport-eyebrow,.site-picker-trigger i,.equipment-glyph,.client-request-detail header>span) { color:var(--light-blue); }
+html[data-theme="light"] :where(.btn-secondary:hover,.btn-ghost:hover) { color:#173B69; background:#D9E8F9; }
+html[data-theme="light"] :where(.brand,.login-brand) :is(span,em) { color:#245FA8; }
+html[data-theme="light"] .sidebar .brand :is(span,em) { color:#77ABFF; }
+html[data-theme="light"] .sidebar :is(p,small) { color:var(--sidebar-ink-dim) !important; }
+html[data-theme="light"] :where(.network-strip span,.inventory-entry-card,.invite-row,.login-result,.pulse-dialog,.onboarding-step,.join-welcome,.client-join-welcome,.equipment-history-card,.passport-photo-placeholder,.site-picker-menu) { color:var(--light-text); background:#F8FBFF; border-color:var(--light-border); }
+html[data-theme="light"] :where(.inventory-entry-card strong,.invite-row strong,.login-result strong,.pulse-dialog strong,.join-welcome strong,.client-join-welcome h2,.client-detail-meta strong,.client-user-group header strong,.passport-active-request strong,.approval-context strong,.client-timeline-item strong) { color:var(--light-text); }
+html[data-theme="light"] :where(.inventory-entry-card span,.invite-row div>span,.onboarding-intro,.passport-status-row,.passport-data>span,.passport-qr span,.client-detail-meta span,.client-detail-overview article>span,.client-site-card span,.client-equipment-card span,.client-documents span,.client-summary-grid>article>span,.client-search-label,.sr-workplace>span,.sr-assignment>span,.sr-empty,.sr-timeline-role,.tech-request-empty,.tech-request-work label,.tech-request-photo-count,.equipment-history-field>span,.equipment-history-technician,.equipment-history-card-head time,.team-state) { color:var(--light-muted); }
+html[data-theme="light"] :where(.client-detail-contact a,.client-site-card b,.client-mobile-card b,.site-mobile-card span,.client-user-group header span,.client-user-row small,.client-request-card>div>span:first-child,.passport-active-request>div>span,.passport-document-icon,.passport-document>b,.passport-qr .btn,.equipment-timeline-item .btn,.tech-request-place a,.client-join-welcome>span,.client-join-dismiss,.onboarding-step>span,.pulse-dialog header span) { color:var(--light-blue); }
+html[data-theme="light"] .network-strip span { color:var(--light-text); }
+html[data-theme="light"] :where(.stat-critical,.form-error,.login-error) { color:#AE3C32; }
+html[data-theme="light"] :where(.status-mark,.status-mark.status-good) { color:#245FA8; background:#E6EFFB; }
+html[data-theme="light"] .status-mark.status-bad { color:#AE3C32; background:#FCEBE8; }
+html[data-theme="light"] .status-mark.status-muted { color:var(--light-muted); background:#EAF1FA; }
+html[data-theme="light"] :where(.approval-context,.tech-request-state-banner,.qr-security-note) { background:#FFF4DD; border-color:#D6B36B; }
+html[data-theme="light"] :where(.approval-context>span,.tech-request-state-banner strong,.tech-request-state-banner span,.client-summary-grid b,.qr-security-note,.qr-security-note a,.onboarding-note) { color:#805400 !important; }
+html[data-theme="light"] :where(.tech-request-equipment-placeholder,.sr-equipment-placeholder,.passport-photo-frame) { color:var(--light-muted); }
+html[data-theme="light"] .tech-request-photo-add { color:var(--light-blue) !important; }
+html[data-theme="light"] .passport-tabs { background:#EAF1FA; border-color:var(--light-border); }
+html[data-theme="light"] .passport-tabs button { color:#425A76; }
+html[data-theme="light"] .passport-tabs button.active { color:#07101F; }
+html[data-theme="light"] .passport-tabs span { opacity:1; }
+html[data-theme="light"] .site-picker-menu button { color:var(--light-text); border-color:var(--light-border); }
+html[data-theme="light"] .site-picker-menu button:hover { background:#E6EFFB; }
+html[data-theme="light"] .equipment-passport .passport-more-menu { background:#FFFFFF !important; border-color:var(--light-border); }
+html[data-theme="light"] .equipment-passport .passport-more-menu button { color:var(--light-text) !important; }
+html[data-theme="light"] .equipment-passport .passport-more-menu button:hover,
+html[data-theme="light"] .equipment-passport .passport-more-menu button:focus-visible { color:#173B69 !important; background:#E6EFFB !important; }
+html[data-theme="light"] .equipment-passport .passport-more-menu .passport-menu-danger { color:#AE3C32 !important; }
+html[data-theme="light"] .invite-status { color:#173B69; background:#E6EFFB; }
+html[data-theme="light"] .invite-status-accepted { color:#116B49; background:#E4F5ED; }
+html[data-theme="light"] :where(.invite-status-revoked,.invite-status-expired) { color:var(--light-muted); background:#EAF1FA; }
+html[data-theme="light"] .client-user-group header strong { color:var(--light-text); }
+html[data-theme="light"] .client-user-group header span,
+html[data-theme="light"] .invite-row div>span,
+html[data-theme="light"] .sr-problem>span { color:var(--light-muted); }
+html[data-theme="light"] .sr-equipment-placeholder,
+html[data-theme="light"] .tech-request-equipment-placeholder { color:var(--light-muted); }
+html[data-theme="light"] .client-request-card>div>span:first-child,
+html[data-theme="light"] .client-request-detail header>span,
+html[data-theme="light"] .passport-photo-placeholder b,
+html[data-theme="light"] .equipment-history-card-head>strong { color:var(--light-blue); }
+html[data-theme="dark"] .equipment-glyph { color:#77ABFF; }
+.toast-error { background:#B63C31; }
+.toast-success { background:#2468B5; }
+.toast-info { background:#315B8E; }
+html[data-theme="light"] .tech-request-secondary button { color:#173B69; border-color:#AFC5DE; background:#E6EFFB; }
+html[data-theme="light"] .pulse-dialog header span { color:var(--light-blue); }
+html[data-theme="light"] .pulse-dialog label { color:var(--light-muted); }
 @media (max-width:767px) { .profile-security-card { grid-column:auto; } }
