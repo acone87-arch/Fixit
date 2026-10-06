@@ -237,6 +237,7 @@ async def list_requests(db: AsyncSession = Depends(get_db), user: CurrentUser = 
         ServiceRequestListItem(
             id=request.id, number=request.number, status=request.status, priority=request.priority,
             title=request.title, description=request.description, client_name=client_label(client, site),
+            client_id=client.id, site_id=site.id, client_legal_name=client.legal_name or client.name,
             site_name=site.name, equipment_name=equipment.name, equipment_type=equipment_type,
             manufacturer=equipment.manufacturer, model=equipment.model, serial_number=equipment.serial_number,
             assigned_technician_id=request.assigned_technician_id, assigned_technician_name=technician_name,
