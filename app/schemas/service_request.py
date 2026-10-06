@@ -63,6 +63,9 @@ class ServiceRequestListItem(BaseModel):
     description: str | None
     client_name: str | None
     site_name: str | None
+    client_id: uuid.UUID | None = None
+    site_id: uuid.UUID | None = None
+    client_legal_name: str | None = None
     equipment_name: str
     equipment_type: str | None = None
     manufacturer: str | None = None

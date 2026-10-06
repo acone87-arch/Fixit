@@ -534,5 +534,14 @@ html[data-text-size="large"] :where(.settings-card,.device-setting,.page-header,
 /* Profile refinements: readable light-mode eyebrow and balanced security section. */
 .profile-security-card { grid-column:1/-1; }
 .profile-security-card form { max-width:540px; }
+.request-queue-controls { display:flex; align-items:flex-end; flex-wrap:wrap; gap:12px; margin:16px 0 8px; }
+.request-queue-controls label { display:grid; gap:6px; flex:1 1 210px; min-width:0; color:var(--ink); }
+.request-queue-controls select { width:100%; min-width:0; min-height:44px; padding:10px; border:1px solid var(--line); border-radius:9px; color:var(--ink); background:var(--surface); font:inherit; }
+.request-queue-controls select:focus-visible { outline:2px solid #5397ec; outline-offset:2px; }
+.request-queue-controls .btn { min-height:44px; }
+.request-queue-summary { margin:8px 0 16px; overflow-wrap:anywhere; }
+html[data-theme="light"] .request-queue-controls label { color:var(--light-text); }
+html[data-theme="light"] .request-queue-controls select { color:var(--light-text); background:#FFFFFF; border-color:var(--light-border); }
+@media (max-width:767px) { .request-queue-controls { display:grid; grid-template-columns:minmax(0,1fr); }.request-queue-controls .btn { justify-self:start; }.client-filter { flex-wrap:wrap; } }
 html[data-theme="light"] .settings-kicker { color:#245FA8; }
 @media (max-width:767px) { .profile-security-card { grid-column:auto; } }

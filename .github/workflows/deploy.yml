@@ -67,6 +67,8 @@ jobs:
           node tests/guest_photo_upload_runtime_test.js
       - name: Run real IndexedDB and service worker acceptance
         run: node tests/durable_queue_browser_test.js
+      - name: Run request queue browser acceptance
+        run: node tests/request_queue_browser_test.js
       - name: Restore a real PostgreSQL and media backup in isolation
         run: bash scripts/ci_backup_restore_drill.sh
       - name: Save release acceptance results

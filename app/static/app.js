@@ -790,14 +790,93 @@ async function router() {
 }
 window.addEventListener('hashchange', router);
 
+function requestQueueRank(item) {
+  if (item.status === 'assigned') return 0;
+  if (item.status === 'waiting_parts') return 1;
+  return ['completed', 'closed', 'cancelled'].includes(item.status) ? 3 : 2;
+}
+
+function requestQueueDate(item) {
+  const value = requestQueueRank(item) === 3 ? (item.completed_at || item.created_at) : item.created_at;
+  return Date.parse(value) || 0;
+}
+
+function sortRequestQueue(requests, order = 'status') {
+  const text = (a, b) => String(a || '').localeCompare(String(b || ''), 'ru', { numeric: true, sensitivity: 'base' });
+  return [...requests].sort((a, b) => {
+    let group = 0;
+    if (order === 'site') group = text(a.site_name, b.site_name) || text(a.client_legal_name || a.client_name, b.client_legal_name || b.client_name);
+    if (order === 'client') group = text(a.client_legal_name || a.client_name, b.client_legal_name || b.client_name) || text(a.site_name, b.site_name);
+    if (!['newest', 'oldest'].includes(order)) group ||= requestQueueRank(a) - requestQueueRank(b);
+    const date = order === 'oldest' ? requestQueueDate(a) - requestQueueDate(b) : requestQueueDate(b) - requestQueueDate(a);
+    return group || date || b.number - a.number || text(a.id, b.id);
+  });
+}
+
+function requestQueueControlsHtml() {
+  return `<div class="request-queue-controls"><label>Порядок<select id="request-order"><option value="status">По статусу: назначенные сначала</option><option value="newest">По дате: новые сначала</option><option value="oldest">По дате: старые сначала</option><option value="site">По объекту: А–Я</option><option value="client">По юрлицу: А–Я</option></select></label><label>Юрлицо<select id="request-client"><option value="">Все юрлица</option></select></label><label>Объект<select id="request-site"><option value="">Все объекты</option></select></label><button type="button" class="btn btn-ghost" id="request-reset">Сбросить</button></div><p class="text-soft request-queue-summary" id="request-queue-summary" role="status" aria-live="polite"></p>`;
+}
+
+function bindRequestQueueControls(content, requests, draw) {
+  const key = `fixit-request-order:${state.me?.organization_id || ''}:${state.me?.id || ''}`;
+  if (state.requestQueueView?.key !== key) {
+    let order = 'status';
+    try { order = localStorage.getItem(key) || order; } catch (_) { /* Storage may be unavailable. */ }
+    state.requestQueueView = { key, order, client: '', site: '' };
+  }
+  const view = state.requestQueueView;
+  const orderSelect = content.querySelector('#request-order');
+  const clientSelect = content.querySelector('#request-client');
+  const siteSelect = content.querySelector('#request-site');
+  if (!['status', 'newest', 'oldest', 'site', 'client'].includes(view.order)) view.order = 'status';
+  const clients = [...new Map(requests.filter((item) => item.client_id).map((item) => [item.client_id, item.client_legal_name || item.client_name || 'Без названия'])).entries()]
+    .sort((a, b) => a[1].localeCompare(b[1], 'ru', { numeric: true }));
+  clientSelect.innerHTML = '<option value="">Все юрлица</option>' + clients.map(([id, name]) => `<option value="${esc(id)}">${esc(name)}</option>`).join('');
+  if (!clients.some(([id]) => id === view.client)) view.client = '';
+  const updateSites = () => {
+    const sites = [...new Map(requests.filter((item) => item.site_id && (!view.client || item.client_id === view.client)).map((item) => [item.site_id, item])).values()]
+      .sort((a, b) => String(a.site_name || '').localeCompare(String(b.site_name || ''), 'ru', { numeric: true }));
+    if (!sites.some((item) => item.site_id === view.site)) view.site = '';
+    siteSelect.innerHTML = '<option value="">Все объекты</option>' + sites.map((item) => `<option value="${esc(item.site_id)}">${esc(item.site_name || 'Без названия')}${view.client ? '' : ` · ${esc(item.client_legal_name || item.client_name || '')}`}</option>`).join('');
+    siteSelect.value = view.site;
+  };
+  const redraw = () => {
+    const visible = sortRequestQueue(requests.filter((item) => (!view.client || item.client_id === view.client) && (!view.site || item.site_id === view.site)), view.order);
+    const count = draw(visible);
+    content.querySelector('#request-queue-summary').textContent = `Показано ${count ?? visible.length} из ${requests.length}. ${['newest', 'oldest'].includes(view.order) ? 'Для завершённых учитывается дата завершения.' : 'Внутри групп — новые сначала; завершённые по дате завершения.'}`;
+  };
+  orderSelect.value = view.order;
+  clientSelect.value = view.client;
+  updateSites();
+  orderSelect.addEventListener('change', () => {
+    view.order = orderSelect.value;
+    try { localStorage.setItem(key, view.order); } catch (_) { /* Sorting still works without storage. */ }
+    redraw();
+  });
+  clientSelect.addEventListener('change', () => { view.client = clientSelect.value; updateSites(); redraw(); });
+  siteSelect.addEventListener('change', () => { view.site = siteSelect.value; redraw(); });
+  content.querySelector('#request-reset').addEventListener('click', () => {
+    view.order = 'status'; view.client = ''; view.site = '';
+    orderSelect.value = 'status'; clientSelect.value = ''; updateSites();
+    try { localStorage.removeItem(key); } catch (_) { /* Optional persistence. */ }
+    redraw();
+  });
+  redraw();
+  return redraw;
+}
+
 async function renderServiceRequests(content) {
   const requests = await api('/service-requests');
   const statusLabel = { new: 'Новая', assigned: 'Назначена', on_the_way: 'В пути', arrived: 'На объекте', in_progress: 'В работе', waiting_parts: 'Ждёт запчасти', waiting_approval: 'Требует согласования', completed: 'Выполнена', closed: 'Закрыта', cancelled: 'Отменена' };
   const requestBadge = (item) => `<span class="badge badge-${['completed', 'closed'].includes(item.status) ? 'good' : item.status.startsWith('waiting') ? 'amber' : item.status === 'cancelled' ? 'idle' : 'warn'}"><span class="badge-dot"></span>${esc(statusLabel[item.status] || item.status)}</span>`;
-  const requestRows = requests.length ? requests.map((item) => `<tr class="clickable request-row" data-id="${item.id}"><td><strong>SR-${String(item.number).padStart(5, '0')}</strong><div class="text-soft">${esc(item.title || item.description || 'Без описания')}</div></td><td>${esc(item.client_name || '—')}<div class="text-soft">${esc(item.site_name || '')}</div></td><td>${esc(item.equipment_name)}<div class="text-soft mono">${esc(item.serial_number)}</div></td><td>${esc(item.assigned_technician_name || 'Не назначен')}</td><td>${requestBadge(item)}</td></tr>`).join('') : '<tr class="empty-row"><td colspan="5">Заявок пока нет</td></tr>';
-  const requestCards = requests.length ? requests.map((item) => `<button class="mobile-info-card request-card request-row" data-id="${item.id}"><div class="mobile-card-top"><span class="request-number">SR-${String(item.number).padStart(5, '0')}</span>${requestBadge(item)}</div><strong>${esc(item.title || item.description || 'Без описания')}</strong><span class="text-soft">${esc(item.equipment_name || 'Оборудование не указано')} · <span class="mono">${esc(item.serial_number || '—')}</span></span><div class="request-card-detail"><span>${esc(item.client_name || 'Клиент не указан')}<small>${esc(item.site_name || 'Объект не указан')}</small></span><span class="assigned-master">${esc(item.assigned_technician_name || 'Мастер не назначен')}</span></div></button>`).join('') : '<div class="mobile-empty">Заявок пока нет</div>';
-  content.innerHTML = `<div class="page-header"><div><h1>Заявки</h1><div class="page-subtitle">Единый путь обращения: от QR до сервисного акта</div></div></div><div class="card mobile-table" style="padding:0"><table><thead><tr><th>№ / проблема</th><th>Клиент и объект</th><th>Оборудование</th><th>Мастер</th><th>Статус</th></tr></thead><tbody>${requestRows}</tbody></table></div><div class="mobile-card-list" id="request-cards">${requestCards}</div>`;
-  content.querySelectorAll('.request-row').forEach((row) => row.addEventListener('click', () => navigateToServiceRequest(row.dataset.id)));
+  const dateLabel = (item) => `${requestQueueRank(item) === 3 && item.completed_at ? 'Завершена' : 'Создана'}: ${fmtDate(requestQueueRank(item) === 3 ? item.completed_at || item.created_at : item.created_at)}`;
+  content.innerHTML = `<div class="page-header"><div><h1>Заявки</h1><div class="page-subtitle">Единый путь обращения: от QR до сервисного акта</div></div></div>${requestQueueControlsHtml()}<div class="card mobile-table" style="padding:0"><table><thead><tr><th>№ / проблема</th><th>Юрлицо и объект</th><th>Оборудование</th><th>Мастер</th><th>Статус / дата</th></tr></thead><tbody></tbody></table></div><div class="mobile-card-list" id="request-cards"></div>`;
+  bindRequestQueueControls(content, requests, (visible) => {
+    const empty = requests.length ? 'Нет заявок по выбранным фильтрам' : 'Заявок пока нет';
+    content.querySelector('tbody').innerHTML = visible.length ? visible.map((item) => `<tr class="clickable request-row" data-id="${item.id}"><td><strong>SR-${String(item.number).padStart(5, '0')}</strong><div class="text-soft">${esc(item.title || item.description || 'Без описания')}</div></td><td>${esc(item.client_legal_name || item.client_name || '—')}<div class="text-soft">${esc(item.site_name || '')}</div></td><td>${esc(item.equipment_name)}<div class="text-soft mono">${esc(item.serial_number)}</div></td><td>${esc(item.assigned_technician_name || 'Не назначен')}</td><td>${requestBadge(item)}<div class="text-soft">${dateLabel(item)}</div></td></tr>`).join('') : `<tr class="empty-row"><td colspan="5">${empty}</td></tr>`;
+    content.querySelector('#request-cards').innerHTML = visible.length ? visible.map((item) => `<button class="mobile-info-card request-card request-row" data-id="${item.id}"><div class="mobile-card-top"><span class="request-number">SR-${String(item.number).padStart(5, '0')}</span>${requestBadge(item)}</div><strong>${esc(item.title || item.description || 'Без описания')}</strong><span class="text-soft">${esc(item.equipment_name || 'Оборудование не указано')} · <span class="mono">${esc(item.serial_number || '—')}</span></span><div class="request-card-detail"><span>${esc(item.client_legal_name || item.client_name || 'Клиент не указан')}<small>${esc(item.site_name || 'Объект не указан')}</small></span><span class="assigned-master">${esc(item.assigned_technician_name || 'Мастер не назначен')}</span></div><small class="text-soft">${dateLabel(item)}</small></button>`).join('') : `<div class="mobile-empty">${empty}</div>`;
+    content.querySelectorAll('.request-row').forEach((row) => row.addEventListener('click', () => navigateToServiceRequest(row.dataset.id)));
+  });
 }
 
 const CLIENT_STATUS = { new: 'Заявка принята', assigned: 'Мастер назначен', on_the_way: 'Мастер в пути', arrived: 'Мастер прибыл', in_progress: 'В работе', waiting_parts: 'Ожидание запчастей', waiting_approval: 'Требуется согласование', completed: 'Ремонт выполнен', closed: 'Заявка закрыта', cancelled: 'Заявка отменена' };
@@ -816,20 +895,24 @@ async function renderClientRequests(content) {
     all: () => true,
     active: (item) => !['completed', 'closed', 'cancelled'].includes(item.status),
     approval: (item) => item.status === 'waiting_approval' && item.approval_target === 'client',
-    completed: (item) => item.status === 'completed',
+    completed: (item) => ['completed', 'closed'].includes(item.status),
   };
-  const draw = (filter = 'all') => {
-    const visible = requests.filter(filters[filter] || filters.all);
-    content.querySelector('.client-request-list').innerHTML = visible.length ? visible.map((item) => `<button class="client-request-card" data-client-request="${item.id}"><div><span>SR-${String(item.number).padStart(5,'0')}</span>${clientBadge(item.status)}</div><strong>${esc(item.title || item.description || 'Заявка')}</strong><p>${esc(item.equipment_name)} · ${esc(item.site_name || '')}</p><small>Создана: ${fmtDate(item.created_at)}</small></button>`).join('') : '<div class="client-empty">В этой группе заявок нет</div>';
+  let filter = 'all';
+  const draw = (items) => {
+    const visible = items.filter(filters[filter] || filters.all);
+    content.querySelector('.client-request-list').innerHTML = visible.length ? visible.map((item) => `<button class="client-request-card" data-client-request="${item.id}"><div><span>SR-${String(item.number).padStart(5,'0')}</span>${clientBadge(item.status)}</div><strong>${esc(item.title || item.description || 'Заявка')}</strong><p>${esc(item.equipment_name)} · ${esc(item.site_name || '')}</p><small>${requestQueueRank(item) === 3 && item.completed_at ? 'Завершена' : 'Создана'}: ${fmtDate(requestQueueRank(item) === 3 ? item.completed_at || item.created_at : item.created_at)}</small></button>`).join('') : '<div class="client-empty">В этой группе заявок нет</div>';
     content.querySelectorAll('[data-client-request]').forEach((button) => button.addEventListener('click', () => navigateToServiceRequest(button.dataset.clientRequest)));
+    return visible.length;
   };
   content.innerHTML = `<div class="page-header"><div><h1>Заявки</h1><div class="page-subtitle">Что происходит с вашим сервисом</div></div><button class="btn btn-primary" id="client-new-request">+ Создать</button></div><div class="client-filter" aria-label="Фильтр заявок"><button class="active" data-client-filter="all">Все</button><button data-client-filter="active">Активные</button><button data-client-filter="approval">Ожидают меня</button><button data-client-filter="completed">Завершённые</button></div><div class="client-request-list"></div>`;
+  content.querySelector('.client-request-list').insertAdjacentHTML('beforebegin', requestQueueControlsHtml());
+  const redraw = bindRequestQueueControls(content, requests, draw);
   content.querySelector('#client-new-request').addEventListener('click', () => openClientRequestForm());
   content.querySelectorAll('[data-client-filter]').forEach((button) => button.addEventListener('click', () => {
     content.querySelectorAll('[data-client-filter]').forEach((item) => item.classList.toggle('active', item === button));
-    draw(button.dataset.clientFilter);
+    filter = button.dataset.clientFilter;
+    redraw();
   }));
-  draw();
 }
 
 function requestResultHtml(item) {
