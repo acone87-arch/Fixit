@@ -52,7 +52,7 @@ async function openEquipmentQRReprint(selectedSite = '') {
     const site_id = siteSelect.value;
     downloading = true; siteSelect.disabled = true; update(); download.textContent = 'Подготовка PDF…';
     try {
-      const blob = await apiBlob('/equipment-inventory/reprint/pdf', {method:'POST', body:JSON.stringify({site_id, equipment_ids})});
+      const blob = await apiBlobPost('/equipment-inventory/reprint/pdf', {site_id, equipment_ids});
       const url = URL.createObjectURL(blob), link = document.createElement('a');
       link.href = url; link.download = `fixit-qr-reprint-${site_id}.pdf`; link.click();
       setTimeout(() => URL.revokeObjectURL(url), 10000);

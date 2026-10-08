@@ -246,15 +246,24 @@ async function api(path, options = {}) {
   return text ? JSON.parse(text) : null;
 }
 
-async function apiBlob(path, options = {}) {
+async function apiBlob(path) {
   const headers = state.token ? { Authorization: `Bearer ${state.token}` } : {};
-  if (options.body) headers['Content-Type'] = 'application/json';
   // API DTOs expose protected media as /api/... URLs, while older callers
   // pass relative API paths. Accept both without producing /api/api/...
   const url = path.startsWith('/api/') ? path : '/api' + path;
-  const res = Object.keys(options).length
-    ? await fetch(url, { ...options, headers })
-    : await fetch(url, { headers });
+  const res = await fetch(url, { headers });
+  return readBlobResponse(res);
+}
+
+async function apiBlobPost(path, body) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (state.token) headers.Authorization = `Bearer ${state.token}`;
+  const url = path.startsWith('/api/') ? path : '/api' + path;
+  const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
+  return readBlobResponse(res);
+}
+
+async function readBlobResponse(res) {
   if (res.status === 401) {
     logout();
     throw new Error('Сессия истекла, войдите заново');
