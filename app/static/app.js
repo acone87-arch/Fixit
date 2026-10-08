@@ -252,7 +252,9 @@ async function apiBlob(path, options = {}) {
   // API DTOs expose protected media as /api/... URLs, while older callers
   // pass relative API paths. Accept both without producing /api/api/...
   const url = path.startsWith('/api/') ? path : '/api' + path;
-  const res = await fetch(url, { ...options, headers });
+  const res = Object.keys(options).length
+    ? await fetch(url, { ...options, headers })
+    : await fetch(url, { headers });
   if (res.status === 401) {
     logout();
     throw new Error('Сессия истекла, войдите заново');

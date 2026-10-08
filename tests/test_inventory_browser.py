@@ -36,6 +36,7 @@ async def test_reprint_selection_download_and_site_change(live, tmp_path, mobile
         context, page = await signed_page(browser, f, f.owner, mobile)
         try:
             await page.goto('http://127.0.0.1:8765/#equipment')
+            await page.locator('#onboarding-continue').click(timeout=15000)
             await page.locator('#equipment-qr-reprint').click()
             await page.locator('#qr-reprint-site').select_option(str(f.sites[0].id))
             choices = page.locator('#qr-reprint-list input[data-equipment-id]')
