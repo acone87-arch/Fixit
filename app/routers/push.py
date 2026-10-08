@@ -1,15 +1,16 @@
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.core.deps import CurrentUser, get_current_user
 from app.database import get_db
 from app.models.push import PushSubscription
+from app.models.core import User
 from app.schemas.push import PushStateOut, PushSubscriptionIn, PushUnsubscribeIn
-from app.services.push_service import configured
+from app.services.push_service import MAX_SUBSCRIPTIONS, configured
 
 router = APIRouter(prefix="/api/push", tags=["push"])
 
@@ -44,7 +45,23 @@ async def subscribe(payload: PushSubscriptionIn, db: AsyncSession = Depends(get_
     if not configured():
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Push пока не настроен")
     p256dh, auth = _keys(payload)
+    # Serialize per-user registrations so concurrent requests cannot exceed the
+    # storage budget. Existing endpoints remain renewable at the limit.
+    await db.scalar(select(User.id).where(User.id == user.id).with_for_update())
     item = await db.scalar(select(PushSubscription).where(PushSubscription.endpoint == payload.endpoint))
+    if not item or item.user_id != user.id:
+        count = await db.scalar(select(func.count()).select_from(PushSubscription).where(
+            PushSubscription.user_id == user.id))
+        if count >= MAX_SUBSCRIPTIONS:
+            inactive = await db.scalar(select(PushSubscription).where(
+                PushSubscription.user_id == user.id, PushSubscription.is_active.is_(False),
+            ).order_by(PushSubscription.last_seen_at).limit(1).with_for_update())
+            if inactive is None:
+                raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Достигнут лимит push-подписок")
+            # Reclaim one explicitly disconnected device, including when VAPID
+            # rotation supplies a new endpoint. Keep active devices untouched.
+            await db.delete(inactive)
+            await db.flush()
     if not item:
         item = PushSubscription(user_id=user.id, organization_id=user.organization_id, endpoint=payload.endpoint, p256dh=p256dh, auth=auth)
         db.add(item)
