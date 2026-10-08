@@ -125,7 +125,9 @@ python -B -m pip_audit --path <application-venv>/Lib/site-packages -f json
 
 69 security cases включают localhost/HTTP/private/loopback/link-local/IPv6/числовые обходы/userinfo/ports/provider spoofing/control chars; special/mixed DNS, DNS rebinding pinning, 301/302/303/307/308 на внутренний Location без follow, явные timeouts, медленный/недоступный endpoint, старую unsafe подписку, saturation/no backlog и допустимые provider URLs. Сеть synthetic tests запрещена автоматически.
 
-Ошибки harness учтены: первый расширенный baseline harness завершился timeout 40 s; повтор выполнен с безусловным network guard и отдельным baseline worktree. Первый новый profile test ожидал неправильное состояние после сброса synthetic fixture при reload (2 failed); ожидание исправлено на «Уведомления выключены», затем 2 passed. Печать Playwright diagnostics обнаружила cp1251 UnicodeEncodeError; harness переведён на UTF-8. Эти первые попытки не скрыты и не выдаются за успех.
+Ошибки harness учтены: первый расширенный baseline harness завершился timeout 40 s. В нём один путь исходного sender не был полностью закрыт mock/общим network guard; поэтому **нельзя подтвердить отсутствие попытки реального сетевого вызова в этом отброшенном запуске**. Это отклонение от требования полной mock-изоляции, а не доказательство безопасного воспроизведения. Фактический сетевой запрос/получение данных этим запуском не установлены; production targets/credentials не использовались. Повтор выполнен с безусловным network guard и отдельным baseline worktree; только его **60 failed / 9 passed** используются как итоговое red evidence. Guard блокирует requests, urllib3 и DNS до сокета, а разрешённые тестовые вызовы перехватываются mocks.
+
+Первый новый profile test ожидал неправильное состояние после сброса synthetic fixture при reload (2 failed); ожидание исправлено на «Уведомления выключены», затем 2 passed. Печать Playwright diagnostics обнаружила cp1251 UnicodeEncodeError; harness переведён на UTF-8. Эти первые попытки не скрыты и не выдаются за успех.
 
 ### Разбор локального полного прогона
 

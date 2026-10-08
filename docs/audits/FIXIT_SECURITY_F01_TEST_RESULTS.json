@@ -1168,5 +1168,12 @@
     "standards_open": 0,
     "spec_open": 0
   },
-  "release": "NO-GO; Draft; manual acceptance pending"
+  "release": "NO-GO; Draft; manual acceptance pending",
+  "discarded_baseline_attempt": {
+    "result": "timeout after 40 seconds; excluded from evidence",
+    "isolation": "one original sender path lacked complete network mocking",
+    "network_attempt": "cannot exclude; actual request/data retrieval not established",
+    "production_targets_or_credentials": "not used",
+    "correction": "unconditional requests/urllib3/DNS guards before the final baseline run"
+  }
 }
