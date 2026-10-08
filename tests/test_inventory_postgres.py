@@ -59,6 +59,54 @@ async def test_batch_retries_pdf_and_empty_equipment_identities(pg):
     assert (await pg.http.post('/api/equipment-inventory/batches', headers=auth(pg.owner,pg.org), json=payload)).status_code == 409
 
 
+async def test_reprint_selected_equipment_preserves_identity_and_a4_layout(pg):
+    _, _, rows = await batch(pg, quantity=10)
+    for row in rows:
+        assert (await complete(pg, row)).status_code == 200
+    # Mix inventory and ordinarily registered equipment in one print selection.
+    regular = await pg.http.post('/api/equipment', headers=auth(pg.owner, pg.org), json={
+        'site_id': str(pg.sites[0].id), 'equipment_type_id': pg.kind.id,
+        'serial_number': 'REPRINT-REGULAR', 'manufacturer': 'Nilfisk', 'model': 'SC401'})
+    assert regular.status_code == 201, regular.text
+    selected = [regular.json(), *rows[:8]]
+    before = (await pg.http.get('/api/equipment', headers=auth(pg.owner, pg.org))).json()
+    response = await pg.http.post('/api/equipment-inventory/reprint/pdf', headers=auth(pg.owner, pg.org),
+        json={'site_id': str(pg.sites[0].id), 'equipment_ids': [row['id'] for row in selected] + [selected[0]['id']]})
+    assert response.status_code == 200, response.text
+    assert response.headers['content-type'] == 'application/pdf'
+    assert response.headers['cache-control'] == 'no-store'
+    reader = PdfReader(BytesIO(response.content))
+    assert len(reader.pages) == 2
+    assert round(float(reader.pages[0].mediabox.width)) == 595
+    urls = [a.get_object()['/A']['/URI'] for page in reader.pages for a in page['/Annots']]
+    assert [url.rsplit('/', 1)[-1] for url in urls] == [row['public_qr_token'] for row in selected]
+    assert 'Nilfisk SC401' in reader.pages[0].extract_text()
+    after = (await pg.http.get('/api/equipment', headers=auth(pg.owner, pg.org))).json()
+    assert before == after
+    async with pg.sessions() as db:
+        assert await db.scalar(select(func.count()).select_from(EquipmentInventoryBatch)) == 1
+
+
+async def test_reprint_rejects_invalid_selection_and_cross_scope(flow):
+    f = flow
+    payload = {'site_id': str(f.sites[0].id), 'equipment_ids': [str(f.equipment[0].id)]}
+    endpoint = '/api/equipment-inventory/reprint/pdf'
+    async def post(body, headers=None):
+        return await f.http.post(endpoint, headers=headers or auth(f.owner, f.org), json=body)
+    assert (await post(payload, auth(f.tech, f.org))).status_code == 403
+    assert (await post(payload, f.manager_headers)).status_code == 403
+    assert (await f.http.post(endpoint, json=payload)).status_code == 401
+    for ids in [[], [str(uuid.uuid4())] * 501, ['invalid']]:
+        assert (await post({**payload, 'equipment_ids': ids})).status_code == 422
+    for body in [
+        {**payload, 'site_id': str(f.sites[3].id)},
+        {**payload, 'site_id': str(f.sites[1].id)},
+        {**payload, 'equipment_ids': [str(f.equipment[0].id), str(f.equipment[2].id)]},
+        {**payload, 'equipment_ids': [str(uuid.uuid4())]},
+    ]:
+        assert (await post(body)).status_code == 404
+
+
 @pytest.mark.parametrize('quantity', [0, -1, 501])
 async def test_invalid_batch_quantity_has_no_side_effects(pg, quantity):
     response = await pg.http.post('/api/equipment-inventory/batches', headers=auth(pg.owner,pg.org),

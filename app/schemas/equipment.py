@@ -74,6 +74,12 @@ class EquipmentBatchOut(BaseModel):
     created_at: datetime
 
 
+class EquipmentQRReprint(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    site_id: uuid.UUID
+    equipment_ids: list[uuid.UUID] = Field(min_length=1, max_length=500)
+
+
 class EquipmentOut(EquipmentBase):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID

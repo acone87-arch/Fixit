@@ -290,6 +290,13 @@ th { background: #10221d; color: #8fa79d; border-color: var(--line); } td { bord
 .passport-summary { min-width:0; }.passport-summary .passport-hero { padding-top:2px; }.passport-top-data { margin:0; }.passport-top-request { margin:10px 0 0; }
 .inventory-entry-card { display:flex; align-items:center; justify-content:space-between; gap:18px; margin:-6px 0 18px; padding:15px 17px; border:1px solid #315A91; border-radius:14px; background:linear-gradient(135deg,rgba(74,144,255,.12),rgba(18,36,64,.9)); }
 .inventory-entry-card div { min-width:0; }.inventory-entry-card strong,.inventory-entry-card span { display:block; }.inventory-entry-card strong { color:#edf8f2; font-size:14px; }.inventory-entry-card span { margin-top:4px; color:#9db8ac; font-size:11px; line-height:1.45; }.inventory-entry-card .btn { flex:none; }
+.qr-reprint-list { max-height:45vh; overflow:auto; margin-top:12px; }
+.qr-reprint-choice { display:flex; align-items:flex-start; gap:12px; padding:12px 0; border-bottom:1px solid var(--line); cursor:pointer; min-height:44px; }
+.qr-reprint-choice input { flex:none; width:20px; height:20px; margin:2px 0; accent-color:var(--accent); }
+.qr-reprint-choice span { min-width:0; overflow-wrap:anywhere; }
+.qr-reprint-choice strong,.qr-reprint-choice small { display:block; }
+.qr-reprint-choice small { margin-top:4px; color:var(--ink-soft); }
+#site-qr-reprint { margin:12px 0; }
 @media (max-width:767px) {
   .modal-backdrop:has(.equipment-passport) { align-items:stretch; background:#06110d; }
   .modal:has(.equipment-passport) { width:100%; max-width:none; max-height:none; min-height:100dvh; padding:16px 14px calc(16px + env(safe-area-inset-bottom)); border:0; border-radius:0; box-shadow:none; }

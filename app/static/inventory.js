@@ -1,4 +1,67 @@
 // Inventory keeps the existing Equipment ID and public QR throughout its life.
+async function openEquipmentQRReprint(selectedSite = '') {
+  await Promise.all([ensureCustomers(true), ensureEquipmentTypes()]);
+  const sites = state.sites;
+  if (!sites.length) return toast('Сначала создайте объект обслуживания', 'error');
+  const modal = openModal('Перепечатать QR оборудования', `
+    <div class="field"><label for="qr-reprint-site">Объект</label><select id="qr-reprint-site">${sites.map(site => `<option value="${site.id}" ${selectedSite === site.id ? 'selected' : ''}>${esc(site.name)} · ${esc(site.client_name || '')}</option>`).join('')}</select></div>
+    <p class="text-soft">Существующие QR-коды сохраняются. PDF: A4, 8 этикеток 90 × 60 мм на листе, масштаб 100%. До 500 этикеток за раз.</p>
+    <label class="qr-reprint-choice"><input type="checkbox" id="qr-reprint-all" disabled><strong>Выбрать все на объекте</strong></label>
+    <p id="qr-reprint-count" role="status">Выбрано: 0</p>
+    <div id="qr-reprint-list" class="qr-reprint-list">Загрузка оборудования…</div>`,
+    '<button class="btn btn-secondary" id="qr-reprint-close">Закрыть</button><button class="btn btn-primary" id="qr-reprint-download" disabled>Скачать PDF</button>');
+  const siteSelect = modal.querySelector('#qr-reprint-site'), all = modal.querySelector('#qr-reprint-all');
+  const list = modal.querySelector('#qr-reprint-list'), download = modal.querySelector('#qr-reprint-download');
+  let loading = false, downloading = false, generation = 0;
+  const choices = () => [...list.querySelectorAll('input[data-equipment-id]')];
+  const update = () => {
+    const inputs = choices(), count = inputs.filter(input => input.checked).length;
+    all.checked = inputs.length > 0 && count === inputs.length;
+    all.indeterminate = count > 0 && count < inputs.length;
+    modal.querySelector('#qr-reprint-count').textContent = `Выбрано: ${count}${count > 500 ? ' — выберите не более 500' : ''}`;
+    download.disabled = loading || downloading || !count || count > 500;
+  };
+  const refresh = async () => {
+    const attempt = ++generation;
+    loading = true; all.disabled = true; all.checked = false; all.indeterminate = false;
+    list.textContent = 'Загрузка оборудования…'; update();
+    try {
+      const items = await api(`/equipment?site_id=${encodeURIComponent(siteSelect.value)}`);
+      if (attempt !== generation || !modal.isConnected) return;
+      list.innerHTML = items.length ? items.map(item => {
+        const type = state.equipmentTypes.find(kind => kind.id === item.equipment_type_id)?.name;
+        const name = [item.manufacturer, item.model].filter(Boolean).join(' ') || type || item.name || 'Оборудование';
+        return `<label class="qr-reprint-choice"><input type="checkbox" data-equipment-id="${item.id}"><span><strong>${esc(name)}</strong><small>${esc([item.serial_number ? `S/N ${item.serial_number}` : '', item.inventory_number != null ? `QR № ${item.inventory_number}` : '', item.location_details, item.inventory_pending ? 'Карточка не заполнена' : ''].filter(Boolean).join(' · '))}</small></span></label>`;
+      }).join('') : '<p>На этом объекте оборудования нет.</p>';
+      all.disabled = !items.length;
+      choices().forEach(input => input.addEventListener('change', update));
+    } catch (error) {
+      if (attempt !== generation || !modal.isConnected) return;
+      list.textContent = 'Не удалось загрузить оборудование. Выберите объект повторно.';
+      toast(error.message, 'error');
+    } finally {
+      if (attempt === generation) { loading = false; update(); }
+    }
+  };
+  all.onchange = () => { choices().forEach(input => { input.checked = all.checked; }); update(); };
+  siteSelect.onchange = refresh;
+  modal.querySelector('#qr-reprint-close').onclick = closeModal;
+  download.onclick = async () => {
+    const equipment_ids = choices().filter(input => input.checked).map(input => input.dataset.equipmentId);
+    if (!equipment_ids.length || equipment_ids.length > 500 || downloading || loading) return;
+    const site_id = siteSelect.value;
+    downloading = true; siteSelect.disabled = true; update(); download.textContent = 'Подготовка PDF…';
+    try {
+      const blob = await apiBlob('/equipment-inventory/reprint/pdf', {method:'POST', body:JSON.stringify({site_id, equipment_ids})});
+      const url = URL.createObjectURL(blob), link = document.createElement('a');
+      link.href = url; link.download = `fixit-qr-reprint-${site_id}.pdf`; link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+    } catch (error) { toast(error.message, 'error'); }
+    finally { downloading = false; siteSelect.disabled = false; download.textContent = 'Скачать PDF'; update(); }
+  };
+  await refresh();
+}
+
 async function openInventoryBatches(selectedSite = '') {
   await ensureCustomers(true);
   const sites = state.sites.filter(site => site.is_active);

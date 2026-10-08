@@ -12,9 +12,10 @@ from app.core.deps import CurrentUser, get_current_user, require_roles
 from app.database import get_db
 from app.models.core import Equipment, EquipmentInventoryBatch, EquipmentType, UserRole
 from app.models.customer import Site
-from app.schemas.equipment import EquipmentBatchCreate, EquipmentBatchOut, EquipmentInventoryComplete, EquipmentOut
+from app.schemas.equipment import EquipmentBatchCreate, EquipmentBatchOut, EquipmentInventoryComplete, EquipmentOut, EquipmentQRReprint
 from app.services.access_policy import ensure_equipment_access
-from app.services.inventory_pdf import build_inventory_pdf
+from app.services.inventory_pdf import build_inventory_pdf, build_equipment_sheet_pdf
+from app.services.equipment_label_pdf import EquipmentLabel
 
 router = APIRouter(prefix='/api/equipment-inventory', tags=['equipment'])
 
@@ -83,6 +84,32 @@ async def batch_pdf(batch_id: uuid.UUID, db: AsyncSession = Depends(get_db),
         [(row.inventory_number, str(row.public_qr_token)) for row in rows], settings.public_app_url.rstrip('/'))
     return Response(content, media_type='application/pdf', headers={
         'Content-Disposition': f'attachment; filename="fixit-qr-{batch.id}.pdf"', 'Cache-Control': 'no-store'})
+
+
+@router.post('/reprint/pdf')
+async def reprint_pdf(payload: EquipmentQRReprint, db: AsyncSession = Depends(get_db),
+                      user: CurrentUser = Depends(require_roles(UserRole.admin))):
+    site = await db.scalar(select(Site).where(Site.id == payload.site_id,
+        Site.organization_id == user.organization_id))
+    if not site:
+        raise HTTPException(404, 'Объект не найден')
+    ids = list(dict.fromkeys(payload.equipment_ids))
+    rows = (await db.scalars(select(Equipment).where(
+        Equipment.id.in_(ids), Equipment.site_id == site.id,
+        Equipment.organization_id == user.organization_id))).all()
+    if len(rows) != len(ids):
+        raise HTTPException(404, 'Выбранное оборудование не найдено на объекте')
+    labels = []
+    for equipment_id in ids:
+        row = await ensure_equipment_access(equipment_id, user, db)
+        labels.append(EquipmentLabel(token=str(row.public_qr_token), site_name=site.name,
+            equipment_name=' '.join(filter(None, [row.manufacturer, row.model])) or row.name,
+            inventory_number=row.inventory_number,
+            batch_id=str(row.inventory_batch_id) if row.inventory_batch_id else None))
+    content = await run_in_threadpool(build_equipment_sheet_pdf, labels, settings.public_app_url.rstrip('/'))
+    return Response(content, media_type='application/pdf', headers={
+        'Content-Disposition': f'attachment; filename="fixit-qr-reprint-{site.id}.pdf"',
+        'Cache-Control': 'no-store'})
 
 
 @router.post('/{equipment_id}/complete', response_model=EquipmentOut)

@@ -22,6 +22,52 @@ async def signed_page(browser, f, user, mobile=False):
     return context, await context.new_page()
 
 
+@pytest.mark.parametrize('mobile', [False, True], ids=['desktop', 'mobile-390'])
+async def test_reprint_selection_download_and_site_change(live, tmp_path, mobile):
+    from io import BytesIO
+    from pypdf import PdfReader
+    from playwright.async_api import async_playwright, expect
+    f = live
+    _, _, rows = await batch(f, 2)
+    for row in rows:
+        assert (await complete(f, row)).status_code == 200
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(executable_path=os.getenv('FIXIT_CHROMIUM_PATH') or None)
+        context, page = await signed_page(browser, f, f.owner, mobile)
+        try:
+            await page.goto('http://127.0.0.1:8765/#equipment')
+            await page.locator('#equipment-qr-reprint').click()
+            await page.locator('#qr-reprint-site').select_option(str(f.sites[0].id))
+            choices = page.locator('#qr-reprint-list input[data-equipment-id]')
+            await expect(choices).to_have_count(2)
+            download = page.locator('#qr-reprint-download')
+            await expect(download).to_be_disabled()
+            await choices.first.check()
+            await expect(page.locator('#qr-reprint-count')).to_have_text('Выбрано: 1')
+            async with page.expect_download() as event:
+                await download.click()
+            saved = tmp_path / 'reprint.pdf'
+            await (await event.value).save_as(saved)
+            reader = PdfReader(BytesIO(saved.read_bytes()))
+            urls = [a.get_object()['/A']['/URI'] for page_ in reader.pages for a in page_['/Annots']]
+            assert len(urls) == 1
+            await page.locator('#qr-reprint-all').check()
+            await expect(page.locator('#qr-reprint-count')).to_have_text('Выбрано: 2')
+            await choices.first.uncheck()
+            await expect(page.locator('#qr-reprint-count')).to_have_text('Выбрано: 1')
+            await page.locator('#qr-reprint-site').select_option(str(f.sites[1].id))
+            await expect(page.locator('#qr-reprint-list')).to_contain_text('На этом объекте оборудования нет')
+            await expect(download).to_be_disabled()
+            assert await page.evaluate('document.documentElement.scrollWidth <= document.documentElement.clientWidth')
+            await page.locator('#qr-reprint-close').click()
+            await page.goto(f'http://127.0.0.1:8765/#clients/{f.client.id}/sites/{f.sites[0].id}')
+            await page.locator('#site-qr-reprint').click()
+            await expect(page.locator('#qr-reprint-site')).to_have_value(str(f.sites[0].id))
+            await expect(page.locator('#qr-reprint-list input[data-equipment-id]')).to_have_count(2)
+        finally:
+            await context.close(); await browser.close()
+
+
 async def test_new_site_batch_pdf_mobile_scan_fill_retry_and_next(live, tmp_path, monkeypatch):
     from playwright.async_api import async_playwright, expect
     f=live
