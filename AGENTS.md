@@ -6,7 +6,7 @@
 
 - Backend: FastAPI, SQLAlchemy, PostgreSQL; `app/routers/`, `app/services/`, `app/models/`, `app/schemas/`.
 - DB migrations: `alembic/versions/`; never rewrite or reorder applied revisions.
-- Admin/client UI: `app/static/`; mobile technician PWA: `app/static-tech/` plus mounted offline assets in `app/static/offline/`; public guest: `app/static-guest/`.
+- Active Fixit Pulse (admin/client and technician PWA): `app/static/`, with offline logic in `app/static/offline/`; public guest: `app/static-guest/`. `app/static-tech/` is legacy retained for compatibility/rollback, not mounted. `/tech` redirects to `/#requests`; `/tech/sw.js` serves the shared offline worker for installed legacy clients. Verify routes in `app/main.py`.
 - Tests: `tests/`, `scripts/test_location_workflow.py`; CI: `.github/workflows/`.
 - Production and backups: `docs/PRODUCTION_RUNBOOK.md` and `scripts/deploy_pilot_release.sh`.
 - The top-level README contains historical sections; verify claims against current code and migrations.

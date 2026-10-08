@@ -15,6 +15,6 @@ Read repository `AGENTS.md`, `GLOSSARY.md`, `docs/agents/domain.md` and current 
 6. **Proof.** Run targeted pytest and JS/browser tests, then as much of the complete test suite as available. Do not misreport skipped/blocked tests. If dependencies are unavailable report the exact limitation.
 7. **Deliver.** Give a concise description of modified files, acceptance evidence, migration/rollout risk and any remaining work. Create a feature PR when requested/authorized; NEVER merge `main` or deploy automatically.
 
-Key entry points: `app/routers/service_requests.py`, `app/services/service_request_workflow.py`, `app/services/access_policy.py`, `app/static/app.js`, `app/static-tech/`, `tests/`.
+Key entry points: `app/routers/service_requests.py`, `app/services/service_request_workflow.py`, `app/services/access_policy.py`, `app/static/app.js`, `app/static/offline/` (active Pulse), `app/static-tech/` (legacy compatibility/rollback only), `tests/`.
 
 Useful validation when dependencies are present: `pytest -q`; `node tests/technician_workflow_runtime_test.js`; `node tests/pulse_offline_engine_runtime_test.js`; `node tests/durable_queue_browser_test.js`. PostgreSQL and Chromium-dependent tests require isolated infrastructure.

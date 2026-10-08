@@ -5,9 +5,9 @@ description: Check Fixit admin and technician PWA mobile behavior, offline queue
 
 # Mobile and offline acceptance
 
-Start with `AGENTS.md`, `docs/PROFILE_PWA_PUSH_QR_ACCEPTANCE.md`, `app/static/`, `app/static-tech/`, `app/static/offline/` and relevant `tests/`.
+Start with `AGENTS.md`, `docs/PROFILE_PWA_PUSH_QR_ACCEPTANCE.md`, `app/static/` (active Pulse), `app/static/offline/` (active offline logic), `app/static-tech/` (legacy compatibility/rollback only) and relevant `tests/`.
 
-1. Record exact changed assets and which route uses them (admin `/`, Pulse `/tech`, guest `/guest`). Don't assume `app/static-tech/` is mounted unchanged in production; inspect `app/main.py`.
+1. Record exact changed assets and routes from `app/main.py`: active Pulse (admin/client/technician) uses `/` and `/static` from `app/static/`; guest uses `/guest`. Test `/tech` and `/tech/*` redirects to `/#requests` as legacy migration cases, with `/tech/sw.js` serving `app/static/offline/sw.js`. `app/static-tech/` is not mounted; preserve it for compatibility/rollback.
 2. Exercise authenticated roles and guest context separately. Test 390x844 and 1440x1000, portrait layout, keyboard/focus, error/loading/empty states, wide fonts and themes. Reject horizontal scroll at 390px.
 3. Check offline first-load limitations explicitly, then online→offline→queue→reload→online. Confirm `pendingRepairs` and `pendingAttachments` persist through SW updates; verify retries with the same `local_uuid` do not create duplicate Repair or media.
 4. Exercise Chromium IndexedDB and Service Worker runtime where available. Verify background sync behavior, foreground fallback and eventual feedback. Never test destructive cache clearing against a real user's stored queue.
