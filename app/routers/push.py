@@ -53,7 +53,15 @@ async def subscribe(payload: PushSubscriptionIn, db: AsyncSession = Depends(get_
         count = await db.scalar(select(func.count()).select_from(PushSubscription).where(
             PushSubscription.user_id == user.id))
         if count >= MAX_SUBSCRIPTIONS:
-            raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Достигнут лимит push-подписок")
+            inactive = await db.scalar(select(PushSubscription).where(
+                PushSubscription.user_id == user.id, PushSubscription.is_active.is_(False),
+            ).order_by(PushSubscription.last_seen_at).limit(1).with_for_update())
+            if inactive is None:
+                raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Достигнут лимит push-подписок")
+            # Reclaim one explicitly disconnected device, including when VAPID
+            # rotation supplies a new endpoint. Keep active devices untouched.
+            await db.delete(inactive)
+            await db.flush()
     if not item:
         item = PushSubscription(user_id=user.id, organization_id=user.organization_id, endpoint=payload.endpoint, p256dh=p256dh, auth=auth)
         db.add(item)

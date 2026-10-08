@@ -230,7 +230,7 @@
   async function registerBackgroundSync() {
     if (!root.navigator?.serviceWorker) return;
     try {
-      const registration = await root.navigator.serviceWorker.register('/sw.js?v=20261002-4', { scope: '/' });
+      const registration = await root.navigator.serviceWorker.register('/sw.js?v=20261009-1', { scope: '/' });
       if ('sync' in registration) await registration.sync.register('fixit-sync-repairs');
     } catch (_) { /* Foreground recovery works without Background Sync. */ }
   }

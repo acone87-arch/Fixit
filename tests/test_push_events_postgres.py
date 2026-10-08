@@ -6,7 +6,8 @@ import time
 
 import pytest
 from sqlalchemy import select
-from sqlalchemy import func
+from sqlalchemy import func, text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.push import PushSubscription
 from app.routers import push as push_router, service_requests, sync as sync_router
@@ -127,6 +128,10 @@ async def test_subscription_budget_is_atomic_and_existing_device_can_rotate_keys
     rotated = synthetic_keys()
     assert (await pg.http.post("/api/push/subscribe", headers=headers, json={"endpoint": endpoint, "keys": rotated})).status_code == 204
     assert (await pg.http.get("/api/push/state", headers=headers, params={"endpoint": endpoint})).json()["subscribed"]
+    assert (await pg.http.post("/api/push/unsubscribe", headers=headers, json={"endpoint": endpoint})).status_code == 204
+    assert (await subscribe("new-after-rotation")).status_code == 204
+    async with pg.sessions() as db:
+        assert await db.scalar(select(func.count()).select_from(PushSubscription)) == push_service.MAX_SUBSCRIPTIONS
 
 
 async def test_unsafe_registration_never_persists_and_legacy_endpoint_can_unsubscribe(pg, monkeypatch):
@@ -167,3 +172,19 @@ async def test_slow_push_preserves_successful_assignment_response_and_saved_stat
         assert saved.json()["status"] == "assigned"
     finally:
         release.set()
+
+
+async def test_notification_query_timeout_keeps_business_session_usable(pg, monkeypatch):
+    original = AsyncSession.scalars
+    async def slow_query(db, statement, *args, **kwargs):
+        if "push_subscriptions" in str(statement):
+            await db.execute(text("SELECT pg_sleep(1)"))
+        return await original(db, statement, *args, **kwargs)
+    monkeypatch.setattr(AsyncSession, "scalars", slow_query)
+    monkeypatch.setattr(push_service, "configured", lambda: True)
+    monkeypatch.setattr(push_service, "DELIVERY_BUDGET", 0.05)
+    async with pg.sessions() as db:
+        await db.execute(text("SELECT 1"))
+        await push_service.send_to_user(db, user_id=pg.owner.id, organization_id=pg.org.id,
+            title="Synthetic", body="Synthetic", url="/#requests/synthetic")
+        assert await db.scalar(text("SELECT 1")) == 1

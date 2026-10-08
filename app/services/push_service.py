@@ -29,9 +29,16 @@ _slots = threading.BoundedSemaphore(4)
 def best_effort(function):
     """Bound the whole fanout, including recipient lookup and cleanup errors."""
     @wraps(function)
-    async def bounded(*args, **kwargs):
+    async def bounded(db, *args, **kwargs):
+        async def invoke():
+            if isinstance(db, AsyncSession):
+                # Cancelled SQL/cleanup must never invalidate the caller's
+                # transaction (sync batches reuse it after notifying).
+                async with AsyncSession(bind=db.bind, expire_on_commit=False) as notification_db:
+                    return await function(notification_db, *args, **kwargs)
+            return await function(db, *args, **kwargs)
         try:
-            return await asyncio.wait_for(function(*args, **kwargs), timeout=DELIVERY_BUDGET)
+            return await asyncio.wait_for(invoke(), timeout=DELIVERY_BUDGET)
         except Exception as exc:
             logger.warning("Web Push notification failed: %s", type(exc).__name__)
     return bounded

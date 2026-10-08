@@ -60,7 +60,7 @@ async function registerPulseWorker() {
   if (!('serviceWorker' in navigator)) return null;
   const registrations = await navigator.serviceWorker.getRegistrations();
   await Promise.all(registrations.map(item => item.update().catch(() => null)));
-  return navigator.serviceWorker.register('/sw.js?v=20261002-4', { scope: '/' });
+  return navigator.serviceWorker.register('/sw.js?v=20261009-1', { scope: '/' });
 }
 
 async function enablePush() {
@@ -75,6 +75,7 @@ async function enablePush() {
     const existing = await registration.pushManager.getSubscription();
     const currentKey = existing?.options?.applicationServerKey ? new Uint8Array(existing.options.applicationServerKey) : null;
     if (existing && (!currentKey || currentKey.length !== expectedKey.length || currentKey.some((value, index) => value !== expectedKey[index]))) {
+      await api('/push/unsubscribe', { method: 'POST', body: JSON.stringify({ endpoint: existing.endpoint }) });
       await existing.unsubscribe();
     }
     const current = await registration.pushManager.getSubscription();
