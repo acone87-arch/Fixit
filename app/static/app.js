@@ -252,6 +252,18 @@ async function apiBlob(path) {
   // pass relative API paths. Accept both without producing /api/api/...
   const url = path.startsWith('/api/') ? path : '/api' + path;
   const res = await fetch(url, { headers });
+  return readBlobResponse(res);
+}
+
+async function apiBlobPost(path, body) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (state.token) headers.Authorization = `Bearer ${state.token}`;
+  const url = path.startsWith('/api/') ? path : '/api' + path;
+  const res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body) });
+  return readBlobResponse(res);
+}
+
+async function readBlobResponse(res) {
   if (res.status === 401) {
     logout();
     throw new Error('Сессия истекла, войдите заново');
@@ -1720,6 +1732,11 @@ async function renderClientSiteDetail(content, client, siteId) {
   content.innerHTML = `<section class="client-detail-screen"><button class="sr-back" id="client-site-back">← ${esc(client.legal_name || client.name)}</button><header class="client-detail-hero"><div><span>ОБЪЕКТ</span><h1>${esc(site.name)}</h1><p>${esc(site.address || 'Адрес не указан')}</p></div>${editAction}</header><div class="client-detail-meta"><div><span>КОНТАКТ</span><strong>${esc(site.contact_name || 'Не указан')}</strong><small>${esc([site.contact_phone, site.contact_email].filter(Boolean).join(' · '))}</small></div><div><span>АКТИВНЫЕ ЗАЯВКИ</span><strong>${activeRequests}</strong><small>Оборудование: ${equipment.length}</small></div></div><section class="client-site-equipment"><h2>Оборудование на объекте</h2><div class="client-equipment-detail-list">${equipment.length ? equipment.map((item) => `<button class="client-equipment-detail-card" data-client-equipment="${item.id}"><span class="client-equipment-photo" data-client-equipment-photo="${item.id}">FIXIT</span><div><strong>${esc([item.manufacturer, item.model].filter(Boolean).join(' ') || item.name)}</strong><span>${esc(item.name || 'Оборудование')}</span><small>S/N ${esc(item.serial_number || '—')}</small>${badge(EQUIPMENT_STATUS, item.status)}</div></button>`).join('') : '<div class="client-empty">На объекте пока нет оборудования.</div>'}</div></section></section>`;
   content.querySelector('#client-site-back').addEventListener('click', () => location.hash = `clients/${client.id}/sites`);
   content.querySelector('#client-site-edit')?.addEventListener('click', () => openSiteEditModal(site, client));
+  if (['owner', 'admin'].includes(state.me.role)) {
+    const section = content.querySelector('.client-site-equipment');
+    section.querySelector('h2').insertAdjacentHTML('afterend', '<button class="btn btn-secondary" id="site-qr-reprint">Перепечатать QR</button>');
+    section.querySelector('#site-qr-reprint').onclick = () => openEquipmentQRReprint(site.id).catch(error => toast(error.message, 'error'));
+  }
   bindClientEquipmentCards(content);
 }
 
@@ -2001,6 +2018,9 @@ async function renderEquipment(content) {
     ${canManageInventory ? `<section class="inventory-entry-card" aria-label="Первичная инвентаризация оборудования">
       <div><strong>Первичная инвентаризация</strong><span>Создайте сразу несколько пустых карточек и скачайте PDF с QR-кодами для печати.</span></div>
       <button class="btn btn-primary" id="inventory-batches-btn">Создать партию оборудования и QR</button>
+    </section><section class="inventory-entry-card" aria-label="Повторная печать QR оборудования">
+      <div><strong>Перепечатать QR</strong><span>Выберите оборудование на объекте и скачайте готовые этикетки A4.</span></div>
+      <button class="btn btn-secondary" id="equipment-qr-reprint">Перепечатать QR</button>
     </section>` : ''}
     <div class="card mobile-table" style="padding:0">
       <table>
@@ -2010,6 +2030,7 @@ async function renderEquipment(content) {
     </div><div class="mobile-card-list" id="equipment-cards"></div>`;
 
   document.getElementById('inventory-batches-btn')?.addEventListener('click', () => openInventoryBatches(document.getElementById('equipment-location-filter').value).catch(error => toast(error.message, 'error')));
+  document.getElementById('equipment-qr-reprint')?.addEventListener('click', () => openEquipmentQRReprint(document.getElementById('equipment-location-filter').value).catch(error => toast(error.message, 'error')));
   const rows = document.getElementById('equipment-rows');
   const cards = document.getElementById('equipment-cards');
   const renderRows = () => {
