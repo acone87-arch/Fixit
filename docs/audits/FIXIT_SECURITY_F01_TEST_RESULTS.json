@@ -1,0 +1,1172 @@
+{
+  "date": "2026-10-09",
+  "base_sha": "7d3bf1896286bb7b5a7c58f0b1fb322a9cdbfbd5",
+  "runtime_sha": "0f3a08d38642118ba5f709e446b0815127b8323e",
+  "test_gate_sha": "3fef2cff63b948ed56a5902b2f8fe6497af061c9",
+  "pr": "https://github.com/acone87-arch/Fixit/pull/22",
+  "local_junit": [
+    {
+      "artifact": "f01-red-registration.xml",
+      "tests": 1,
+      "passed": 0,
+      "failed": 1,
+      "errors": 0,
+      "skipped": 0,
+      "failed_or_error_tests": [
+        "tests.test_push_endpoint_security::test_registration_rejects_loopback_endpoint"
+      ]
+    },
+    {
+      "artifact": "f01-red-saved.xml",
+      "tests": 2,
+      "passed": 1,
+      "failed": 1,
+      "errors": 0,
+      "skipped": 0,
+      "failed_or_error_tests": [
+        "tests.test_push_endpoint_security::test_saved_unsafe_subscription_never_reaches_network"
+      ]
+    },
+    {
+      "artifact": "f01-red-keys.xml",
+      "tests": 3,
+      "passed": 0,
+      "failed": 3,
+      "errors": 0,
+      "skipped": 0,
+      "failed_or_error_tests": [
+        "tests.test_push_endpoint_security::test_registration_rejects_malformed_or_oversized_keys[keys0]",
+        "tests.test_push_endpoint_security::test_registration_rejects_malformed_or_oversized_keys[keys1]",
+        "tests.test_push_endpoint_security::test_registration_rejects_malformed_or_oversized_keys[keys2]"
+      ]
+    },
+    {
+      "artifact": "f01-red-baseline.xml",
+      "tests": 69,
+      "passed": 9,
+      "failed": 60,
+      "errors": 0,
+      "skipped": 0,
+      "failed_or_error_tests": [
+        "tests.test_push_endpoint_security::test_registration_rejects_unsafe_urls[http://127.0.0.1/push]",
+        "tests.test_push_endpoint_security::test_registration_rejects_unsafe_urls[http://localhost/push]",
+        "tests.test_push_endpoint_security::test_registration_rejects_unsafe_urls[https://localhost/push]",
+        "tests.test_push_endpoint_security::test_registration_rejects_unsafe_urls[https://127.0.0.1/push]",
+        "tests.test_push_endpoint_security::test_registration_rejects_unsafe_urls[https://10.0.0.1/push]",
+        "tests.test_push_endpoint_security::test_registration_rejects_unsafe_urls[https://172.16.0.1/push]",
+        "tests.test_push_endpoint_security::test_registration_rejects_unsafe_urls[https://192.168.0.1/push]",
+        "tests.test_push_endpoint_security::test_registration_rejects_unsafe_urls[https://169.254.169.254/push]",
+        "tests.test_push_endpoint_security::test_registration_rejects_unsafe_urls[https://[::1]/push]",
+        "tests.test_push_endpoint_security::test_registration_rejects_unsafe_urls[https://[fe80::1]/push]",
+        "tests.test_push_endpoint_security::test_registration_rejects_unsafe_urls[https://[::ffff:127.0.0.1]/push]",
+        "tests.test_push_endpoint_security::test_registration_rejects_unsafe_urls[https://2130706433/push]",
+        "tests.test_push_endpoint_security::test_registration_rejects_unsafe_urls[https://0177.0.0.1/push]",
+        "tests.test_push_endpoint_security::test_registration_rejects_unsafe_urls[https://0x7f000001/push]",
+        "tests.test_push_endpoint_security::test_registration_rejects_unsafe_urls[https://127.1/push]",
+        "tests.test_push_endpoint_security::test_registration_rejects_unsafe_urls[https://fcm.googleapis.com:8443/push]",
+        "tests.test_push_endpoint_security::test_registration_rejects_unsafe_urls[https://fcm.googleapis.com:80/push]",
+        "tests.test_push_endpoint_security::test_registration_rejects_unsafe_urls[https://user:pass@fcm.googleapis.com/push]",
+        "tests.test_push_endpoint_security::test_registration_rejects_unsafe_urls[https://@fcm.googleapis.com/push]",
+        "tests.test_push_endpoint_security::test_registration_rejects_unsafe_urls[https://fcm.googleapis.com.evil.invalid/push]",
+        "tests.test_push_endpoint_security::test_registration_rejects_unsafe_urls[https://evilpush.apple.com/push]",
+        "tests.test_push_endpoint_security::test_registration_rejects_unsafe_urls[https://push.apple.com.evil.invalid/push]",
+        "tests.test_push_endpoint_security::test_registration_rejects_unsafe_urls[https://evil.invalid/push]",
+        "tests.test_push_endpoint_security::test_registration_rejects_unsafe_urls[https://fcm.googleapis.com./push]",
+        "tests.test_push_endpoint_security::test_registration_rejects_unsafe_urls[https://fcm%2egoogleapis.com/push]",
+        "tests.test_push_endpoint_security::test_registration_rejects_unsafe_urls[https://fcm.googleapis.com\\\\@127.0.0.1/push]",
+        "tests.test_push_endpoint_security::test_registration_rejects_unsafe_urls[https://fcm.googleapis.com/push#fragment]",
+        "tests.test_push_endpoint_security::test_registration_rejects_unsafe_urls[ https://fcm.googleapis.com/push]",
+        "tests.test_push_endpoint_security::test_registration_rejects_unsafe_urls[https://fcm.googleapis.com\\n/push]",
+        "tests.test_push_endpoint_security::test_registration_rejects_loopback_endpoint",
+        "tests.test_push_endpoint_security::test_delivery_rejects_special_dns_answers[127.0.0.1]",
+        "tests.test_push_endpoint_security::test_delivery_rejects_special_dns_answers[10.0.0.1]",
+        "tests.test_push_endpoint_security::test_delivery_rejects_special_dns_answers[169.254.169.254]",
+        "tests.test_push_endpoint_security::test_delivery_rejects_special_dns_answers[0.0.0.0]",
+        "tests.test_push_endpoint_security::test_delivery_rejects_special_dns_answers[100.64.0.1]",
+        "tests.test_push_endpoint_security::test_delivery_rejects_special_dns_answers[192.0.2.1]",
+        "tests.test_push_endpoint_security::test_delivery_rejects_special_dns_answers[224.0.0.1]",
+        "tests.test_push_endpoint_security::test_delivery_rejects_special_dns_answers[::1]",
+        "tests.test_push_endpoint_security::test_delivery_rejects_special_dns_answers[fe80::1]",
+        "tests.test_push_endpoint_security::test_delivery_rejects_special_dns_answers[fc00::1]",
+        "tests.test_push_endpoint_security::test_delivery_rejects_special_dns_answers[ff02::1]",
+        "tests.test_push_endpoint_security::test_delivery_rejects_special_dns_answers[::ffff:93.184.216.34]",
+        "tests.test_push_endpoint_security::test_delivery_rejects_special_dns_answers[2002:7f00:1::]",
+        "tests.test_push_endpoint_security::test_delivery_rejects_special_dns_answers[64:ff9b:1::1]",
+        "tests.test_push_endpoint_security::test_delivery_rejects_special_dns_answers[64:ff9b::7f00:1]",
+        "tests.test_push_endpoint_security::test_mixed_public_private_dns_fails_closed",
+        "tests.test_push_endpoint_security::test_delivery_pins_ip_with_provider_tls_and_bounded_timeouts",
+        "tests.test_push_endpoint_security::test_dns_rebinding_cannot_change_numeric_connection_target",
+        "tests.test_push_endpoint_security::test_gateway_redirect_is_rejected_without_second_request[301]",
+        "tests.test_push_endpoint_security::test_gateway_redirect_is_rejected_without_second_request[302]",
+        "tests.test_push_endpoint_security::test_gateway_redirect_is_rejected_without_second_request[303]",
+        "tests.test_push_endpoint_security::test_gateway_redirect_is_rejected_without_second_request[307]",
+        "tests.test_push_endpoint_security::test_gateway_redirect_is_rejected_without_second_request[308]",
+        "tests.test_push_endpoint_security::test_slow_delivery_does_not_hold_business_handler",
+        "tests.test_push_endpoint_security::test_recipient_lookup_failure_is_best_effort",
+        "tests.test_push_endpoint_security::test_outstanding_sends_have_no_unbounded_backlog",
+        "tests.test_push_endpoint_security::test_registration_rejects_malformed_or_oversized_keys[keys0]",
+        "tests.test_push_endpoint_security::test_registration_rejects_malformed_or_oversized_keys[keys1]",
+        "tests.test_push_endpoint_security::test_registration_rejects_malformed_or_oversized_keys[keys2]",
+        "tests.test_push_endpoint_security::test_saved_unsafe_subscription_never_reaches_network"
+      ]
+    },
+    {
+      "artifact": "f01-security.xml",
+      "tests": 69,
+      "passed": 69,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0,
+      "failed_or_error_tests": []
+    },
+    {
+      "artifact": "f01-push-pwa-final.xml",
+      "tests": 89,
+      "passed": 89,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0,
+      "failed_or_error_tests": []
+    },
+    {
+      "artifact": "f01-security-acl.xml",
+      "tests": 87,
+      "passed": 87,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0,
+      "failed_or_error_tests": []
+    },
+    {
+      "artifact": "f01-red-session.xml",
+      "tests": 1,
+      "passed": 0,
+      "failed": 1,
+      "errors": 0,
+      "skipped": 0,
+      "failed_or_error_tests": [
+        "tests.test_push_events_postgres::test_notification_query_timeout_keeps_business_session_usable"
+      ]
+    },
+    {
+      "artifact": "f01-green-session.xml",
+      "tests": 2,
+      "passed": 2,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0,
+      "failed_or_error_tests": []
+    },
+    {
+      "artifact": "f01-profile-browser.xml",
+      "tests": 2,
+      "passed": 2,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0,
+      "failed_or_error_tests": []
+    },
+    {
+      "artifact": "f01-full.xml",
+      "tests": 416,
+      "passed": 405,
+      "failed": 8,
+      "errors": 0,
+      "skipped": 3,
+      "failed_or_error_tests": [
+        "tests.test_frontend_parity_browser::test_client_filters_search_and_authenticated_problem_photo",
+        "tests.test_inventory_browser::test_new_site_batch_pdf_mobile_scan_fill_retry_and_next",
+        "tests.test_request_workflow_browser::test_pulse_approval_payload_and_dispatcher_result[client]",
+        "tests.test_request_workflow_postgres::test_guest_photo_partial_retry_and_legacy",
+        "tests.test_request_workflow_postgres::test_concurrent_guest_photo_retry_and_foreign_qr",
+        "tests.test_technician_result_browser::test_technician_sees_original_guest_photo",
+        "tests.test_technician_result_browser::test_client_opens_passport_and_complete_result[True]",
+        "tests.test_technician_result_browser::test_pulse_long_diagnosis_parts_photo_completion_and_reload"
+      ]
+    },
+    {
+      "artifact": "f01-windows-retry.xml",
+      "tests": 8,
+      "passed": 8,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0,
+      "failed_or_error_tests": []
+    },
+    {
+      "artifact": "f01-runtime-gate.xml",
+      "tests": 1,
+      "passed": 1,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0,
+      "failed_or_error_tests": []
+    },
+    {
+      "artifact": "f01-baseline-windows-path.xml",
+      "tests": 1,
+      "passed": 0,
+      "failed": 0,
+      "errors": 1,
+      "skipped": 0,
+      "failed_or_error_tests": [
+        "tests.test_request_workflow_postgres::test_guest_photo_partial_retry_and_legacy"
+      ]
+    },
+    {
+      "artifact": "f01-baseline-windows-path-v2.xml",
+      "tests": 1,
+      "passed": 0,
+      "failed": 1,
+      "errors": 0,
+      "skipped": 0,
+      "failed_or_error_tests": [
+        "tests.test_request_workflow_postgres::test_guest_photo_partial_retry_and_legacy"
+      ]
+    },
+    {
+      "artifact": "f01-baseline-windows-path-short.xml",
+      "tests": 1,
+      "passed": 1,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0,
+      "failed_or_error_tests": []
+    }
+  ],
+  "runtime_linux_ci": {
+    "run_id": 37835334346,
+    "passed": 416,
+    "failed": 0,
+    "errors": 0,
+    "skipped": 0,
+    "backup_restore": {
+      "tables": 3,
+      "media_files": 2,
+      "checksums": "passed"
+    },
+    "deploy_job": "skipped"
+  },
+  "test_gate_linux_ci": {
+    "run_id": 37844084658,
+    "pilot_run_id": 37844084655,
+    "passed": 417,
+    "failed": 0,
+    "errors": 0,
+    "skipped": 0,
+    "both_workflows": "success",
+    "deploy_job": "skipped"
+  },
+  "previously_skipped": [
+    {
+      "test": "tests.test_durable_queue_browser::test_offline_restart_lost_repair_and_photo_response[blob]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_durable_queue_browser::test_offline_restart_lost_repair_and_photo_response[data-url]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_durable_queue_postgres::test_concurrent_photo_receipt_returns_one_attachment",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_equipment_qr_postgres::test_equipment_download_is_print_label_with_same_safe_url",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_frontend_parity_browser::test_light_theme_uses_light_operational_surfaces_on_mobile",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_frontend_parity_browser::test_profile_opens_from_sidebar_identity_without_separate_nav_item",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_frontend_parity_browser::test_qr_request_assignment_reaches_technician_and_cannot_be_reassigned",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_frontend_parity_browser::test_client_filters_search_and_authenticated_problem_photo",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_frontend_parity_browser::test_site_edit_and_invite_revoke_are_persistent",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_frontend_parity_postgres::test_client_list_exposes_filter_and_equipment_search_fields",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_frontend_parity_postgres::test_invite_metadata_derives_expired_without_disclosing_capability",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_inventory_browser::test_reprint_selection_download_and_site_change[desktop]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_inventory_browser::test_reprint_selection_download_and_site_change[mobile-390]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_inventory_browser::test_new_site_batch_pdf_mobile_scan_fill_retry_and_next",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_inventory_browser::test_admin_edits_all_card_details_without_changing_qr",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_inventory_browser::test_site_manager_completes_pending_card_from_mobile_qr",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_inventory_migration_postgres::test_inventory_upgrade_preserves_old_equipment_and_qr",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_inventory_postgres::test_batch_retries_pdf_and_empty_equipment_identities",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_inventory_postgres::test_reprint_selected_equipment_preserves_identity_and_a4_layout",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_inventory_postgres::test_reprint_rejects_invalid_selection_and_cross_scope",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_inventory_postgres::test_invalid_batch_quantity_has_no_side_effects[0]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_inventory_postgres::test_invalid_batch_quantity_has_no_side_effects[-1]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_inventory_postgres::test_invalid_batch_quantity_has_no_side_effects[501]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_inventory_postgres::test_only_admin_can_batch_and_site_manager_or_assigned_technician_can_complete",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_inventory_postgres::test_completion_concurrency_and_duplicate_serial_rollback",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_inventory_postgres::test_full_admin_edit_and_existing_service_chain",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_onboarding_browser::test_site_manager_first_equipment_in_browser[desktop]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_onboarding_browser::test_site_manager_first_equipment_in_browser[mobile-viewport]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_onboarding_browser::test_existing_user_director_joins_existing_client_in_browser",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_onboarding_postgres::test_new_manager_equipment_and_technician_access",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_onboarding_postgres::test_existing_user_then_director_same_client",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_onboarding_postgres::test_invalid_invites_do_not_create_access[expired]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_onboarding_postgres::test_invalid_invites_do_not_create_access[revoked]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_onboarding_postgres::test_invalid_invites_do_not_create_access[reused]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_onboarding_postgres::test_invalid_invites_do_not_create_access[organization]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_onboarding_postgres::test_invalid_invites_do_not_create_access[client]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_onboarding_postgres::test_invalid_invites_do_not_create_access[site]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_onboarding_postgres::test_invalid_invites_do_not_create_access[inviter]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_onboarding_postgres::test_wrong_email_and_wrong_invite_site",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_onboarding_postgres::test_concurrent_accept_same_token_commits_once",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_onboarding_postgres::test_inactive_technician_membership_cannot_be_granted",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_onboarding_postgres::test_pending_invite_cannot_restore_revoked_identity[user]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_onboarding_postgres::test_pending_invite_cannot_restore_revoked_identity[membership]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_onboarding_postgres::test_pending_invite_cannot_restore_revoked_identity[access]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_onboarding_postgres::test_concurrent_different_invites_same_existing_user",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_onboarding_postgres::test_concurrent_new_account_separate_invites_is_retryable",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_onboarding_postgres::test_concurrent_fleet_replacement_is_consistent",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_pilot_deploy_script::test_backup_precedes_migration_and_failure_restores_image[]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_pilot_deploy_script::test_backup_precedes_migration_and_failure_restores_image[migration]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_pilot_deploy_script::test_backup_precedes_migration_and_failure_restores_image[health]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_production_acceptance::test_full_alembic_chain_and_empty_baseline_are_reproducible",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_production_acceptance::test_legacy_baseline_matches_pre_saas_git_schema",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_production_acceptance::test_existing_old_chain_at_0016_treats_new_ancestor_as_noop",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_production_acceptance::test_unversioned_legacy_database_can_be_stamped_then_upgraded_without_data_loss",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_profile_passwords::test_change_password_revokes_existing_sessions_and_accepts_new_password",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_profile_passwords::test_password_change_rejects_wrong_current_password",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_profile_passwords::test_reset_is_non_disclosing_single_use_and_hashed",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_push_events_postgres::test_assignment_emits_push_event",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_push_events_postgres::test_client_approval_wait_emits_scoped_push_event",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_push_events_postgres::test_completion_emits_dispatcher_push_event",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_push_events_postgres::test_subscribe_reassigns_browser_endpoint_to_current_account",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_push_events_postgres::test_gone_push_endpoint_is_deactivated",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_request_queue_postgres::test_request_queue_preserves_client_site_identity_and_role_scope",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_request_receipts_migration_postgres::test_upgrade_downgrade_upgrade_preserves_existing_data",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_request_receipts_migration_postgres::test_migration_transaction_rollback_leaves_previous_schema",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_request_workflow_browser::test_pulse_approval_payload_and_dispatcher_result[internal]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_request_workflow_browser::test_pulse_approval_payload_and_dispatcher_result[client]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_request_workflow_postgres::test_repeat_qr_active_request[False]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_request_workflow_postgres::test_repeat_qr_active_request[True]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_request_workflow_postgres::test_qr_response_loss_and_foreign_equipment_key",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_request_workflow_postgres::test_repeat_key_remains_bound_after_completion",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_request_workflow_postgres::test_concurrent_numbering[qr]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_request_workflow_postgres::test_concurrent_numbering[staff]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_request_workflow_postgres::test_concurrent_numbering[client]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_request_workflow_postgres::test_concurrent_same_qr_creates_one_request",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_request_workflow_postgres::test_guest_photo_partial_retry_and_legacy",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_request_workflow_postgres::test_approval_contract_and_authority[internal-True]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_request_workflow_postgres::test_approval_contract_and_authority[internal-False]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_request_workflow_postgres::test_approval_contract_and_authority[client-True]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_request_workflow_postgres::test_approval_contract_and_authority[client-False]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_request_workflow_postgres::test_waiting_parts_completion_and_cancellation_guards",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_request_workflow_postgres::test_completion_timestamp_and_retry",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_request_workflow_postgres::test_two_syncs_waiting_for_equipment_lock[True]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_request_workflow_postgres::test_two_syncs_waiting_for_equipment_lock[False]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_request_workflow_postgres::test_other_active_request_or_version_conflict_preserves_equipment[False]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_request_workflow_postgres::test_other_active_request_or_version_conflict_preserves_equipment[True]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_request_workflow_postgres::test_client_approval_executes_postgres_lock",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_request_workflow_postgres::test_cached_pulse_approval_and_invalid_snapshot",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_request_workflow_postgres::test_legacy_ticket_key_preserved_and_scope_checked",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_request_workflow_postgres::test_concurrent_guest_photo_retry_and_foreign_qr",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_request_workflow_postgres::test_client_approval_other_site_denied_and_concurrent_decision",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_request_workflow_postgres::test_authenticated_intake_marks_equipment_for_service[False]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_request_workflow_postgres::test_authenticated_intake_marks_equipment_for_service[True]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_request_workflow_postgres::test_concurrent_qr_key_is_scoped_to_equipment_and_tenant[False]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_request_workflow_postgres::test_concurrent_qr_key_is_scoped_to_equipment_and_tenant[True]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_security_postgres::test_shared_user_disable_is_membership_only",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_security_postgres::test_shared_user_contacts_cannot_be_changed_by_other_tenant",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_security_postgres::test_existing_email_requires_account_consent",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_security_postgres::test_client_cannot_read_internal_operations[/api/tasks-manager]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_security_postgres::test_client_cannot_read_internal_operations[/api/tasks-director]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_security_postgres::test_client_cannot_read_internal_operations[/api/warehouses-manager]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_security_postgres::test_client_cannot_read_internal_operations[/api/warehouses-director]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_security_postgres::test_client_cannot_read_internal_operations[/api/parts-manager]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_security_postgres::test_client_cannot_read_internal_operations[/api/parts-director]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_security_postgres::test_client_cannot_read_internal_operations[stock-manager]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_security_postgres::test_client_cannot_read_internal_operations[stock-director]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_security_postgres::test_reading_repair_does_not_authorize_upload[manager]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_security_postgres::test_reading_repair_does_not_authorize_upload[director]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_security_postgres::test_reading_repair_does_not_authorize_upload[tech2]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_security_postgres::test_author_delayed_photo_retry_and_revoked_membership",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_security_postgres::test_manager_cannot_read_foreign_equipment_or_media[1]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_security_postgres::test_manager_cannot_read_foreign_equipment_or_media[2]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_security_postgres::test_manager_cannot_read_foreign_equipment_or_media[3]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_security_postgres::test_legacy_sync_rejects_untrusted_context[no-context]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_security_postgres::test_legacy_sync_rejects_untrusted_context[wrong-ticket]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_security_postgres::test_legacy_sync_rejects_untrusted_context[other-tech-ticket]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_security_postgres::test_legacy_sync_rejects_untrusted_context[foreign-ticket]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_security_postgres::test_legacy_sync_rejects_untrusted_context[cancelled-task]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_security_postgres::test_legacy_sync_rejects_untrusted_context[mixed-ticket]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_security_postgres::test_legacy_sync_rejects_untrusted_context[foreign-part]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_security_postgres::test_valid_legacy_queue_and_owner_scoped_retry[task]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_security_postgres::test_valid_legacy_queue_and_owner_scoped_retry[ticket]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_security_postgres::test_null_site_grant_never_promotes_site_manager",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_security_postgres::test_director_cannot_attach_another_clients_user",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_security_postgres::test_deleted_access_cannot_be_restored_by_pending_invite",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_security_postgres::test_concurrent_revoke_and_accept_never_restores_member",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_security_postgres::test_concurrent_access_delete_and_accept_preserves_revocation",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_security_postgres::test_concurrent_owner_deletion_preserves_one_admin",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_security_postgres::test_admin_cannot_disable_self_via_patch",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_security_postgres::test_global_account_survives_last_membership_deletion",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_security_postgres::test_disabled_client_or_site_revokes_existing_scope[client]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_security_postgres::test_disabled_client_or_site_revokes_existing_scope[site]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_security_postgres::test_new_internal_user_still_works_and_returns_membership",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_security_postgres::test_canonical_sync_still_completes_and_retries_for_author",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_security_postgres::test_legacy_cannot_bypass_canonical_assignment",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_security_postgres::test_cross_tenant_stock_reference_is_rejected_before_consumption",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_security_postgres::test_manager_cannot_move_equipment_or_change_foreign_media[1]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_security_postgres::test_manager_cannot_move_equipment_or_change_foreign_media[2]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_security_postgres::test_manager_cannot_move_equipment_or_change_foreign_media[3]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_security_postgres::test_foreign_tenant_media_has_positive_owner_control",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_security_postgres::test_client_reads_own_service_act_and_author_photos",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_security_postgres::test_site_reassignment_does_not_allow_old_pending_invite_to_restore_scope",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_security_postgres::test_manager_client_counts_respect_site_scope",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_technician_result_browser::test_technician_sees_original_guest_photo",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_technician_result_browser::test_client_opens_passport_and_complete_result[False]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_technician_result_browser::test_client_opens_passport_and_complete_result[True]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_technician_result_browser::test_pulse_long_diagnosis_parts_photo_completion_and_reload",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_technician_result_postgres::test_empty_result_does_not_complete_or_consume_parts[]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_technician_result_postgres::test_empty_result_does_not_complete_or_consume_parts[ \\n\\t]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_technician_result_postgres::test_complete_result_retry_media_act_history_and_scope[False]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_technician_result_postgres::test_complete_result_retry_media_act_history_and_scope[True]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_technician_result_postgres::test_legacy_results_do_not_disappear_or_get_arbitrary_canonical_owner[task]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_technician_result_postgres::test_legacy_results_do_not_disappear_or_get_arbitrary_canonical_owner[ticket]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_warehouse_integrity_migration_postgres::test_clean_legacy_schema_upgrades_with_integrity_constraints",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_warehouse_integrity_migration_postgres::test_migration_refuses_duplicate_legacy_mobile_warehouses",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_warehouse_integrity_postgres::test_new_technician_gets_one_persistent_warehouse_and_full_stock_cycle",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_warehouse_integrity_postgres::test_non_positive_quantities_are_rejected_without_stock_changes[0]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_warehouse_integrity_postgres::test_non_positive_quantities_are_rejected_without_stock_changes[-1]",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_warehouse_integrity_postgres::test_idempotency_key_cannot_be_reused_for_different_movement",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_warehouse_integrity_postgres::test_concurrent_receipts_accumulate_when_stock_row_does_not_exist",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_warehouse_integrity_postgres::test_two_repairs_cannot_consume_the_same_last_part",
+      "linux_ci_status": "passed"
+    },
+    {
+      "test": "tests.test_warehouse_integrity_postgres::test_second_missing_part_rolls_back_repair_first_part_and_ledger",
+      "linux_ci_status": "passed"
+    }
+  ],
+  "remaining_checks": [
+    {
+      "check": "f01-alembic-clean",
+      "exit_code": 0
+    },
+    {
+      "check": "f01-runtime-gate",
+      "exit_code": 0
+    },
+    {
+      "check": "f01-js-onboarding_equipment",
+      "exit_code": 0
+    },
+    {
+      "check": "f01-js-pulse_offline_engine",
+      "exit_code": 0
+    },
+    {
+      "check": "f01-js-technician_workflow",
+      "exit_code": 0
+    },
+    {
+      "check": "f01-js-offline_attachment_sync",
+      "exit_code": 0
+    },
+    {
+      "check": "f01-js-guest_photo_upload",
+      "exit_code": 0
+    },
+    {
+      "check": "f01-js-push_subscription",
+      "exit_code": 0
+    },
+    {
+      "check": "f01-idb-sw",
+      "exit_code": 0
+    },
+    {
+      "check": "f01-request-queue",
+      "exit_code": 0
+    },
+    {
+      "check": "f01-theme-contrast",
+      "exit_code": 0
+    },
+    {
+      "check": "f01-pip-check",
+      "exit_code": 0
+    },
+    {
+      "check": "f01-npm-audit",
+      "exit_code": 1
+    },
+    {
+      "check": "f01-python-audit",
+      "exit_code": 0
+    }
+  ],
+  "pip_audit": [
+    {
+      "target": "direct",
+      "exit_code": 1,
+      "packages": [
+        {
+          "name": "python-jose",
+          "version": "3.3.0",
+          "entries": 5,
+          "ids": [
+            "PYSEC-2024-232",
+            "PYSEC-2024-233",
+            "PYSEC-2025-185"
+          ]
+        },
+        {
+          "name": "pillow",
+          "version": "10.4.0",
+          "entries": 33,
+          "ids": [
+            "PYSEC-2026-165",
+            "PYSEC-2026-2249",
+            "PYSEC-2026-2250",
+            "PYSEC-2026-2252",
+            "PYSEC-2026-2253",
+            "PYSEC-2026-2254",
+            "PYSEC-2026-2255",
+            "PYSEC-2026-2256",
+            "PYSEC-2026-2257",
+            "PYSEC-2026-2874",
+            "PYSEC-2026-3451",
+            "PYSEC-2026-3453",
+            "PYSEC-2026-3454",
+            "PYSEC-2026-3493",
+            "PYSEC-2026-3494",
+            "PYSEC-2026-3495",
+            "PYSEC-2026-3496"
+          ]
+        }
+      ],
+      "checked": 16
+    },
+    {
+      "target": "installed",
+      "exit_code": 1,
+      "packages": [
+        {
+          "name": "ecdsa",
+          "version": "0.19.2",
+          "entries": 2,
+          "ids": [
+            "PYSEC-2026-1325"
+          ]
+        },
+        {
+          "name": "pillow",
+          "version": "10.4.0",
+          "entries": 33,
+          "ids": [
+            "PYSEC-2026-165",
+            "PYSEC-2026-2249",
+            "PYSEC-2026-2250",
+            "PYSEC-2026-2252",
+            "PYSEC-2026-2253",
+            "PYSEC-2026-2254",
+            "PYSEC-2026-2255",
+            "PYSEC-2026-2256",
+            "PYSEC-2026-2257",
+            "PYSEC-2026-2874",
+            "PYSEC-2026-3451",
+            "PYSEC-2026-3453",
+            "PYSEC-2026-3454",
+            "PYSEC-2026-3493",
+            "PYSEC-2026-3494",
+            "PYSEC-2026-3495",
+            "PYSEC-2026-3496"
+          ]
+        },
+        {
+          "name": "pip",
+          "version": "25.0.1",
+          "entries": 12,
+          "ids": [
+            "PYSEC-2026-1795",
+            "PYSEC-2026-1796",
+            "PYSEC-2026-196",
+            "PYSEC-2026-2875",
+            "PYSEC-2026-2876",
+            "PYSEC-2026-3721"
+          ]
+        },
+        {
+          "name": "pypdf",
+          "version": "5.9.0",
+          "entries": 85,
+          "ids": [
+            "CVE-2026-57204",
+            "PYSEC-2026-1827",
+            "PYSEC-2026-1828",
+            "PYSEC-2026-1829",
+            "PYSEC-2026-1830",
+            "PYSEC-2026-1831",
+            "PYSEC-2026-1832",
+            "PYSEC-2026-1833",
+            "PYSEC-2026-3004",
+            "PYSEC-2026-3005",
+            "PYSEC-2026-3006",
+            "PYSEC-2026-3007",
+            "PYSEC-2026-3009",
+            "PYSEC-2026-3010",
+            "PYSEC-2026-3011",
+            "PYSEC-2026-3012",
+            "PYSEC-2026-3013",
+            "PYSEC-2026-3014",
+            "PYSEC-2026-3015",
+            "PYSEC-2026-3016",
+            "PYSEC-2026-3017",
+            "PYSEC-2026-3018",
+            "PYSEC-2026-3019",
+            "PYSEC-2026-3020",
+            "PYSEC-2026-3021",
+            "PYSEC-2026-3022",
+            "PYSEC-2026-3023",
+            "PYSEC-2026-3024",
+            "PYSEC-2026-3025",
+            "PYSEC-2026-3026",
+            "PYSEC-2026-3027",
+            "PYSEC-2026-3610",
+            "PYSEC-2026-3611",
+            "PYSEC-2026-3612",
+            "PYSEC-2026-3613",
+            "PYSEC-2026-3655",
+            "PYSEC-2026-3656",
+            "PYSEC-2026-3910",
+            "PYSEC-2026-3911",
+            "PYSEC-2026-3912",
+            "PYSEC-2026-3913",
+            "PYSEC-2026-4153",
+            "PYSEC-2026-4154",
+            "PYSEC-2026-4155",
+            "PYSEC-2026-4156",
+            "PYSEC-2026-4157",
+            "PYSEC-2026-4158",
+            "PYSEC-2026-4159",
+            "PYSEC-2026-4160"
+          ]
+        },
+        {
+          "name": "pytest",
+          "version": "8.3.3",
+          "entries": 2,
+          "ids": [
+            "PYSEC-2026-1845"
+          ]
+        },
+        {
+          "name": "python-jose",
+          "version": "3.3.0",
+          "entries": 5,
+          "ids": [
+            "PYSEC-2024-232",
+            "PYSEC-2024-233",
+            "PYSEC-2025-185"
+          ]
+        },
+        {
+          "name": "starlette",
+          "version": "0.38.6",
+          "entries": 14,
+          "ids": [
+            "PYSEC-2026-161",
+            "PYSEC-2026-1941",
+            "PYSEC-2026-1943",
+            "PYSEC-2026-2280",
+            "PYSEC-2026-2281",
+            "PYSEC-2026-248",
+            "PYSEC-2026-249"
+          ]
+        }
+      ],
+      "checked": 101
+    }
+  ],
+  "npm_audit": {
+    "exit_code": 1,
+    "high": 1,
+    "advisory": "GHSA-7mvr-c777-76hp"
+  },
+  "browser": {
+    "indexeddb_sw_scenarios_passed": 16,
+    "contrast_screens": 298,
+    "contrast_failures": 0
+  },
+  "clean_alembic": {
+    "postgresql": "16.15",
+    "head": "20261002_0018",
+    "tables": 31,
+    "result": "passed"
+  },
+  "review": {
+    "standards_open": 0,
+    "spec_open": 0
+  },
+  "release": "NO-GO; Draft; manual acceptance pending"
+}
