@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models.core import EquipmentStatus, TaskPriority, TaskStatus
 
@@ -16,7 +16,16 @@ class EquipmentTypeCreate(BaseModel):
     name: str
 
 
-class EquipmentBase(BaseModel):
+class OptionalSerialNumber(BaseModel):
+    serial_number: str | None = Field(default=None, max_length=255)
+
+    @field_validator("serial_number", mode="before")
+    @classmethod
+    def normalize_serial_number(cls, value):
+        return (value.strip() or None) if isinstance(value, str) else value
+
+
+class EquipmentBase(OptionalSerialNumber):
     equipment_type_id: int | None
     site_id: uuid.UUID
     # Название больше не вводится пользователем: сервер берёт его из типа
@@ -24,35 +33,31 @@ class EquipmentBase(BaseModel):
     name: str | None = None
     manufacturer: str | None = None
     model: str | None = None
-    serial_number: str | None
     location: str | None = None
     location_details: str | None = Field(default=None, max_length=500)
 
 
 class EquipmentCreate(EquipmentBase):
     equipment_type_id: int
-    serial_number: str = Field(min_length=1, max_length=255)
 
 
-class EquipmentUpdate(BaseModel):
+class EquipmentUpdate(OptionalSerialNumber):
     model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
     status: EquipmentStatus | None = None
     site_id: uuid.UUID | None = None
     equipment_type_id: int | None = None
     manufacturer: str | None = Field(default=None, max_length=255)
     model: str | None = Field(default=None, max_length=255)
-    serial_number: str | None = Field(default=None, min_length=1, max_length=255)
     location: str | None = Field(default=None, max_length=255)
     location_details: str | None = Field(default=None, max_length=500)
     expected_version: int | None = Field(default=None, ge=1)
 
 
-class EquipmentInventoryComplete(BaseModel):
+class EquipmentInventoryComplete(OptionalSerialNumber):
     model_config = ConfigDict(extra='forbid', str_strip_whitespace=True)
     equipment_type_id: int
     manufacturer: str | None = Field(default=None, max_length=255)
     model: str | None = Field(default=None, max_length=255)
-    serial_number: str = Field(min_length=1, max_length=255)
     location: str | None = Field(default=None, max_length=255)
     location_details: str | None = Field(default=None, max_length=500)
     expected_version: int = Field(ge=1)

@@ -105,7 +105,7 @@ class Equipment(Base):
     __table_args__ = (
         UniqueConstraint("organization_id", "serial_number", name="uq_equipment_org_serial"),
         UniqueConstraint('inventory_batch_id', 'inventory_number', name='uq_equipment_inventory_number'),
-        CheckConstraint('inventory_pending OR (equipment_type_id IS NOT NULL AND serial_number IS NOT NULL)', name='ck_equipment_inventory_complete'),
+        CheckConstraint('inventory_pending OR equipment_type_id IS NOT NULL', name='ck_equipment_inventory_complete'),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

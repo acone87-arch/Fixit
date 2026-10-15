@@ -163,7 +163,7 @@ async def test_completion_concurrency_and_duplicate_serial_rollback(pg):
     async with pg.sessions() as db:
         remaining=await db.get(Equipment,uuid.UUID(rows[1]['id']))
         assert remaining.inventory_pending and remaining.serial_number is None and remaining.version==1
-    for changes in [{'serial_number':' '}, {'equipment_type_id':999999}, {'expected_version':99}]:
+    for changes in [{'serial_number':'x' * 256}, {'equipment_type_id':999999}, {'expected_version':99}]:
         assert (await complete(pg,rows[1],{**details(pg,rows[1]),**changes})).status_code in {409,422}
 
 
@@ -205,3 +205,30 @@ async def test_full_admin_edit_and_existing_service_chain(flow):
     assert passport['history'][0]['has_service_act']
     assert (await f.http.delete(f"/api/equipment/{row['id']}",headers=auth(f.owner,f.org))).status_code==409
     assert (await f.http.get('/api/equipment-inventory/batches',headers=auth(f.owner,f.org))).json()[0]['completed']==1
+
+
+async def test_optional_serial_create_complete_and_clear(pg):
+    for value in [None, '', '   ']:
+        response = await pg.http.post('/api/equipment', headers=auth(pg.owner, pg.org), json={
+            'site_id': str(pg.sites[0].id), 'equipment_type_id': pg.kind.id,
+            'serial_number': value, 'location_details': 'Корпус 2, этаж 1'})
+        assert response.status_code == 201, response.text
+        assert response.json()['serial_number'] is None
+    _, _, rows = await batch(pg)
+    for row in rows:
+        body = details(pg, row)
+        del body['serial_number']
+        response = await complete(pg, row, body)
+        assert response.status_code == 200, response.text
+        assert response.json()['serial_number'] is None
+        assert not response.json()['inventory_pending']
+        assert (await complete(pg, row, body)).status_code == 200
+    row = response.json()
+    original_token = row['public_qr_token']
+    for value in ['REAL-SN-123', None]:
+        response = await pg.http.patch(f"/api/equipment/{row['id']}", headers=auth(pg.owner, pg.org),
+            json={'serial_number': value, 'expected_version': row['version']})
+        assert response.status_code == 200, response.text
+        row = response.json()
+        assert row['serial_number'] == value
+        assert row['public_qr_token'] == original_token
