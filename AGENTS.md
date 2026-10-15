@@ -1,48 +1,139 @@
-# Fixit — instructions for coding agents
+# Fixit — инструкции для работы с репозиторием
 
-Работай с Fixit как с действующим multi-tenant SaaS. Изменения должны быть минимальными, обратимо развёртываемыми и подтверждёнными тестами.
+## Продукт и критерий результата
 
-## Project map
+Fixit 2.0 / Fixit Pulse — система обслуживания оборудования на объектах заказчиков.
+Приоритет: надёжно провести заявку от обращения до результата ремонта, фотографий,
+запчастей, акта и истории оборудования. Интерфейс должен быть удобен с телефона
+для техника, диспетчера, владельца сервиса и представителя клиента.
 
-- Backend: FastAPI, SQLAlchemy, PostgreSQL; `app/routers/`, `app/services/`, `app/models/`, `app/schemas/`.
-- DB migrations: `alembic/versions/`; never rewrite or reorder applied revisions.
-- Active Fixit Pulse (admin/client and technician PWA): `app/static/`, with offline logic in `app/static/offline/`; public guest: `app/static-guest/`. `app/static-tech/` is legacy retained for compatibility/rollback, not mounted. `/tech` redirects to `/#requests`; `/tech/sw.js` serves the shared offline worker for installed legacy clients. Verify routes in `app/main.py`.
-- Tests: `tests/`, `scripts/test_location_workflow.py`; CI: `.github/workflows/`.
-- Production and backups: `docs/PRODUCTION_RUNBOOK.md` and `scripts/deploy_pilot_release.sh`.
-- The top-level README contains historical sections; verify claims against current code and migrations.
+Опорный сценарий: приглашение → клиент/объект → оборудование/QR → ServiceRequest →
+назначение техника → ремонт → работы/детали/фото → акт → история → результат клиенту.
+Проверяй затронутый участок сценария; весь сценарий — при сквозных изменениях и выпуске.
 
-## Non-negotiable invariants
+## Рабочий контекст
 
-1. The tenant boundary is Organization. Organization → Client → Site → Equipment; never trust a client-supplied organization_id for authorization.
-2. ServiceRequest is the canonical work item. Task is legacy/read-only; Ticket retains guest QR provenance. Do not restore Task/Ticket as parallel workflows.
-3. A ServiceRequest has one canonical Repair. Preserve idempotent QR submissions, sync retries, stable receipts and version-based conflict handling.
-4. All access checks run server-side. Preserve Client/Site scope and role checks, technician assignments, revocations, media ACL and public QR token separation.
-5. Protect warehouse stock integrity, concurrent updates, PostgreSQL row locking and ordering. Never use SQLite as proof for PG-only behavior.
-6. Preserve IndexedDB queues, service worker semantics, existing offline payload formats, guest upload retry and QR routes. Do not erase client storage as an easy fix.
-7. No redesign, new framework, or unrelated feature without an explicit requirement.
+- Перед изменениями проверь текущую ветку, HEAD и рабочий diff. Сохраняй чужие и
+  незакоммиченные изменения. Для конфликтующей работы используй отдельную ветку/копию.
+- Читай только относящиеся к задаче участки кода и документации. Полный аудит нужен
+  по запросу или при обнаруженном системном риске, а не перед каждой правкой.
+- Проверяй связанные ветки и PR перед повторной реализацией известного исправления.
+  Различай: предложено, реализовано в ветке, проверено, включено в main, развёрнуто.
+  Успешный CI ветки не означает, что исправление уже присутствует в main/production.
+- Код показывает фактическое поведение, требования — ожидаемое, тесты — проверенное.
+  При расхождении установи причину; существующая реализация сама по себе не оправдывает баг.
+- Старые чаты, roadmap и отчёты — исторические источники. Сверяй дату и SHA;
+  не переноси прежние команды «остановиться после этапа» в новую задачу автоматически.
+- В рамках поручения самостоятельно выполняй локальные правки, проверки и исправление
+  вызванных ими ошибок. Уточняй только существенную неопределённость требований или
+  действие вне согласованного объёма. Уже данное разрешение не запрашивай повторно.
+- По умолчанию работай одним агентом; параллельных агентов используй по явному запросу.
 
-## How to work
+## Карта проекта — открывать по задаче
 
-- Read `GLOSSARY.md`, `docs/agents/domain.md`, and relevant existing tests before changing business rules.
-- For meaningful features, agree on a focused spec and acceptance criteria; use GitHub Issues for approved task tracking. See `docs/agents/issue-tracker.md`.
-- Prefer an end-to-end vertical slice (router + service + DB if required + UI + regression tests). Keep changes isolated.
-- For new behavior, write a failing regression test first where feasible; test negative ACL cases and retry/concurrency behavior.
-- Verify targeted tests first, then full PostgreSQL/Chromium/JS gates if the environment permits. Record actual results and skipped/blocked checks; never claim unrun tests passed.
-- For JS/PWA changes test at 390x844 and 1440x1000, and check Service Worker/IndexedDB with real browser runtime.
-- Update related PWA shell/cache versions together when shipping changed assets; do not reset IndexedDB.
-- For migrations use compatible expand/contract steps; never use stamp/downgrade on production.
+| Область | Основные файлы |
+|---|---|
+| HTTP и активные интерфейсы | `app/main.py`, `app/routers/`, `app/schemas/` |
+| Роли и границы доступа | `app/core/deps.py`, `app/services/access_policy.py`, `app/services/client_portal.py` |
+| Жизненный цикл заявки | `app/services/service_request_workflow.py`, `app/services/service_requests.py` |
+| Ремонт и синхронизация | `app/services/sync_service.py`, `app/models/repair.py` |
+| Склад | `app/services/stock_service.py`, `app/routers/warehouses.py` |
+| Pulse и офлайн | `app/static/`, `app/static/offline/`, `app/static/sw.js` |
+| Гостевые обращения | `app/static-guest/`, `app/routers/tickets.py` |
+| БД | `app/models/`, `alembic/versions/` |
+| Проверки и выпуск | `tests/`, `.github/workflows/`, `scripts/deploy_pilot_release.sh` |
 
-## Delivery and safety
+Backend: Python/FastAPI, SQLAlchemy async, PostgreSQL. Pulse: vanilla JS/CSS/PWA.
+Активный интерфейс всех авторизованных ролей находится в `app/static/`.
+`app/static-tech/` — legacy; `/tech` перенаправляется в Pulse, `/tech/sw.js` обслуживает
+совместимость установленных клиентов. Не создавай там второй действующий интерфейс.
 
-- Create a feature branch and PR; do not merge into `main`, push a release branch, run manual deploy or alter VPS/production data without explicit approval.
-- `main` push triggers production deployment. PR checks are validation, not permission to deploy.
-- Never commit credentials, real personal data, DB dumps, `.env` values, or production logs.
-- Summarize changed files, tests actually executed, remaining risks, rollout/rollback considerations, and PR link.
+## Инварианты данных и доступа
 
-## Project-specific skills
+- Граница tenant — Organization; иерархия: Organization → Client → Site → Equipment.
+  Пользователь и его OrganizationMembership — разные сущности. Изменение доступа
+  в одной организации не должно отключать его в другой.
+- Авторизацию обеспечивай на сервере: организация, роль, клиент/объект, активность,
+  отзыв доступа и назначение техника. Не доверяй присланным ownership ID.
+  Учитывай фактическую owner-семантику `require_roles`, а не только список аргументов.
+- ServiceRequest управляет активной работой. Task — история; Ticket — происхождение
+  гостевого обращения. Новые процессы не строятся параллельно на Task/Ticket.
+- У заявки не более одного canonical Repair. Сохраняй исторические nullable-связи,
+  если их удаление не является отдельной проверенной миграцией данных.
+- Переходы статусов, назначение и согласования проходят через общую серверную политику.
+  UI не должен имитировать неподдерживаемое переназначение или обходить lifecycle.
+- Повтор отправки/потеря ответа не создают второй ремонт, списание или вложение.
+  Сохраняй receipt/local_uuid, optimistic version checks и корректную атомарность.
+- Складские операции сохраняют неотрицательные остатки, положительные количества,
+  порядок блокировок и целостность при конкурентных запросах.
+- Публичный QR использует внешний токен; перепечатка сохраняет идентичность оборудования.
+  Проверяй публичный доступ отдельно от JWT-маршрутов, включая деактивацию и отзыв.
+  Фото/документы и операции с ними имеют самостоятельные серверные проверки прав.
+- Invite-ссылки одноразовые; hash не позволяет восстановить исходный токен.
+  Изображение подписи не объявляй юридической электронной подписью.
 
-- `.agents/skills/fixit-feature/` — specification-to-PR feature workflow.
-- `.agents/skills/fixit-mobile-qa/` — responsive and offline PWA acceptance.
-- `.agents/skills/fixit-security/` — tenant, role, media, QR and warehouse boundary review.
-- `.agents/skills/fixit-release/` — pre-release checks and manual-go/no-go; never auto-deploy.
-- Third-party Matt Pocock skills are installed separately in Codex (not vendored); see `docs/agents/README.md`.
+## Офлайн, мобильный интерфейс и внешние сервисы
+
+- `pendingRepairs` и `pendingAttachments` — пользовательские данные, а не удаляемый кеш.
+  Используй общий offline engine. Сохраняй ownership, форматы старых payload и очередей.
+  Проверяй retry, перезапуск, смену пользователя/организации и гонку page/Service Worker,
+  когда изменение затрагивает эти сценарии. Не очищай IndexedDB для исправления ошибки.
+- Показывай различие между «сохранено на устройстве», «отправляется», «принято сервером»
+  и ошибкой. Сохранение ремонта ещё не доказывает успешную отправку всех фотографий.
+- При изменении кешируемых ресурсов согласованно обновляй версии активного shell и
+  Service Worker. Проверяй обновление установленного приложения без потери очереди.
+- Для UI проверяй затронутые роли, 390×844 и 1440×1000, светлую/тёмную темы и крупный
+  текст, состояния загрузки/ошибки/пустого списка. Не заставляй пользователя переходить
+  на desktop для основного действия. Не обещай одинаковый Background Sync на всех браузерах.
+- Внешние endpoints и файлы — недоверенные входы. Для сетевой доставки учитывай SSRF,
+  DNS/redirect, таймауты и ограничение параллелизма; для limiter — ограничение памяти.
+  Сбой Push/SMTP не должен повреждать сохранённый бизнес-результат или его транзакцию.
+- Security-проверки выполняй с синтетическими данными и изолированной сетью/transport.
+  Mock PushManager или gateway не подтверждают физическую доставку Android/iOS.
+
+## Проверки и миграции
+
+- Выбирай проверки по затронутому поведению. Для бага по возможности сначала воспроизведи
+  его, затем добавь regression. Для текста достаточно проверки diff и ссылок.
+- ACL, SQL, блокировки, уникальность, конкурентные повторы и миграции подтверждай на
+  настоящем изолированном PostgreSQL. SQLite и mocks не заменяют эти доказательства.
+- Для UI прослеживай UI → handler → payload → API → ACL → данные → response → UI.
+  Для offline/SW используй реальные browser/runtime-проверки затронутых сценариев.
+- Параметры тестовой БД задавай явно; не наследуй production DSN, SMTP/VAPID и клиентские
+  данные. После проверки изоляции запускай нужные тесты и исправляй регрессии без
+  промежуточных подтверждений. Если локальная инфраструктура недоступна, используй
+  доступный изолированный CI в рамках разрешённой работы; сообщай оставшиеся ограничения.
+- `scripts/test_location_workflow.py` — целевая подборка. Состав полного release gate
+  определяют текущие `.github/workflows/deploy.yml` и `pilot-onboarding.yml`.
+  Не считай pytest с пропущенными обязательными интеграционными тестами полной приёмкой.
+- Для изменения схемы добавляй Alembic revision после актуального head. Не переписывай
+  уже применённые миграции ради текущей функции. Проверяй чистую установку, upgrade
+  существующей схемы и совместимость с предыдущим image, если требуется rollback.
+  `create_all` не заменяет миграции; production stamp/downgrade не является способом исправить сбой.
+- Отчёт различает новую регрессию, прежний дефект и ограничение окружения. Сохраняй
+  результат исходного прогона; удачный повтор части тестов не превращает его в полный PASS.
+
+## Объём работы, документация и выпуск
+
+- Предпочитай небольшое законченное изменение через существующие сервисы и endpoints.
+  Новая инфраструктура, framework или изменение бизнес-правил должны быть обоснованы
+  задачей. Не превращай исправление в несогласованное расширение продукта.
+- Для реализации используй feature-ветку. Создание PR не означает разрешение на выпуск.
+  Push/merge в main запускает production deployment; проверяй актуальные workflow conditions.
+  Выполняй release и изменения production только при явном разрешении пользователя
+  в текущем поручении или ранее согласованном объёме. Зелёный CI не заменяет разрешение.
+- Перед выпуском требуется gate для выпускаемого SHA, проверка DB+media backup/restore,
+  совместимости миграций и rollback. Production не используется как тестовый стенд.
+- Секреты, токены, `.env`, дампы и реальные клиентские данные не включаются в Git/отчёты.
+- Обновляй описание изменённого поведения вместе с кодом. README — актуальный запуск
+  и возможности; roadmap — история и явно обозначенные текущие задачи. Не создавай
+  ещё один roadmap или дублирующий журнал для каждой небольшой правки.
+- Если в текущей ветке доступны `GLOSSARY.md`, `docs/agents/` и `.agents/skills/`,
+  используй соответствующие задаче материалы. Не предполагай, что навыки со старого
+  компьютера установлены здесь; отсутствие необязательного навыка не блокирует работу.
+- Финальный отчёт — по-русски: результат, выполненные проверки, ограничения и статус
+  Git/PR/release. Отделяй собственные проверки от результатов CI и исторических отчётов.
+
+В этом файле хранятся устойчивые правила. Текущие SHA, номера открытых PR, результаты
+отдельных прогонов, цены и очередной этап продукта фиксируются в соответствующих
+задачах/отчётах и перепроверяются перед использованием.
