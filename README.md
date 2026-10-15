@@ -1,263 +1,192 @@
-# Service & Warehouse Management API (FastAPI)
+# Fixit 2.0 / Fixit Pulse
 
-Бэкенд по ТЗ «Учёт ремонтов, сервисной истории оборудования и управления
-складом запчастей». Реализует REST API из `database_schema.sql`, плюс
-механизмы, перенесённые из прототипа Codex: идемпотентный офлайн-синк,
-optimistic concurrency (`version`), блокировки остатков и гостевые заявки
-через публичный QR.
+Система обслуживания оборудования на объектах заказчиков: заявки, работа
+техников, история ремонтов, сервисные акты, склад запчастей и QR-инвентаризация.
+Fixit Pulse — единое веб-приложение для сотрудников и клиентского кабинета,
+с установкой как PWA и общей офлайн-очередью ремонтов и фотографий.
 
-## Быстрый старт через Docker (рекомендуется)
+Описание сверено с кодом и Git-историей до `7d3bf18` (08.10.2026).
+Это состояние исходного кода, а не подтверждение текущего SHA production.
 
-У тебя уже настроен Docker Desktop — этот способ проще всего.
+## Возможности и модель данных
 
-1. Распакуй `backend.zip` в отдельную папку (не поверх проекта Codex —
-   схемы разные, лучше не мешать данные в одном volume).
-2. В этой папке:
+- Иерархия обслуживания: `Organization → Client → Site → Equipment`.
+  Доступ к организации задаётся через `OrganizationMembership`, активная
+  организация определяется сервером из авторизации, а не из произвольного ID
+  в клиентском запросе.
+- Роли: `owner`, `admin`, `dispatcher`, `technician`, `client_admin`,
+  `client_site_user`. Доступ дополнительно ограничивается организацией,
+  клиентом, объектом и назначением техника; роль не даёт доступа ко всем данным.
+- `ServiceRequest` — единственная активная рабочая сущность для диспетчера,
+  техника, клиента и гостевого QR-обращения. Есть назначение, статусы,
+  согласования, приоритетная очередь и фильтры по клиенту/объекту.
+- Результат ремонта: диагностика и работы, использованные детали, фотографии,
+  история оборудования и PDF сервисного акта, связанные с заявкой.
+- Клиентский кабинет: оборудование и паспорта, обращения, согласования,
+  документы, пользователи и одноразовые приглашения, список и отзыв приглашений.
+  Для сотрудников доступно редактирование объектов в рамках серверных прав.
+- Склад: центральные и мобильные склады техников, остатки, приход,
+  перемещения и списание деталей при ремонте. Сервер использует блокировки,
+  ограничения остатков и идемпотентные операции.
+- QR-инвентаризация: создание партии пустых карточек оборудования на объекте,
+  печать PDF, заполнение карточек после сканирования и пакетная перепечатка
+  наклеек существующего оборудования без смены QR-идентификаторов.
+- Единый шаблон QR-этикетки для одиночной и массовой печати. Публичная ссылка
+  имеет вид `{PUBLIC_APP_URL}/e/{public_qr_token}` и ведёт к гостевой заявке.
+- Профиль и настройки: тема, размер текста, смена и восстановление пароля,
+  установка PWA, управление Web Push.
 
-   ```bash
-   docker compose up --build
-   ```
+`Task` и административный `Ticket` API сохранены только для чтения истории.
+`Ticket` хранит происхождение QR-обращения, но не управляет жизненным циклом
+работы. Исторические связи и данные не удалены. `/tech` перенаправляет в Pulse;
+`app/static-tech/` остаётся для совместимости и rollback, а не как отдельное
+действующее приложение. Подробнее: [Task retirement](TASK_DEPRECATION_TODO.md).
 
-   Поднимутся два контейнера: `api` (на `localhost:8000`) и `db` (Postgres,
-   `localhost:5432`). Первый запуск соберёт образ — займёт минуту-другую.
+## Стек и структура
 
-3. В новом терминале создай таблицы и наполни тестовыми данными:
+Python 3.12, FastAPI, SQLAlchemy async, PostgreSQL 16 и Alembic.
+Интерфейс — HTML/CSS/vanilla JavaScript без отдельной сборки приложения.
+PDF формируется через ReportLab; Web Push — через pywebpush.
+Node.js нужен для JS/browser-проверок, в CI используется Node.js 22.
 
-   ```bash
-   docker compose exec api python scripts/bootstrap_db.py
-   docker compose exec api python scripts/seed.py
-   ```
+| Путь | Назначение |
+|---|---|
+| `app/routers/` | HTTP API, авторизация и границы доступа |
+| `app/services/` | Workflow, синхронизация, склад, PDF, Push и почта |
+| `app/models/`, `app/schemas/` | ORM-модели и API-схемы |
+| `app/static/` | Pulse SPA, PWA и общий офлайн-движок |
+| `app/static-guest/` | Гостевое обращение по QR |
+| `alembic/versions/` | Версионированная схема БД |
+| `scripts/` | Демо-данные, проверки, выпуск и backup/restore |
+| `tests/` | Python, PostgreSQL, JS runtime и browser-проверки |
 
-   Второй скрипт выведет логин/пароль admin и техника — тестовое оборудование
-   и склад с одной запчастью уже будут созданы.
+## Локальный запуск через Docker
 
-4. Открой **http://localhost:8000/** — это веб-панель администратора на
-   русском (не Swagger). Войди под admin или technician из seed. Swagger
-   по-прежнему доступен на `/docs`, если понадобится подёргать API напрямую.
-
-Остановить: `docker compose down` (данные останутся в volume `postgres_data`,
-следующий `up` не потеряет БД). Полный сброс: `docker compose down -v`.
-
-## Альтернатива без Docker
-
-```bash
-python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-cp .env.example .env   # и поправить DATABASE_URL/SECRET_KEY под себя
-```
-
-Нужен Postgres (можно поднять только `db` из docker-compose.yml этого проекта:
-`docker compose up db`).
-
-### Локальные targeted tests
-
-Создай отдельную тестовую базу в локальном Compose Postgres (не используй
-production DB):
-
-```bash
-docker compose exec db psql -U fsm -d fsm -c "CREATE ROLE pilot LOGIN PASSWORD 'pilot-ci-only';"
-docker compose exec db psql -U fsm -d fsm -c "CREATE DATABASE fixit_test OWNER pilot;"
-```
-
-Установи dev-зависимости и Chromium Playwright в `.venv`, затем запускай
-целевые PostgreSQL и browser acceptance tests (команда задаёт изолированный CI
-DSN сама):
-
-```bash
-python -m venv .venv
-.venv/bin/python -m pip install -r requirements-dev.txt
-.venv/bin/python -m playwright install chromium
-.venv/bin/python scripts/test_location_workflow.py
-```
-
-В Windows используй `.venv\Scripts\python.exe` вместо `.venv/bin/python`.
-
-Таблицы: быстрее всего через `python scripts/bootstrap_db.py` (см. описание в
-разделе Docker выше — та же логика, просто без `docker compose exec`). Для
-реального проекта источник правды — Alembic-миграции:
+Из корня клонированного репозитория, при работающем Docker Compose:
 
 ```bash
-alembic init alembic
-# в alembic/env.py: target_metadata = Base.metadata (импорт из app.database + app.models)
-alembic revision --autogenerate -m "init"
-alembic upgrade head
+mkdir -p uploads
+docker compose up --build -d
+docker compose exec api alembic upgrade head
+docker compose exec api python -m scripts.seed
 ```
 
-Запуск:
+Локальный Compose задаёт собственные параметры разработки: PostgreSQL
+`fsm:fsm` в базе `fsm`, API на порту 8000, БД на порту 5432. Файл `.env`
+для этого сценария не требуется. Каталог `uploads` нужен в том числе для
+проверки readiness и хранения загружаемых файлов.
 
-```bash
-uvicorn app.main:app --reload --port 8000
-python scripts/seed.py   # тестовые admin/техник/оборудование
-```
+Открыть [Pulse](http://localhost:8000/), [Swagger](http://localhost:8000/docs)
+или [readiness](http://localhost:8000/health). `/health` проверяет доступность
+БД и возможность записи в `uploads`; при ошибке возвращает 503.
 
-Swagger: `http://localhost:8000/docs`.
+Демо-скрипт создаёт организацию `fixit-default`, клиента, объект, оборудование,
+склады и запчасть. Локальные учётные записи по умолчанию:
 
-## SaaS foundation
-
-Новые бизнес-данные принадлежат `Organization`, а доступ пользователя к
-организации и его роль хранятся в `OrganizationMembership`. Активная
-организация записывается в JWT (`org`) и определяется сервером; API не доверяет
-`organization_id`, присланному клиентом. Один пользователь может состоять в
-нескольких организациях, выбрав нужную через `organization_slug` при входе.
-
-Для обновления существующей production-базы используется Alembic:
-
-```bash
-alembic upgrade head
-```
-
-Первая миграция создаёт организацию `Fixit Default`, добавляет в неё текущих
-пользователей и переносит существующее оборудование, заявки, ремонты и склад,
-не удаляя данные.
-
-Клиенты и объекты обслуживания образуют следующий уровень tenant-модели:
-`Organization → Client → Site → Equipment`. Миграция `20260826_0002`
-преобразует существующие текстовые расположения оборудования в объекты и
-привязывает их к импортированному клиенту соответствующей организации.
-
-## Автодеплой на VPS
-
-Workflow `.github/workflows/deploy.yml` запускается после каждого push в
-`main`, после fast-forward pilot release-ветки или вручную через
-**Actions → Deploy to VPS → Run workflow**. Он повторяет полный
-PostgreSQL/Chromium/JS gate для точного `github.sha`, подключается к серверу по
-SSH, создаёт и восстанавливает в изоляции DB+media backup, собирает новый
-образ, применяет `alembic upgrade head`, затем обновляет API и проверяет
-readiness, TLS и multipart limits. Порядок выпуска и восстановления описан в
-[`docs/PRODUCTION_RUNBOOK.md`](docs/PRODUCTION_RUNBOOK.md).
-
-В GitHub Environment `production` должны быть настроены Secrets:
-
-- `VPS_HOST` — IP или DNS-имя сервера;
-- `VPS_USER` — SSH-пользователь с доступом к `/opt/fixit` и Docker;
-- `VPS_SSH_KEY` — приватный SSH-ключ без passphrase;
-- `VPS_KNOWN_HOSTS` — строка сервера из `ssh-keyscan`.
-
-Файл `/opt/fixit/.env` хранится только на сервере и при деплое не
-перезаписывается. Данные PostgreSQL остаются в Docker volume
-`postgres_data`. При ошибке backup restore, миграции или readiness release
-script возвращает предыдущий checkout и API image без Alembic downgrade и без
-удаления PostgreSQL/media volumes.
-
-## Веб-панель администратора
-
-`app/static/` — небольшой vanilla-JS SPA (без сборки), который FastAPI отдаёт
-напрямую на `/`. ServiceRequest («Заявка») — единая рабочая сущность для
-диспетчера, клиента, QR-обращения и техника; ремонт и сервисный акт привязаны
-к ней напрямую. Техники работают в Fixit Pulse, в том числе с офлайн-очередью.
-
-`Task` сохранён только для чтения исторических записей. `Ticket` сохраняет
-оригинальное QR-обращение, его идемпотентный ключ и данные заявителя, но не
-управляет назначением или жизненным циклом работы.
-
-## Офлайн-работа техника
-
-Fixit Pulse использует общую durable IndexedDB-очередь для сервисных актов.
-`/tech` перенаправляет в Pulse; его старые статические файлы не монтируются в
-production и сохранены только для rollback/совместимости уже сохранённых
-офлайн-данных.
-
-- **Офлайн-хранилище** — `db.js`, обёртка над IndexedDB: кэш назначенных
-  заявок, паспортов оборудования (включая ленту истории) и остатков на
-  складе техника. При открытии заявки без сети данные берутся из кэша.
-- **Закрытие ремонта офлайн** — акт сохраняется в IndexedDB
-  (`pendingRepairs`) с локально сгенерированным `local_uuid` и версией
-  оборудования на момент открытия карточки. Индикатор связи вверху экрана
-  показывает, сколько актов ждут отправки.
-- **Синхронизация** — при восстановлении сети (`online`-событие) сразу
-  пробует отправить очередь на `/api/v1/sync/repairs`. Если приложение в
-  этот момент закрыто — за это отвечает **Background Sync API**
-  (`sw.js`, событие `sync`), поддержан в Chrome/Edge (desktop и Android).
-  В Safari/iOS Background Sync недоступен — синк тогда произойдёт при
-  следующем открытии приложения с сетью.
-- **Скан QR** — через `BarcodeDetector` (нативный API браузера, без внешних
-  библиотек — сети для их загрузки может не быть). Поддержан в Chrome/Edge;
-  там, где недоступен (Safari), всегда есть ручной ввод серийного номера.
-
-## Гостевая заявка по QR
-
-`app/static-guest/` — страница на `/guest/`, куда ведёт редирект `/e/{token}`
-(именно этот URL закодирован в самой QR-наклейке на оборудовании). Гость
-сканирует обычной камерой телефона, без входа в систему, отмечает
-серьёзность/симптомы и отправляет — заявка попадает в раздел «Заявки от
-гостей» админ-панели.
-
-## Карта эндпоинтов
-
-| Группа | Метод/путь | Доступ |
+| Email | Пароль | Роль в демо-организации |
 |---|---|---|
-| Auth | `POST /api/auth/login` | публично |
-| Пользователи | `GET /api/users/me` | любой авторизованный |
-| | `GET/POST /api/users` | admin (создание — только admin) |
-| Клиенты | `GET/POST /api/clients` | список — любой; создание — admin/dispatcher |
-| Объекты | `GET/POST /api/sites` | список — любой; создание — admin/dispatcher |
-| Оборудование | `GET/POST /api/equipment` | список — любой; создание — admin/dispatcher |
-| | `PATCH /api/equipment/{id}` | admin/dispatcher |
-| | `GET /api/equipment/{id}/passport` | любой (лента истории для карточки) |
-| | `GET /api/equipment/{id}/qr` | любой (SVG для печати/показа) |
-| Заявки | `GET/POST /api/service-requests` | текущая работа; создание — admin/dispatcher |
-| | `PATCH /api/service-requests/{id}/assign`, `/status`, `/approval` | canonical assignment/workflow |
-| Исторические Task | `GET /api/tasks` | deprecated, только чтение; новая работа не создаёт Task |
-| Гостевые заявки | `GET /api/public/equipment/{qr_token}` | публично, без авторизации |
-| | `POST /api/public/equipment/{qr_token}/tickets` | публично, идемпотентно |
-| | `GET /api/tickets` | deprecated, только чтение provenance QR-обращений |
-| Склад | `GET /api/warehouses`, `GET /api/warehouses/{id}/stock` | техник — только свой мобильный склад |
-| | `POST /api/warehouses/movements/receive` | admin/dispatcher |
-| | `POST /api/warehouses/movements/transfer` | admin/dispatcher |
-| | `GET/POST /api/parts` | список — любой; создание — admin/dispatcher |
-| Офлайн-синк | `POST /api/v1/sync/repairs` | technician (JWT) |
-| QR | `GET /api/equipment/by-qr/{qr_token}` | авторизован (техник — паспорт по сканy) |
-| | `GET /e/{qr_token}` | публично, редирект на гостевую страницу |
+| `admin@example.com` | `admin12345` | `owner` |
+| `tech@example.com` | `tech12345` | `technician` |
 
-## Ключевые механизмы (перенесены из прототипа Codex, адаптированы)
+Пароли новых демо-пользователей можно задать переменными
+`INITIAL_ADMIN_PASSWORD` и `INITIAL_TECH_PASSWORD` при запуске seed.
+Повторный seed не меняет пароль уже существующего пользователя.
+Демо-данные и эти пароли предназначены для локальной разработки.
 
-- **Идемпотентность синка** — `services/sync_service.py` проверяет
-  `sync_operations` по `local_uuid` до любых записей; повторная отправка
-  пакета возвращает тот же результат, не создавая дублей.
-- **Optimistic concurrency** — `equipment.version` + `base_equipment_version`
-  в payload ремонта. Расхождение не роняет запрос, а помечает ремонт
-  `sync_status = conflict` для ручной проверки диспетчером.
-- **Блокировки остатков** — `services/stock_service.py` берёт
-  `SELECT ... FOR UPDATE` на строку `warehouse_stock` перед списанием/
-  перемещением; при переводе между двумя складами строки блокируются в
-  стабильном порядке (по id), чтобы избежать deadlock при встречных операциях.
-- **Гостевые заявки** — публичный QR ведёт на `public_qr_token` (не на
-  внутренний `id`), создание заявки идемпотентно по ключу с гостевой
-  страницы. Это расширение сверх исходных ролей ТЗ (админ/техник) — обсудить
-  с заказчиком, нужно ли это в проде, или оставить только техников.
+Остановка: `docker compose down`. Данные PostgreSQL остаются в volume
+`postgres_data`, локальные файлы — в `uploads/`.
+`docker compose down -v` удаляет volume с локальной БД.
 
-## Что осознанно не сделано (для MVP-скелета)
+## Запуск Python без контейнера API
 
-- **Обработка фотографий к акту ремонта** — модель `repair_attachments` есть
-  в схеме, но нет эндпоинта загрузки файлов (нужно решить, куда класть файлы:
-  S3-совместимое хранилище/локальный диск).
-- **Alembic-миграции не сгенерированы** — только зависимость в
-  `requirements.txt`, см. «Быстрый старт» выше.
-- **Rate limiting / brute-force защита на `/api/auth/login`** — не реализована.
-- **CORS открыт на `*`** в `main.py` — сузить под реальные origin перед продом.
+Нужны Python 3.12, PostgreSQL 16 и системный шрифт DejaVu Sans для PDF.
+В Docker-образе шрифт устанавливается автоматически.
 
-## Fixit Pulse PWA и Web Push
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+```
 
-Fixit Pulse — устанавливаемое веб-приложение, а не APK. После входа откройте
-**«Профиль и настройки»**: Chrome/Edge покажет кнопку установки только после
-события `beforeinstallprompt`. Кнопка вызывает стандартный браузерный install
-prompt только по явному нажатию. После установки
-Fixit запускается в standalone-окне и использует ту же авторизацию и тот же
-`fixit-tech-db` с очередями `pendingRepairs`/`pendingAttachments`.
+Настройте `.env` под локальную БД. Если используете БД из `docker compose up -d db`:
 
-На iPhone/iPad браузер не даёт программно открыть prompt: Pulse показывает
-инструкцию **«Поделиться → На экран «Домой»»**. В уже установленном standalone
-приложении эта подсказка не отображается. На iOS Background Sync имеет
-ограничения: очередь будет отправлена при следующем открытии приложения с
-сетью. Для Android рекомендуется актуальный Chrome; Web Push требует HTTPS.
+```env
+DATABASE_URL=postgresql+asyncpg://fsm:fsm@127.0.0.1:5432/fsm
+SECRET_KEY=replace-with-a-random-local-secret
+PUBLIC_APP_URL=http://localhost:8000
+ALLOWED_ORIGINS=http://localhost:8000,http://127.0.0.1:8000
+ALLOWED_HOSTS=localhost,127.0.0.1
+```
 
-Единый service worker отдаётся с `/sw.js` и имеет scope `/`; это необходимо,
-поскольку старый `/static/offline/sw.js` мог контролировать только каталог
-`/static/offline/`. Новый worker импортирует прежний offline engine и сохраняет
-событие Background Sync `fixit-sync-repairs`; IndexedDB не мигрируется и не
-сбрасывается.
+Затем:
 
-Для Web Push задайте только на сервере `/opt/fixit/.env`:
+```bash
+mkdir -p uploads
+alembic upgrade head
+python -m scripts.seed
+uvicorn app.main:app --reload --port 8000
+```
+
+В Windows активация окружения: `.venv\Scripts\activate`.
+
+## Миграции БД
+
+Существующая Alembic-цепочка — источник установки и обновления схемы.
+Не запускайте `alembic init` и не генерируйте новую initial migration для
+клонированного проекта. `scripts/bootstrap_db.py` — старый dev-helper с
+`Base.metadata.create_all()`: он не записывает историю Alembic и не заменяет
+миграции в описанном выше запуске.
+
+```bash
+alembic heads
+alembic current
+alembic upgrade head
+```
+
+Текущая линейная цепочка: `20260825_0000 → … → 20261002_0018`.
+`0000` восстанавливает историческую pre-SaaS схему; далее идут tenant-модель,
+клиенты/объекты, заявки, вложения, доступы, Push, приглашения, QR-инвентаризация
+и склад. Последние изменения:
+
+- `20260928_0017`: `equipment.location_details`.
+- `20261002_0018`: версия авторизации пользователя и токены восстановления пароля.
+
+На БД с revision `0016` обновление до текущего `head` применяет `0017` и `0018`;
+оно уже не является no-op. Исторические утверждения о no-op относятся к выпуску
+P0.7, когда head был `0016`. Stamp допустим только для проверенной точной
+legacy-схемы по процедуре runbook, а не для пустой БД. Перед production upgrade
+нужны проверенные backup/restore и совместимость нового кода со схемой.
+
+## Офлайн-работа и PWA
+
+Pulse использует общий движок `app/static/offline/engine.js`, IndexedDB
+`fixit-tech-db` и очереди `pendingRepairs` / `pendingAttachments`.
+Черновик заявки, включая выбранные фото, также сохраняется локально.
+При завершении ремонта результат и фотографии ставятся в durable queue;
+повторы синхронизации используют `local_uuid` и серверную идемпотентность.
+Контроль версии оборудования позволяет отметить конфликт вместо незаметной
+перезаписи. Очередь учитывает владельца и организацию, включая смену аккаунта.
+
+Корневой Service Worker `/sw.js` имеет scope `/` и импортирует общий движок.
+При наличии поддержки браузера применяется Background Sync
+`fixit-sync-repairs`; иначе отправка продолжается при открытии приложения с
+сетью. Существование очереди не означает, что каждый экран и любой первый
+запуск доступны без сети. Физическая проверка Android/iOS остаётся отдельной
+частью приёмки.
+
+Установка доступна в «Профиль и настройки»: Chrome/Edge показывают кнопку после
+`beforeinstallprompt`. На iPhone/iPad используется «Поделиться → На экран Домой».
+Production PWA и Web Push требуют HTTPS.
+
+## Настройки сервера, Web Push и почта
+
+Полный пример переменных — [.env.example](.env.example). CORS и Host проверяются
+по `ALLOWED_ORIGINS` и `ALLOWED_HOSTS` (списки через запятую).
+`PUBLIC_APP_URL` должен указывать на внешний адрес сервиса: он используется
+в QR и ссылках восстановления.
+
+Для Web Push задайте одну согласованную пару ключей только на сервере:
 
 ```env
 VAPID_PUBLIC_KEY=...
@@ -265,40 +194,130 @@ VAPID_PRIVATE_KEY=...
 VAPID_SUBJECT=mailto:admin@example.com
 ```
 
-Сгенерировать пару можно после установки зависимостей командой
-`python -m py_vapid --gen --json`. Публичный ключ возвращается только
-авторизованному клиенту; private key не попадает ни в API, ни в git. После
-установки пользователь сам нажимает **«Включить уведомления»**. При logout
-текущая browser subscription снимается, чтобы общий телефон не получал личные
-уведомления прежнего пользователя.
+Подключение уведомлений запускается пользователем из профиля. При logout
+приложение снимает текущую browser subscription. Реализованы уведомления о
+назначении, внутреннем и клиентском ожидании согласования, завершении ремонта.
+Нажатие открывает безопасный внутренний адрес заявки. Реальную доставку на
+устройство следует проверять отдельно от тестов с замоканным transport.
 
-События: назначение заявки технику, внутреннее ожидание согласования
-диспетчеру/админу, клиентское ожидание согласования доступным представителям
-клиента и завершение ремонта техником. Тап по push открывает
-безопасный внутренний URL конкретной заявки. Для ручной проверки на Android:
-установите Pulse, включите уведомления, назначьте заявку технику из другого
-аккаунта, закройте приложение, затем нажмите полученное уведомление и убедитесь,
-что открылась нужная заявка.
-
-## Восстановление пароля
-
-Ссылка восстановления одноразовая, по умолчанию действует 30 минут. В базе
-хранится только SHA-256 токена; смена или восстановление пароля завершает все
-ранее выпущенные сеансы пользователя. Ответ запроса одинаков для известных и
-неизвестных email. Для реальной доставки настройте серверный `.env`:
+Для восстановления пароля:
 
 ```env
-PUBLIC_APP_URL=https://fixit.example.com
 PASSWORD_RESET_EXPIRE_MINUTES=30
 PASSWORD_RESET_DEBUG=false
 SMTP_HOST=smtp.example.com
 SMTP_PORT=587
 SMTP_USERNAME=...
 SMTP_PASSWORD=...
-SMTP_FROM_EMAIL=no-reply@example.com
-SMTP_USE_TLS=true
+SMTP_FROM=no-reply@example.com
+SMTP_STARTTLS=true
 ```
 
-Локально, без SMTP, можно временно включить `PASSWORD_RESET_DEBUG=true`:
-тестовая ссылка вернётся только для существующего пользователя. Этот режим
-нельзя включать в production.
+Имена параметров — именно `SMTP_FROM` и `SMTP_STARTTLS`, как в `app/config.py`.
+В БД хранится SHA-256 одноразового токена. Смена и восстановление пароля
+инвалидируют ранее выданные JWT через версию авторизации. Публичный ответ
+запроса восстановления одинаков для известных и неизвестных email.
+`PASSWORD_RESET_DEBUG=true` разрешает preview-ссылку для существующего
+пользователя только в локальном сценарии без SMTP; в production оставьте false.
+
+## Основные API
+
+Точные схемы и методы доступны в `/docs`. Все защищённые маршруты дополнительно
+проверяют tenant/client/site scope и права; таблица не заменяет ACL.
+
+| Группа | Маршруты |
+|---|---|
+| Авторизация | `/api/auth/login`, `/api/auth/password/*` |
+| Пользователи и организации | `/api/users`, `/api/organizations` |
+| Клиенты и объекты | `/api/clients`, `/api/sites` |
+| Оборудование | `/api/equipment`, `/api/equipment-types` |
+| Паспорт и QR | `GET /api/equipment/{id}/passport`, `GET /api/equipment/{id}/qr` (PDF) |
+| Инвентаризация | `/api/equipment-inventory/batches`, `/api/equipment-inventory/reprint/pdf`, `/api/equipment-inventory/{id}/complete` |
+| Заявки | `/api/service-requests`, включая assignment, статусы, approval и вложения |
+| Ремонты | `/api/repairs/{id}/attachments`, `/api/repairs/{id}/act.pdf` |
+| Клиентский кабинет | `/api/client-portal/*` |
+| Гостевой QR | `/e/{token}`, `/api/public/equipment/{token}`, `/api/public/equipment/{token}/tickets` |
+| Склад | `/api/warehouses`, `/api/parts` |
+| Офлайн-синк | `POST /api/v1/sync/repairs` |
+| Push | `/api/push/*` |
+| Исторические данные | `GET /api/tasks`, `GET /api/tickets` |
+
+## Проверки
+
+Для целевых локальных PostgreSQL/browser-тестов поднимите Compose БД и создайте
+отдельную тестовую базу (один раз):
+
+```bash
+docker compose up -d db
+docker compose exec db psql -U fsm -d fsm -c "CREATE ROLE pilot LOGIN PASSWORD 'pilot-ci-only';"
+docker compose exec db psql -U fsm -d fsm -c "CREATE DATABASE fixit_test OWNER pilot;"
+```
+
+В Python-окружении:
+
+```bash
+pip install -r requirements-dev.txt
+python -m playwright install chromium
+python scripts/test_location_workflow.py
+```
+
+Этот helper сам задаёт изолированный DSN `fixit_test`, test host и browser-флаг.
+Он запускает целевую подборку, а не весь release gate.
+
+Полный gate задан в [.github/workflows/deploy.yml](.github/workflows/deploy.yml):
+Python/PostgreSQL/Chromium, пять JS runtime suites, настоящий IndexedDB/Service
+Worker, browser-тесты очереди и контраста, изолированный restore PostgreSQL и
+media. JS-зависимости устанавливаются через `npm ci --prefix tests --ignore-scripts`.
+Проверки должны использовать отдельную БД; количество passed/skipped зависит
+от версии кода и включённых проверок, старые числа приёмки не являются текущим
+результатом.
+
+## Production и выпуск
+
+`docker-compose.prod.yml` использует `.env`, отдельные volumes PostgreSQL и
+media и публикует API только на `127.0.0.1:8000`. В `.env` production нужны
+случайные `SECRET_KEY`, `POSTGRES_PASSWORD`, внешний `PUBLIC_APP_URL` и allowlists.
+Compose формирует `DATABASE_URL` контейнера из `POSTGRES_PASSWORD`.
+
+Workflow `Deploy to VPS` выполняет проверки для PR в `main`, push в `main`
+или `codex/pilot-release-p0-5`, а также при ручном запуске. Но **job deploy
+разрешён только для события `push` в `main`**, после успешного test job.
+Push в старую release-ветку или ручной запуск сами по себе сейчас не деплоят.
+
+В GitHub Environment `production` используются `VPS_HOST`, `VPS_USER`,
+`VPS_SSH_KEY`, `VPS_KNOWN_HOSTS`. Серверный `.env` не перезаписывается выпуском.
+Скрипт выпуска проверяет согласованный backup/restore DB+media, применяет
+миграции, обновляет приложение и проверяет readiness, nginx, TLS и multipart.
+При ошибке возвращается прежний код/image без удаления volumes и без Alembic
+downgrade. Изменения схемы должны оставаться совместимыми с rollback приложения.
+
+Процедуры восстановления: [PRODUCTION_RUNBOOK.md](docs/PRODUCTION_RUNBOOK.md).
+Его исторические указания о head `0016` и выпуске через pilot release-ветку
+нужно читать с учётом актуальных миграций и workflow, описанных выше.
+
+## Основные изменения по Git-истории
+
+| Дата / commit | Изменение |
+|---|---|
+| `672b812`, `45b13c5` | Вывод Task из активного workflow и общая durable offline queue |
+| 15.09.2026, `4184d68`–`b72d287` | Восстановление legacy baseline, clean bootstrap, production acceptance и backup/restore |
+| 16–24.09.2026, `f525bd7`–`494b107` | Frontend/backend parity и стабилизация проверок |
+| 29.09.2026, `7c18bb7` | Расположение оборудования в workflow заявки |
+| 02.10.2026, `9ed44d2` | Профиль, пароль, PWA/Push и единый QR-шаблон |
+| 02–06.10.2026, `9606d7f`, `4d92d75`, `2853f21` | Светлая тема, контраст и мобильный интерфейс при крупном тексте |
+| 06.10.2026, `b14ba15` | Приоритетная очередь заявок и фильтры по клиенту/объекту |
+| 08.10.2026, `7d3bf18` | Пакетная перепечатка QR оборудования на объекте |
+
+История P0 и старый parity backlog сохранены в
+[PILOT_HARDENING_ROADMAP.md](docs/PILOT_HARDENING_ROADMAP.md).
+Это журнал решений: его записи о недостающем UI после P0.7 не описывают
+все последующие исправления. Аналогично `OFFLINE_TODO.md` и
+`docs/client-portal-notification-todo.md` содержат исторические планы,
+часть которых уже реализована. Профиль/PWA/Push/QR дополнительно описаны в
+[документе приёмки](docs/PROFILE_PWA_PUSH_QR_ACCEPTANCE.md); для переменных SMTP
+используйте актуальные имена из этого README и `.env.example`.
+
+Ограничения: переназначение уже назначенной заявки требует отдельного правила
+серверного workflow; сервисный акт генерируется из текущих данных и не является
+криптографически подписанным неизменяемым snapshot. Исходную invite-ссылку
+нельзя восстановить после создания, поскольку хранится только hash токена.
