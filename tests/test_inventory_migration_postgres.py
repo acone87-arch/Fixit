@@ -42,3 +42,30 @@ async def test_inventory_upgrade_preserves_old_equipment_and_qr(flow):
             await connection.run_sync(downgrade)
         await db.rollback()
         assert await db.scalar(select(func.count()).select_from(Equipment))==5
+
+
+async def test_optional_serial_upgrade_and_safe_downgrade(flow):
+    spec = importlib.util.spec_from_file_location('optional_serial_migration',
+        'alembic/versions/20261016_0019_optional_equipment_serial.py')
+    revision = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(revision)
+    async with flow.sessions() as db:
+        connection = await db.connection()
+        def cycle(sync_connection):
+            with Operations.context(MigrationContext.configure(sync_connection)):
+                revision.downgrade()
+                revision.upgrade()
+        await connection.run_sync(cycle)
+        saved = await db.get(Equipment, flow.equipment[0].id)
+        token = saved.public_qr_token
+        saved.serial_number = None
+        await db.commit()
+        await db.refresh(saved)
+        assert saved.public_qr_token == token and not saved.inventory_pending
+        connection = await db.connection()
+        def downgrade(sync_connection):
+            with Operations.context(MigrationContext.configure(sync_connection)):
+                revision.downgrade()
+        with pytest.raises(RuntimeError, match='without serial numbers'):
+            await connection.run_sync(downgrade)
+        await db.rollback()

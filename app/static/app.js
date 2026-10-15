@@ -2095,7 +2095,7 @@ async function renderEquipment(content) {
   });
 
   if (canEdit) {
-    document.getElementById('add-equipment-btn').addEventListener('click', openCreateEquipmentModal);
+    document.getElementById('add-equipment-btn').addEventListener('click', () => openCreateEquipmentModal());
   }
 }
 
@@ -2123,8 +2123,9 @@ async function openCreateEquipmentModal(preselectedClientId = null) {
         <div class="field"><label>Производитель</label><input id="f-manufacturer"></div>
         <div class="field"><label>Модель</label><input id="f-model"></div>
       </div>
-      <div class="field"><label>Серийный номер</label><input id="f-serial" required></div>
+      <div class="field"><label>Серийный номер (необязательно)</label><input id="f-serial" maxlength="255"></div>
       <div class="field"><label>Объект обслуживания</label><select id="f-site" required>${siteOptions}</select></div>
+      <div class="field"><label for="f-location-details">Расположение на объекте</label><input id="f-location-details" maxlength="500" placeholder="Например: прачечная, корпус 2, 1 этаж"></div>
       <div class="field"><label>Фото оборудования <span class="text-soft">(необязательно)</span></label><div class="equipment-photo-inputs"><label class="btn btn-ghost btn-sm">Сфотографировать<input id="f-equipment-camera" type="file" accept="image/*" capture="environment" hidden></label><label class="btn btn-ghost btn-sm">Выбрать фото<input id="f-equipment-photo" type="file" accept="image/*" hidden></label><span id="f-equipment-photo-name" class="text-soft">Фото не выбрано</span></div></div>
     </form>`,
     `<button class="btn btn-secondary" id="modal-cancel">Отмена</button>
@@ -2153,15 +2154,15 @@ async function openCreateEquipmentModal(preselectedClientId = null) {
         typeId = created.id;
       }
       const serial = backdrop.querySelector('#f-serial').value.trim();
-      if (!serial) return toast('Укажите серийный номер', 'error');
       const equipment = await api('/equipment', {
         method: 'POST',
         body: JSON.stringify({
           equipment_type_id: Number(typeId),
           manufacturer: backdrop.querySelector('#f-manufacturer').value.trim() || null,
           model: backdrop.querySelector('#f-model').value.trim() || null,
-          serial_number: serial,
+          serial_number: serial || null,
           site_id: backdrop.querySelector('#f-site').value,
+          location_details: backdrop.querySelector('#f-location-details').value.trim() || null,
         }),
       });
       closeModal();
