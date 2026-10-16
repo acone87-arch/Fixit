@@ -59,7 +59,7 @@ def build_service_act(
     equipment_name: str,
     manufacturer: str | None,
     model: str | None,
-    serial_number: str,
+    serial_number: str | None,
     technician_name: str,
     fault_type: str | None,
     description: str,
