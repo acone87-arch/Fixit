@@ -15,7 +15,8 @@ from sqlalchemy import func, select, text, update
 from app.config import settings
 from app.core.deps import CurrentUser
 from app.models.ai import AIGeneration
-from app.models.core import User, UserRole
+from app.models.core import Equipment, User, UserRole
+from app.models.customer import Client, Site
 from app.models.organization import Organization, OrganizationMembership
 from app.models.service_request import ServiceRequest
 from app.services.access_policy import STAFF_ROLES, ensure_service_request_access
@@ -47,6 +48,19 @@ def capabilities(user):
             "enabled": bool(allowed), "cost_basis": "local_estimate_not_cloud_balance"}
 
 
+async def ensure_pilot_equipment(db, user, equipment_id):
+    client_ids = settings._split_csv(settings.ai_client_ids)
+    if not client_ids:
+        return
+    client_id = await db.scalar(select(Client.id).join(Site, Site.client_id == Client.id)
+        .join(Equipment, Equipment.site_id == Site.id).where(
+            Equipment.id == equipment_id, Equipment.organization_id == user.organization_id,
+            Site.organization_id == user.organization_id, Client.organization_id == user.organization_id,
+            Client.is_active.is_(True), Site.is_active.is_(True)))
+    if str(client_id) not in client_ids:
+        raise HTTPException(403, "AI-пилот не включён для клиента этого оборудования")
+
+
 async def allowed_request(db, user, request_id):
     request = await db.scalar(select(ServiceRequest).where(ServiceRequest.id == request_id).execution_options(populate_existing=True))
     if not request:
@@ -54,6 +68,7 @@ async def allowed_request(db, user, request_id):
     await ensure_service_request_access(request, user, db)
     if user.role not in STAFF_ROLES and user.role != UserRole.technician:
         raise HTTPException(403, "AI-черновик доступен сотрудникам сервиса")
+    await ensure_pilot_equipment(db, user, request.equipment_id)
     if request.status not in WORK_STATES:
         raise HTTPException(409, "Черновик доступен только для заявки в работе или ожидании")
     return request

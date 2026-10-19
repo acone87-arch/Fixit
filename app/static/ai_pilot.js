@@ -46,6 +46,7 @@
       availability.append(el('p', state, 'ai-pilot-notice'));
       const settings = el('dl', undefined, 'ai-pilot-facts');
       line(settings, 'Модель', config.model);
+      if (config.client_scope_restricted) line(settings, 'Клиенты пилота', config.pilot_clients.join(', ') || 'Нет клиентов этой организации');
       line(settings, 'Оформление результата', caps.repair_draft ? 'Доступно' : 'Выключено');
       line(settings, 'История оборудования', caps.equipment_brief ? 'Доступна' : 'Выключена');
       availability.append(settings);
@@ -53,7 +54,7 @@
       const limits = el('dl', undefined, 'ai-pilot-facts');
       line(limits, 'Лимит на месяц', money(config.monthly_limit_rub));
       line(limits, 'Лимит на день', money(config.daily_limit_rub));
-      budget.append(el('p', 'Один лимит на все организации пилота.'), limits);
+      budget.append(el('p', 'Один лимит на всех клиентов и организации пилота.'), limits);
       const grid = el('div', undefined, 'ai-pilot-grid'); grid.append(availability, budget); body.append(grid);
       if (!m.calls) body.append(el('p', 'Запусков оформления результата в этом месяце пока нет. Показатели появятся после первых черновиков.', 'ai-pilot-notice'));
       const ratings = m.helpful + m.not_helpful;

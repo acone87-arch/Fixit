@@ -68,3 +68,12 @@ async def test_pilot_disabled_still_shows_past_metrics_and_foreign_org_is_empty(
     assert not data['configuration']['pilot_member']
     assert str(f.org.id) not in response.text
     assert len(f.calls) == 1
+
+
+async def test_pilot_client_names_do_not_leak_across_organizations(ai_flow, monkeypatch):
+    f = ai_flow
+    monkeypatch.setattr(settings, 'ai_client_ids', f'{f.client.id},{f.sites[3].client_id}')
+    data = (await f.http.get('/api/ai/pilot', headers=auth(f.owner, f.org))).json()
+    assert data['configuration']['client_scope_restricted']
+    assert data['configuration']['pilot_clients'] == [f.client.name]
+    assert not f.calls

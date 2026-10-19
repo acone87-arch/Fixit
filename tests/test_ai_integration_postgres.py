@@ -307,3 +307,48 @@ async def test_metrics_do_not_include_other_organizations(ai_flow):
     assert data['calls'] == data['saved_repairs'] == data['applied'] == 0
     assert data['estimated_rub'] == data['unresolved_reserve_rub'] == '0'
     assert data['latency_ms']['samples'] == 0
+
+
+async def test_pilot_client_scope_blocks_generation_and_brief_before_provider(ai_flow, monkeypatch):
+    f = ai_flow
+    monkeypatch.setattr(settings, 'ai_client_ids', str(f.other.id))
+    assert (await generate(f)).status_code == 403
+    brief_url = f'/api/ai/equipment/{f.equipment[0].id}/brief'
+    assert (await f.http.post(brief_url, headers=auth(f.owner, f.org))).status_code == 403
+    assert not f.calls
+    async with f.sessions() as db:
+        assert await db.scalar(select(func.count()).select_from(AIGeneration)) == 0
+    monkeypatch.setattr(settings, 'ai_client_ids', str(f.client.id))
+    assert (await f.http.post(brief_url, headers=auth(f.owner, f.org))).status_code == 200
+    assert (await generate(f)).status_code == 200
+    assert len(f.calls) == 1
+
+
+async def test_pilot_scope_change_during_provider_discards_result(ai_flow, monkeypatch):
+    f = ai_flow
+    monkeypatch.setattr(settings, 'ai_client_ids', str(f.client.id))
+    async def provider(note, config):
+        monkeypatch.setattr(settings, 'ai_client_ids', str(f.other.id))
+        return await f.ai_provider(note, config)
+    monkeypatch.setattr(ai_provider, 'generate', provider)
+    result = await generate(f)
+    assert result.status_code == 403
+    assert len(f.calls) == 1
+    async with f.sessions() as db:
+        row = await db.scalar(select(AIGeneration))
+        assert row.result_json is None and row.estimated_rub is not None
+
+
+async def test_two_pilot_clients_share_budget(ai_flow, monkeypatch):
+    f = ai_flow
+    monkeypatch.setattr(settings, 'ai_client_ids', f'{f.client.id},{f.other.id}')
+    second_id = await new_request(f, index=2)
+    await start(f, second_id)
+    assert (await generate(f)).status_code == 200
+    # The second client's reservation must include the first client's usage.
+    from decimal import Decimal
+    encoded = json.dumps(ai_provider.request_body('Очистил фильтр.', settings), ensure_ascii=False).encode()
+    reserve = Decimal((len(encoded) + 1024) * 8 + ai_provider.MAX_OUTPUT * 8) / 10000
+    monkeypatch.setattr(settings, 'ai_daily_limit_rub', reserve + Decimal('0.06'))
+    assert (await generate(f, request_id=second_id)).status_code == 429
+    assert len(f.calls) == 1

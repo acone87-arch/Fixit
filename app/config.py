@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     # Explicit opt-in: UUIDs, not organization names/slugs supplied by a browser.
     ai_enabled: bool = False
     ai_organization_ids: str = ""
+    # Optional additional restriction within service tenants. Empty = all their clients.
+    ai_client_ids: str = ""
     ai_repair_enabled: bool = False
     ai_brief_enabled: bool = False
     yandex_gpt_api_key: str | None = None
