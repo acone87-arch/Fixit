@@ -22,6 +22,7 @@ class RepairCreate(BaseModel):
     # Canonical Fixit 2.0 linkage. Legacy IDs are accepted only for queued
     # payloads from retired clients and are never emitted by Fixit Pulse.
     service_request_id: uuid.UUID | None = None
+    ai_generation_id: uuid.UUID | None = None
     task_id: uuid.UUID | None = None
     ticket_id: uuid.UUID | None = None
     fault_type: str | None = None

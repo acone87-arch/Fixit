@@ -1,4 +1,6 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field
+from decimal import Decimal
 
 
 class Settings(BaseSettings):
@@ -18,6 +20,23 @@ class Settings(BaseSettings):
     smtp_password: str | None = None
     smtp_from: str | None = None
     smtp_starttls: bool = True
+    # Explicit opt-in: UUIDs, not organization names/slugs supplied by a browser.
+    ai_enabled: bool = False
+    ai_organization_ids: str = ""
+    ai_repair_enabled: bool = False
+    ai_brief_enabled: bool = False
+    yandex_gpt_api_key: str | None = None
+    yandex_gpt_folder_id: str | None = None
+    ai_model: str = "yandexgpt-5.1"
+    ai_timeout_seconds: int = Field(default=30, ge=1, le=60)
+    ai_monthly_limit_rub: Decimal = Field(default=Decimal("300"), ge=0, le=300)
+    ai_daily_limit_rub: Decimal = Field(default=Decimal("10"), ge=0, le=10)
+    ai_input_rub_per_1000: Decimal = Field(default=Decimal("0.8"), gt=0)
+    ai_output_rub_per_1000: Decimal = Field(default=Decimal("0.8"), gt=0)
+    # Conservatively carry forward the existing diagnostic estimate + unknown
+    # reserve; this is not an observed cloud bill. Override only after reconciliation.
+    ai_prior_accounted_rub: Decimal = Field(default=Decimal("6.3992"), ge=0)
+    ai_prior_accounted_date: str = "2026-10-19"
     # Comma-separated values keep the production .env readable and avoid JSON
     # syntax in shell-managed deployment configuration.
     allowed_origins: str = "http://localhost:8000,http://127.0.0.1:8000"

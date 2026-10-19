@@ -20,7 +20,7 @@ from app.main import health
 
 ROOT = Path(__file__).resolve().parents[1]
 LEGACY_REVISION = "20260825_0000"
-HEAD_REVISION = "20261019_0020"
+HEAD_REVISION = "20261019_0022"
 LEGACY_TABLES = {
     "users", "equipment_types", "equipment", "tasks", "tickets",
     "repairs", "repair_parts", "repair_attachments", "sync_log",
@@ -39,6 +39,7 @@ LEGACY_ENUMS = {
     "stock_movement_type": ["receipt", "transfer", "writeoff"],
 }
 HEAD_TABLES = {
+    "ai_generations",
     "organizations", "organization_memberships", "clients", "sites",
     "equipment", "equipment_inventory_batches", "service_requests",
     "service_request_events", "service_request_attachments",
