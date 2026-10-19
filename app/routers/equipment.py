@@ -20,6 +20,7 @@ from app.schemas.equipment import (
     EquipmentCreate,
     EquipmentDocumentEntry,
     EquipmentOut,
+    EquipmentPendingDelete,
     EquipmentPhotoOut,
     EquipmentPassport,
     EquipmentTimelineEntry,
@@ -327,28 +328,52 @@ async def delete_equipment(
     """Удаляет ошибочно заведённую единицу оборудования без сервисной истории."""
     equipment = await db.scalar(select(Equipment).where(
         Equipment.id == equipment_id, Equipment.organization_id == user.organization_id
-    ))
+    ).with_for_update())
     if not equipment:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Оборудование не найдено")
 
-    if equipment.inventory_batch_id:
+    if equipment.inventory_batch_id and not equipment.inventory_pending:
         raise HTTPException(409, 'Оборудование с напечатанным QR нельзя удалить. Используйте архивирование')
+
+    await _delete_equipment_rows([equipment], db)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post('/pending/delete', status_code=status.HTTP_204_NO_CONTENT)
+async def delete_pending_equipment(
+    payload: EquipmentPendingDelete,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(require_roles(UserRole.admin)),
+):
+    ids = list(dict.fromkeys(payload.equipment_ids))
+    rows = (await db.scalars(select(Equipment).where(
+        Equipment.id.in_(ids), Equipment.site_id == payload.site_id,
+        Equipment.organization_id == user.organization_id,
+    ).order_by(Equipment.id).with_for_update())).all()
+    if len(rows) != len(ids):
+        raise HTTPException(404, 'Выбранное оборудование не найдено на объекте')
+    if any(not row.inventory_pending for row in rows):
+        raise HTTPException(409, 'Удалять можно только незаполненные карточки. Обновите список')
+    await _delete_equipment_rows(rows, db)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+async def _delete_equipment_rows(rows: list[Equipment], db: AsyncSession):
+    ids = [row.id for row in rows]
 
     # Паспорт с реальными заявками/ремонтами — часть аудита. Его нельзя удалить
     # вместе с историей одной кнопкой, поэтому для ошибочной записи разрешаем
     # удаление только до начала эксплуатации.
-    has_task = await db.scalar(select(Task.id).where(Task.equipment_id == equipment_id).limit(1))
-    has_ticket = await db.scalar(select(Ticket.id).where(Ticket.equipment_id == equipment_id).limit(1))
-    has_repair = await db.scalar(select(Repair.id).where(Repair.equipment_id == equipment_id).limit(1))
-    if has_task or has_ticket or has_repair:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            "Нельзя удалить оборудование с нарядами, заявками или историей ремонтов",
-        )
-
-    await db.delete(equipment)
-    await db.commit()
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    for model in (Task, Ticket, Repair, ServiceRequest):
+        if await db.scalar(select(model.id).where(model.equipment_id.in_(ids)).limit(1)):
+            raise HTTPException(409, 'Нельзя удалить оборудование с нарядами, заявками или историей ремонтов')
+    try:
+        for row in rows:
+            await db.delete(row)
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(409, 'Карточки изменились или используются. Обновите список') from exc
 
 
 @router.get("/{equipment_id}/passport", response_model=EquipmentPassport)

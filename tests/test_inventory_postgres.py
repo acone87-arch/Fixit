@@ -59,6 +59,22 @@ async def test_batch_retries_pdf_and_empty_equipment_identities(pg):
     assert (await pg.http.post('/api/equipment-inventory/batches', headers=auth(pg.owner,pg.org), json=payload)).status_code == 409
 
 
+async def test_concurrent_batches_allocate_site_numbers_and_deletion_keeps_watermark(pg):
+    await batch(pg, quantity=10)
+    results = await asyncio.gather(*[batch(pg, quantity=10) for _ in range(2)])
+    numbers = sorted(row['inventory_number'] for _, _, rows in results for row in rows)
+    assert numbers == list(range(11, 31))
+    for _, created, rows in results:
+        response = await pg.http.post('/api/equipment/pending/delete', headers=auth(pg.owner, pg.org),
+            json={'site_id': str(pg.sites[0].id), 'equipment_ids': [row['id'] for row in rows]})
+        assert response.status_code == 204, response.text
+        assert (await pg.http.get(created['pdf_url'], headers=auth(pg.owner, pg.org))).status_code == 409
+    _, _, more = await batch(pg, quantity=2)
+    assert sorted(row['inventory_number'] for row in more) == [31, 32]
+    _, _, other_site = await batch(pg, quantity=2, site_id=str(pg.sites[1].id))
+    assert sorted(row['inventory_number'] for row in other_site) == [1, 2]
+
+
 async def test_reprint_selected_equipment_preserves_identity_and_a4_layout(pg):
     _, _, rows = await batch(pg, quantity=10)
     for row in rows:

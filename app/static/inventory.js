@@ -62,7 +62,72 @@ async function openEquipmentQRReprint(selectedSite = '') {
   await refresh();
 }
 
-async function openInventoryBatches(selectedSite = '') {
+async function openPendingEquipmentDelete(selectedSite = '', onDeleted = async () => {}) {
+  await ensureCustomers(true);
+  // Inactive sites may also have unused labels that need removing.
+  const sites = state.sites;
+  if (!sites.length) return toast('Сначала создайте объект обслуживания', 'error');
+  const modal = openModal('Удалить незаполненные QR', `
+    <div class="field"><label for="inventory-delete-site">Объект</label><select id="inventory-delete-site">${sites.map(site => `<option value="${site.id}" ${selectedSite === site.id ? 'selected' : ''}>${esc(site.name)} · ${esc(site.client_name || '')}</option>`).join('')}</select></div>
+    <p>Выберите лишние пустые карточки. Их QR-коды перестанут работать, в том числе на уже распечатанных этикетках. Номера оставшихся карточек сохранятся.</p>
+    <label class="qr-reprint-choice"><input type="checkbox" id="inventory-delete-all" disabled><strong>Выбрать все незаполненные</strong></label>
+    <p id="inventory-delete-count" role="status">Выбрано: 0</p>
+    <div id="inventory-delete-list" class="qr-reprint-list">Загрузка карточек…</div>`,
+    '<button class="btn btn-secondary" id="inventory-delete-close">Закрыть</button><button class="btn btn-danger" id="inventory-delete-submit" disabled>Удалить выбранные</button>');
+  const site = modal.querySelector('#inventory-delete-site'), all = modal.querySelector('#inventory-delete-all');
+  const list = modal.querySelector('#inventory-delete-list'), submit = modal.querySelector('#inventory-delete-submit');
+  let generation = 0, loading = false, deleting = false;
+  const choices = () => [...list.querySelectorAll('input[data-equipment-id]')];
+  const update = () => {
+    const inputs = choices(), count = inputs.filter(input => input.checked).length;
+    all.checked = inputs.length > 0 && count === inputs.length;
+    all.indeterminate = count > 0 && count < inputs.length;
+    modal.querySelector('#inventory-delete-count').textContent = `Выбрано: ${count}${count > 500 ? ' — выберите не более 500' : ''}`;
+    submit.disabled = loading || deleting || count === 0 || count > 500;
+  };
+  const refresh = async () => {
+    const attempt = ++generation;
+    loading = true; all.disabled = true; all.checked = false; all.indeterminate = false;
+    list.textContent = 'Загрузка карточек…'; update();
+    try {
+      const items = await api(`/equipment?site_id=${encodeURIComponent(site.value)}`);
+      if (attempt !== generation || !modal.isConnected) return;
+      const pending = items.filter(item => item.inventory_pending).sort((a, b) => (a.inventory_number || 0) - (b.inventory_number || 0));
+      list.innerHTML = pending.length ? pending.map(item => `<label class="qr-reprint-choice"><input type="checkbox" data-equipment-id="${item.id}"><span><strong>${esc(item.name)}</strong><small>Карточка не заполнена</small></span></label>`).join('') : '<p>На этом объекте нет незаполненных карточек.</p>';
+      all.disabled = pending.length === 0;
+      choices().forEach(input => input.onchange = update);
+    } catch (error) {
+      if (attempt !== generation || !modal.isConnected) return;
+      list.textContent = 'Не удалось загрузить карточки. Выберите объект повторно.';
+      toast(error.message, 'error');
+    } finally {
+      if (attempt === generation) { loading = false; update(); }
+    }
+  };
+  all.onchange = () => { choices().forEach(input => { input.checked = all.checked; }); update(); };
+  site.onchange = refresh;
+  modal.querySelector('#inventory-delete-close').onclick = closeModal;
+  submit.onclick = async () => {
+    const equipment_ids = choices().filter(input => input.checked).map(input => input.dataset.equipmentId);
+    if (loading || deleting || !equipment_ids.length || equipment_ids.length > 500) return;
+    if (!confirm(`Удалить незаполненные карточки: ${equipment_ids.length}? Их QR-коды перестанут работать. Это действие нельзя отменить.`)) return;
+    deleting = true; site.disabled = true; all.disabled = true; update();
+    let removed = false;
+    try {
+      await api('/equipment/pending/delete', {method: 'POST', body: JSON.stringify({site_id: site.value, equipment_ids})});
+      removed = true;
+      toast(`Удалено карточек: ${equipment_ids.length}`);
+    } catch (error) { toast(error.message, 'error'); }
+    finally { deleting = false; site.disabled = false; }
+    // Refresh even on a conflict or lost response: selection may have changed.
+    await refresh();
+    try { await onDeleted(); } catch (error) { toast(error.message, 'error'); }
+    if (removed && modal.isConnected) closeModal();
+  };
+  await refresh();
+}
+
+async function openInventoryBatches(selectedSite = '', onCreated = async () => {}) {
   await ensureCustomers(true);
   const sites = state.sites.filter(site => site.is_active);
   if (!sites.length) return toast('Сначала создайте объект обслуживания', 'error');
@@ -70,7 +135,7 @@ async function openInventoryBatches(selectedSite = '') {
     <p>Создайте пустые карточки, распечатайте QR и заполните оборудование на объекте с телефона.</p>
     <div class="field"><label for="inventory-site">Объект</label><select id="inventory-site">${sites.map(site => `<option value="${site.id}" ${selectedSite === site.id ? 'selected' : ''}>${esc(site.name)} · ${esc(site.client_name || '')}</option>`).join('')}</select></div>
     <div class="field"><label for="inventory-count">Количество оборудования</label><input id="inventory-count" type="number" min="1" max="500" value="10"></div>
-    <p class="text-soft">От 1 до 500 QR в партии. PDF: A4, 8 этикеток на листе, печать в масштабе 100%.</p>
+    <p class="text-soft">От 1 до 500 QR в партии. Нумерация продолжается с последнего выданного номера на объекте. PDF: A4, 8 этикеток на листе, печать в масштабе 100%.</p>
     <div id="inventory-batches">Загрузка партий…</div>`,
     '<button class="btn btn-secondary" id="inventory-close">Закрыть</button><button class="btn btn-primary" id="inventory-generate">Создать партию QR</button>');
   modal.querySelector('#inventory-close').onclick = closeModal;
@@ -79,7 +144,7 @@ async function openInventoryBatches(selectedSite = '') {
     const siteId = modal.querySelector('#inventory-site').value;
     const batches = await api(`/equipment-inventory/batches?site_id=${encodeURIComponent(siteId)}`);
     if (siteId !== modal.querySelector('#inventory-site').value) return;
-    modal.querySelector('#inventory-batches').innerHTML = batches.length ? batches.map(batch => `<p><strong>Партия ${esc(batch.id.slice(0,8))}</strong> · ${fmtDate(batch.created_at)}<br>Заполнено ${batch.completed} из ${batch.quantity} <button class="btn btn-secondary" data-inventory-pdf="${batch.id}">Скачать PDF</button></p>`).join('') : '<p>На этом объекте ещё нет партий QR.</p>';
+    modal.querySelector('#inventory-batches').innerHTML = batches.length ? batches.map(batch => `<p><strong>Партия ${esc(batch.id.slice(0,8))}</strong> · ${fmtDate(batch.created_at)}<br>Заполнено ${batch.completed} из ${batch.remaining}${batch.deleted ? ` · Удалено: ${batch.deleted}` : ''} <button class="btn btn-secondary" data-inventory-pdf="${batch.id}" ${batch.remaining === 0 ? 'disabled' : ''}>Скачать PDF</button></p>`).join('') : '<p>На этом объекте ещё нет партий QR.</p>';
     modal.querySelectorAll('[data-inventory-pdf]').forEach(button => button.onclick = async () => {
       button.disabled = true;
       try {
@@ -109,6 +174,7 @@ async function openInventoryBatches(selectedSite = '') {
       localStorage.removeItem(storageKey); attempt = null;
       toast('Партия создана. Скачайте PDF для печати');
       await refresh();
+      await onCreated();
     } catch (error) { toast(error.message, 'error'); }
     finally { button.disabled = false; }
   };
