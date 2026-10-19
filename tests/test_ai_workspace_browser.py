@@ -150,7 +150,14 @@ async def test_applied_draft_survives_reload_and_links_only_after_offline_sync(l
             await prepare(page)
             await page.get_by_role('button', name='Полезно', exact=True).click()
             await expect(page.locator('.ai-output')).to_contain_text('Оценка записана')
-            await page.get_by_role('button', name='Применить в форму', exact=True).click()
+            # Form application precedes optional feedback delivery. Wait for
+            # the server acknowledgement before asserting durable feedback.
+            async with page.expect_response(lambda response: response.url.endswith('/feedback')
+                    and response.request.method == 'POST'
+                    and response.request.post_data_json.get('action') == 'applied') as recorded:
+                await page.get_by_role('button', name='Применить в форму', exact=True).click()
+            feedback = await recorded.value
+            assert feedback.status == 200 and (await feedback.json())['recorded']
             await expect(page.locator('.ai-message')).to_contain_text('Текст применён')
             async with f.sessions() as db:
                 row = await db.scalar(select(AIGeneration))
