@@ -194,3 +194,40 @@ async def test_site_manager_completes_pending_card_from_mobile_qr(live):
                 assert saved.public_qr_token==uuid.UUID(row['public_qr_token'])
         finally:
             await manager_context.close(); await browser.close()
+
+
+@pytest.mark.parametrize('mobile', [False, True])
+@pytest.mark.parametrize('theme', ['light', 'dark'])
+async def test_save_cards_without_serial(live, mobile, theme):
+    from playwright.async_api import async_playwright, expect
+    f = live
+    _, _, rows = await batch(f, 1)
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(executable_path=os.getenv('FIXIT_CHROMIUM_PATH') or None)
+        context, page = await signed_page(browser, f, f.owner, mobile)
+        await page.set_viewport_size({'width': 390, 'height': 844} if mobile else {'width': 1440, 'height': 1000})
+        try:
+            await page.goto('http://127.0.0.1:8765/#equipment')
+            await page.locator('#onboarding-continue').click(timeout=15000)
+            await page.evaluate('(theme) => applyAppearance(theme, "large")', theme)
+            await page.locator('#add-equipment-btn').click()
+            await page.locator('#f-location-details').fill('Прачечная, этаж 2')
+            await page.locator('#modal-save').click()
+            await expect(page.locator('#passport-manage')).to_be_visible()
+            await page.locator('#passport-manage').click()
+            await expect(page.locator('#inventory-serial')).to_have_value('')
+            await expect(page.locator('#inventory-location-details')).to_have_value('Прачечная, этаж 2')
+            await page.locator('#inventory-save').click()
+            await expect(page.locator('#passport-manage')).to_be_visible()
+            await page.evaluate('(id) => openEquipmentPassport(id)', rows[0]['id'])
+            await page.locator('#inventory-type').select_option(str(f.kind.id))
+            await page.locator('#inventory-location-details').fill('Корпус 1')
+            assert await page.evaluate('document.documentElement.scrollWidth <= document.documentElement.clientWidth')
+            await page.locator('#inventory-save').click()
+            await expect(page.locator('#inventory-next')).to_be_visible()
+            result = await f.http.get(f"/api/equipment/{rows[0]['id']}/passport", headers=auth(f.owner, f.org))
+            assert result.json()['serial_number'] is None
+            assert not result.json()['inventory_pending']
+        finally:
+            await context.close()
+            await browser.close()

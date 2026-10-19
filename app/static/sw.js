@@ -1,6 +1,6 @@
 // Root-scoped Fixit Pulse worker: preserves the durable offline repair engine.
 importScripts('/static/offline/engine.js?v=20261002-4');
-const SHELL_CACHE = 'fixit-pulse-shell-v22';
+const SHELL_CACHE = 'fixit-pulse-shell-v23';
 const SHELL = ['/static/inventory.js?v=20261019-1', '/', '/static/styles.css?v=20261019-1', '/static/app.js?v=20261019-1', '/static/offline/engine.js?v=20261002-4', '/static/icons/fixit-192.png', '/static/icons/fixit-512.png', '/static/icons/fixit-512-maskable.png'];
 self.addEventListener('install', (event) => event.waitUntil(caches.open(SHELL_CACHE).then((cache) => cache.addAll(SHELL)).then(() => self.skipWaiting())));
 self.addEventListener('activate', (event) => event.waitUntil(Promise.all([

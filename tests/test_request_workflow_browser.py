@@ -147,3 +147,32 @@ async def test_pulse_approval_payload_and_dispatcher_result(live, flow, target):
             raise
         finally:
             await browser.close()
+
+
+@pytest.mark.parametrize('mobile', [False, True])
+async def test_main_tabs_with_missing_equipment_serial(live, flow, mobile):
+    from playwright.async_api import async_playwright, expect
+    from test_inventory_browser import signed_page
+    request_id = await new_request(flow)
+    async with flow.sessions() as db:
+        equipment = await db.get(Equipment, flow.equipment[0].id)
+        equipment.serial_number = None
+        await db.commit()
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(executable_path=os.getenv('FIXIT_CHROMIUM_PATH') or None)
+        context, page = await signed_page(browser, flow, flow.owner, mobile)
+        errors = []
+        page.on('pageerror', lambda error: errors.append(str(error)))
+        page.on('response', lambda response: errors.append(f'HTTP {response.status}: {response.url}') if response.status >= 500 else None)
+        try:
+            await page.goto('http://127.0.0.1:8765/#pulse')
+            await page.locator('#onboarding-continue').click(timeout=15000)
+            for route in ['pulse', 'requests', f'requests/{request_id}', 'clients', 'equipment', 'warehouse', 'users', 'profile']:
+                await page.evaluate('async (route) => { history.replaceState(null, "", "#" + route); await router(); }', route)
+                await page.wait_for_function('(route) => state.route === route.split("/")[0]', arg=route)
+                await expect(page.locator('#content .section-loading')).to_have_count(0)
+                await expect(page.locator('#content')).not_to_be_empty()
+            assert errors == []
+        finally:
+            await context.close()
+            await browser.close()

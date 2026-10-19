@@ -2,8 +2,8 @@
 from alembic import op
 import sqlalchemy as sa
 
-revision = '20261019_0019'
-down_revision = '20261002_0018'
+revision = '20261019_0020'
+down_revision = '20261016_0019'
 branch_labels = None
 depends_on = None
 
@@ -22,5 +22,5 @@ def upgrade():
 def downgrade():
     # Removing the watermark could reissue numbers of already deleted labels.
     if op.get_bind().execute(sa.text('SELECT EXISTS (SELECT 1 FROM sites WHERE inventory_last_number > 0)')).scalar():
-        raise RuntimeError('Issued QR numbers exist: keep schema 0019 to prevent number reuse')
+        raise RuntimeError('Issued QR numbers exist: keep schema 0020 to prevent number reuse')
     op.drop_column('sites', 'inventory_last_number')

@@ -407,3 +407,31 @@ async def test_concurrent_qr_key_is_scoped_to_equipment_and_tenant(flow, other_t
     else:
         async with flow.sessions() as db:
             assert await db.scalar(select(func.count()).select_from(ServiceRequest)) == 1
+
+
+async def test_requests_for_equipment_without_serial(flow):
+    """Clearing an equipment serial must not break queues, detail, or mutations."""
+    f = flow
+    request_id = await new_request(f)
+    current = await f.http.get(f'/api/equipment/{f.equipment[0].id}/passport', headers=auth(f.owner, f.org))
+    cleared = await f.http.patch(f'/api/equipment/{f.equipment[0].id}',
+        headers=auth(f.owner, f.org),
+        json={'serial_number': None, 'expected_version': current.json()['version']})
+    assert cleared.status_code == 200, cleared.text
+    for endpoint, headers in [
+        ('/api/service-requests', auth(f.owner, f.org)),
+        (f'/api/service-requests/{request_id}', auth(f.owner, f.org)),
+        ('/api/client-portal/requests', f.manager_headers),
+        (f'/api/client-portal/requests/{request_id}', f.manager_headers),
+    ]:
+        result = await f.http.get(endpoint, headers=headers)
+        assert result.status_code == 200, (endpoint, result.text)
+        payload = result.json()
+        row = next(item for item in payload if item['id'] == request_id) if isinstance(payload, list) else payload
+        assert row['serial_number'] is None
+    await start(f, request_id)
+    other = await f.http.patch(f'/api/equipment/{f.equipment[1].id}',
+        headers=auth(f.owner, f.org),
+        json={'serial_number': None, 'expected_version': f.equipment[1].version})
+    assert other.status_code == 200
+    await new_request(f, index=1)

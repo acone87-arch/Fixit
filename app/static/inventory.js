@@ -202,7 +202,7 @@ async function openEquipmentDetailsEditor(passport) {
     <div class="field hidden" id="inventory-new-type-wrap"><label for="inventory-new-type">Новый тип *</label><input id="inventory-new-type" maxlength="100"></div>
     <div class="field"><label for="inventory-maker">Производитель</label><input id="inventory-maker" maxlength="255" value="${esc(passport.manufacturer || '')}"></div>
     <div class="field"><label for="inventory-model">Модель</label><input id="inventory-model" maxlength="255" value="${esc(passport.model || '')}"></div>
-    <div class="field"><label for="inventory-serial">Серийный номер *</label><input id="inventory-serial" required maxlength="255" value="${esc(passport.serial_number || '')}" autocapitalize="off"></div>
+    <div class="field"><label for="inventory-serial">Серийный номер (необязательно)</label><input id="inventory-serial" maxlength="255" value="${esc(passport.serial_number || '')}" autocapitalize="off"></div>
     <div class="field"><label for="inventory-location">Старое поле расположения</label><input id="inventory-location" maxlength="255" value="${esc(passport.location || '')}"></div>
     <div class="field"><label for="inventory-location-details">Расположение на объекте</label><input id="inventory-location-details" maxlength="500" placeholder="Например: прачечная, корпус 2, 1 этаж" value="${esc(passport.location_details || '')}"><small>Укажите, где именно искать оборудование внутри объекта.</small></div>
     ${!pending ? `<div class="field"><label for="inventory-edit-site">Объект обслуживания</label><select id="inventory-edit-site">${sites.map(site => `<option value="${site.id}" ${site.id === passport.site_id ? 'selected' : ''}>${esc(site.name)}</option>`).join('')}</select></div><div class="field"><label for="inventory-status">Статус</label><select id="inventory-status">${Object.entries(EQUIPMENT_STATUS).map(([key,item]) => `<option value="${key}" ${key === passport.status ? 'selected' : ''}>${item.label}</option>`).join('')}</select></div>` : ''}
@@ -217,7 +217,6 @@ async function openEquipmentDetailsEditor(passport) {
     if (!form.reportValidity()) return;
     const button = event.currentTarget, errorBox = modal.querySelector('#inventory-error');
     const serial = modal.querySelector('#inventory-serial').value.trim();
-    if (!serial) { errorBox.textContent = 'Укажите серийный номер'; return; }
     button.disabled = true; errorBox.textContent = '';
     try {
       let equipment_type_id = modal.querySelector('#inventory-type').value;
@@ -229,7 +228,7 @@ async function openEquipmentDetailsEditor(passport) {
         modal.querySelector('#inventory-type').add(new Option(kind.name, kind.id, true, true));
         equipment_type_id = kind.id;
       }
-      const payload = {equipment_type_id:Number(equipment_type_id), serial_number:serial,
+      const payload = {equipment_type_id:Number(equipment_type_id), serial_number:serial || null,
         manufacturer:modal.querySelector('#inventory-maker').value.trim() || null,
         model:modal.querySelector('#inventory-model').value.trim() || null,
         location:modal.querySelector('#inventory-location').value.trim() || null,

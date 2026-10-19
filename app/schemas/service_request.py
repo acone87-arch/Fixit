@@ -70,7 +70,7 @@ class ServiceRequestListItem(BaseModel):
     equipment_type: str | None = None
     manufacturer: str | None = None
     model: str | None = None
-    serial_number: str
+    serial_number: str | None
     assigned_technician_id: uuid.UUID | None = None
     assigned_technician_name: str | None = None
     approval_target: str = "internal"
@@ -81,7 +81,7 @@ class ServiceRequestListItem(BaseModel):
 class ServiceRequestDetail(BaseModel):
     id: uuid.UUID; number: int; ticket_id: uuid.UUID | None; task_id: uuid.UUID | None; equipment_id: uuid.UUID
     title: str = ""
-    client_name: str | None; site_name: str | None; equipment_name: str; serial_number: str
+    client_name: str | None; site_name: str | None; equipment_name: str; serial_number: str | None
     description: str | None; priority: str; assigned_technician_id: uuid.UUID | None; assigned_technician_name: str | None
     status: str; created_at: datetime; completed_at: datetime | None; approval_target: str = "internal"; repair_id: uuid.UUID | None = None
     parts_used: list[dict] = []; outcome: str | None = None; history: list[dict] = []

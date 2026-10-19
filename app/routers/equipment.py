@@ -289,8 +289,8 @@ async def update_equipment(
         raise HTTPException(409, 'Карточка изменилась. Откройте её заново')
     if equipment.inventory_pending:
         raise HTTPException(409, 'Сначала завершите первичную инвентаризацию')
-    if any(changes.get(key, 'omitted') is None for key in ('site_id', 'status', 'equipment_type_id', 'serial_number')):
-        raise HTTPException(422, 'Тип, серийный номер, объект и статус не могут быть пустыми')
+    if any(changes.get(key, 'omitted') is None for key in ('site_id', 'status', 'equipment_type_id')):
+        raise HTTPException(422, 'Тип, объект и статус не могут быть пустыми')
     if 'equipment_type_id' in changes:
         kind = await db.scalar(select(EquipmentType).where(EquipmentType.id == changes['equipment_type_id'], EquipmentType.organization_id == user.organization_id))
         if not kind:

@@ -166,7 +166,7 @@ async def test_numbering_migration_preserves_existing_labels(inventory_db):
     f.sites[0].inventory_last_number = 0
     f.session.commit()
     spec = importlib.util.spec_from_file_location('qr_numbering_migration',
-        'alembic/versions/20261019_0019_inventory_numbering.py')
+        'alembic/versions/20261019_0020_inventory_numbering.py')
     revision = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(revision)
     with Operations.context(MigrationContext.configure(f.session.connection())):
