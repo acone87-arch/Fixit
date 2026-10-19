@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, Enum, ForeignKey, Index, String, UniqueConstraint
+from sqlalchemy import Boolean, Enum, ForeignKey, Index, Integer, String, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -47,6 +47,8 @@ class Site(Base):
     organization_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("organizations.id"), index=True)
     client_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("clients.id"), index=True)
     name: Mapped[str] = mapped_column(String(255))
+    # Issued QR numbers survive deletion of unused cards.
+    inventory_last_number: Mapped[int] = mapped_column(Integer, default=0, server_default='0')
     address: Mapped[str | None] = mapped_column(String(500))
     contact_name: Mapped[str | None] = mapped_column(String(255))
     contact_phone: Mapped[str | None] = mapped_column(String(32))

@@ -20,7 +20,7 @@ from app.main import health
 
 ROOT = Path(__file__).resolve().parents[1]
 LEGACY_REVISION = "20260825_0000"
-HEAD_REVISION = "20261002_0018"
+HEAD_REVISION = "20261019_0019"
 LEGACY_TABLES = {
     "users", "equipment_types", "equipment", "tasks", "tickets",
     "repairs", "repair_parts", "repair_attachments", "sync_log",

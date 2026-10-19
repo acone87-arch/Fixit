@@ -70,11 +70,19 @@ class EquipmentBatchOut(BaseModel):
     site_id: uuid.UUID
     quantity: int
     completed: int
+    remaining: int
+    deleted: int
     pdf_url: str
     created_at: datetime
 
 
 class EquipmentQRReprint(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    site_id: uuid.UUID
+    equipment_ids: list[uuid.UUID] = Field(min_length=1, max_length=500)
+
+
+class EquipmentPendingDelete(BaseModel):
     model_config = ConfigDict(extra='forbid')
     site_id: uuid.UUID
     equipment_ids: list[uuid.UUID] = Field(min_length=1, max_length=500)

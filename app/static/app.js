@@ -2017,7 +2017,7 @@ async function renderEquipment(content) {
     </div>
     ${canManageInventory ? `<section class="inventory-entry-card" aria-label="Первичная инвентаризация оборудования">
       <div><strong>Первичная инвентаризация</strong><span>Создайте сразу несколько пустых карточек и скачайте PDF с QR-кодами для печати.</span></div>
-      <button class="btn btn-primary" id="inventory-batches-btn">Создать партию оборудования и QR</button>
+      <div class="inventory-entry-actions"><button class="btn btn-primary" id="inventory-batches-btn">Создать партию оборудования и QR</button><button class="btn btn-secondary" id="inventory-delete-pending">Удалить незаполненные QR</button></div>
     </section><section class="inventory-entry-card" aria-label="Повторная печать QR оборудования">
       <div><strong>Перепечатать QR</strong><span>Выберите оборудование на объекте и скачайте готовые этикетки A4.</span></div>
       <button class="btn btn-secondary" id="equipment-qr-reprint">Перепечатать QR</button>
@@ -2029,7 +2029,12 @@ async function renderEquipment(content) {
       </table>
     </div><div class="mobile-card-list" id="equipment-cards"></div>`;
 
-  document.getElementById('inventory-batches-btn')?.addEventListener('click', () => openInventoryBatches(document.getElementById('equipment-location-filter').value).catch(error => toast(error.message, 'error')));
+  const refreshItems = async () => {
+    const nextItems = await api('/equipment');
+    items.splice(0, items.length, ...nextItems); renderRows();
+  };
+  document.getElementById('inventory-batches-btn')?.addEventListener('click', () => openInventoryBatches(document.getElementById('equipment-location-filter').value, refreshItems).catch(error => toast(error.message, 'error')));
+  document.getElementById('inventory-delete-pending')?.addEventListener('click', () => openPendingEquipmentDelete(document.getElementById('equipment-location-filter').value, refreshItems).catch(error => toast(error.message, 'error')));
   document.getElementById('equipment-qr-reprint')?.addEventListener('click', () => openEquipmentQRReprint(document.getElementById('equipment-location-filter').value).catch(error => toast(error.message, 'error')));
   const rows = document.getElementById('equipment-rows');
   const cards = document.getElementById('equipment-cards');
@@ -2039,6 +2044,9 @@ async function renderEquipment(content) {
       .filter((eq) => !selectedLocation || eq.site_id === selectedLocation)
       .sort((a, b) => {
         const byLocation = (siteOf(a.site_id)?.name || '').localeCompare(siteOf(b.site_id)?.name || '', 'ru');
+        if (!byLocation && a.site_id === b.site_id && a.inventory_pending && b.inventory_pending) {
+          return (a.inventory_number || 0) - (b.inventory_number || 0);
+        }
         return byLocation || typeName(a.equipment_type_id).localeCompare(typeName(b.equipment_type_id), 'ru');
       });
     rows.innerHTML = visibleItems.length ? visibleItems.map((eq) => {

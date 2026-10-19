@@ -21,16 +21,18 @@ router = APIRouter(prefix='/api/equipment-inventory', tags=['equipment'])
 
 
 async def batch_out(batch, db):
-    completed = await db.scalar(select(func.count()).select_from(Equipment).where(
-        Equipment.inventory_batch_id == batch.id, Equipment.inventory_pending.is_(False)))
+    remaining, completed = (await db.execute(select(
+        func.count(), func.count().filter(Equipment.inventory_pending.is_(False)),
+    ).select_from(Equipment).where(Equipment.inventory_batch_id == batch.id))).one()
     return EquipmentBatchOut(id=batch.id, site_id=batch.site_id, quantity=batch.quantity,
-        completed=completed, created_at=batch.created_at, pdf_url=f'/api/equipment-inventory/batches/{batch.id}/pdf')
+        completed=completed, remaining=remaining, deleted=batch.quantity - remaining,
+        created_at=batch.created_at, pdf_url=f'/api/equipment-inventory/batches/{batch.id}/pdf')
 
 
 @router.post('/batches', response_model=EquipmentBatchOut, status_code=201)
 async def create_batch(payload: EquipmentBatchCreate, db: AsyncSession = Depends(get_db),
                        user: CurrentUser = Depends(require_roles(UserRole.admin))):
-    # A site lock serializes retries without relying on an in-process mutex.
+    # The site lock serializes both retries and allocation of new QR numbers.
     site = await db.scalar(select(Site).where(Site.id == payload.site_id,
         Site.organization_id == user.organization_id, Site.is_active.is_(True)).with_for_update())
     if not site:
@@ -43,6 +45,10 @@ async def create_batch(payload: EquipmentBatchCreate, db: AsyncSession = Depends
         if (batch.organization_id, batch.site_id, batch.quantity) != (user.organization_id, site.id, payload.quantity):
             raise HTTPException(409, 'Ключ уже использован для другой партии')
         return await batch_out(batch, db)
+    existing_max = await db.scalar(select(func.max(Equipment.inventory_number)).where(
+        Equipment.site_id == site.id, Equipment.organization_id == user.organization_id))
+    first_number = max(site.inventory_last_number, existing_max or 0) + 1
+    site.inventory_last_number = first_number + payload.quantity - 1
     batch = EquipmentInventoryBatch(id=payload.idempotency_key, organization_id=user.organization_id,
         site_id=site.id, quantity=payload.quantity, created_by_user_id=user.id)
     db.add(batch)
@@ -51,7 +57,7 @@ async def create_batch(payload: EquipmentBatchCreate, db: AsyncSession = Depends
         db.add_all([Equipment(organization_id=user.organization_id, site_id=site.id,
             name=f'Оборудование №{number}', equipment_type_id=None, serial_number=None,
             inventory_pending=True, inventory_batch_id=batch.id, inventory_number=number,
-            location=site.name) for number in range(1, payload.quantity + 1)])
+            location=site.name) for number in range(first_number, first_number + payload.quantity)])
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
@@ -80,6 +86,8 @@ async def batch_pdf(batch_id: uuid.UUID, db: AsyncSession = Depends(get_db),
     site = await db.get(Site, batch.site_id)
     rows = (await db.scalars(select(Equipment).where(Equipment.inventory_batch_id == batch.id)
         .order_by(Equipment.inventory_number))).all()
+    if not rows:
+        raise HTTPException(409, 'Все карточки этой партии удалены. Создайте новую партию QR')
     content = await run_in_threadpool(build_inventory_pdf, site.name, str(batch.id),
         [(row.inventory_number, str(row.public_qr_token)) for row in rows], settings.public_app_url.rstrip('/'))
     return Response(content, media_type='application/pdf', headers={
