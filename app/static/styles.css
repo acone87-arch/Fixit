@@ -630,3 +630,48 @@ html[data-theme="light"] .pulse-dialog label { color:var(--light-muted); }
   html[data-text-size="xlarge"] :is(.mobile-info-card,.client-request-card) { min-width:0; overflow-wrap:anywhere; }
   html[data-text-size="xlarge"] .badge { max-width:100%; white-space:normal; }
 }
+
+/* AI draft preview shares the technician form and remains useful on mobile. */
+.ai-workspace { min-width: 0; }
+.ai-controls { display: grid; gap: 12px; }
+.ai-controls label { display: grid; gap: 6px; color: var(--ink-soft); font-size: 12px; font-weight: 600; }
+.ai-controls textarea { width: 100%; box-sizing: border-box; min-height: 100px; resize: vertical; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); }
+.ai-controls .ai-consent { display: flex; align-items: flex-start; gap: 8px; font-size: .9rem; }
+.ai-consent input { flex: 0 0 auto; margin-top: 4px; }
+.ai-output p, .ai-source p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.ai-output button { margin: 8px 8px 0 0; }
+.ai-source { border-top: 1px solid var(--line); padding: 12px 0; }
+.ai-message { font-size: .9rem; overflow-wrap: anywhere; }
+
+/* AI pilot settings follow the current organization and the appearance theme. */
+.profile-ai-card { grid-column:1/-1; }
+.ai-pilot-screen { width:min(1040px,100%); padding-bottom:100px; }
+.ai-pilot-back { display:inline-block; margin-bottom:20px; color:var(--accent); text-decoration:none; }
+.ai-pilot-screen .page-header { gap:16px; align-items:center; flex-wrap:wrap; }
+.ai-pilot-screen .settings-card { background:var(--surface); border-color:var(--line); }
+.ai-pilot-screen .settings-card h2,.ai-pilot-scope h2 { color:var(--ink); }
+.ai-pilot-screen .settings-card p,.ai-pilot-status,.ai-pilot-scope p { color:var(--ink-soft); font-size:13px; line-height:1.6; }
+.ai-pilot-status { min-height:24px; margin:0 0 18px; }
+.ai-pilot-scope { margin-bottom:20px; overflow-wrap:anywhere; }
+.ai-pilot-scope p { margin:8px 0 0; }
+.ai-pilot-body { display:grid; gap:16px; }
+.ai-pilot-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
+.ai-pilot-stats { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; }
+.ai-pilot-stat { min-width:0; padding:20px 16px; border:1px solid var(--line); border-radius:17px; background:var(--surface); }
+.ai-pilot-stat span,.ai-pilot-stat small { display:block; color:var(--ink-soft); font-size:12px; line-height:1.5; }
+.ai-pilot-stat strong { display:block; color:var(--ink); font-size:32px; margin:10px 0; }
+.ai-pilot-facts { margin:16px 0 0; }
+.ai-pilot-facts>div { display:flex; justify-content:space-between; align-items:baseline; gap:16px; padding:12px 0; border-top:1px solid var(--line); }
+.ai-pilot-facts dt { color:var(--ink-soft); font-size:13px; }
+.ai-pilot-facts dd { margin:0; color:var(--ink); font-weight:700; text-align:right; overflow-wrap:anywhere; }
+.ai-pilot-notice { padding:12px 14px; background:var(--surface-sunk); border-radius:10px; color:var(--ink-soft); line-height:1.6; margin:0; }
+.ai-pilot-screen .settings-card>p:last-child { margin:14px 0 0; }
+@media(max-width:767px) {
+ .ai-pilot-screen .page-header { display:flex; }
+ .ai-pilot-grid { grid-template-columns:1fr; }
+ .ai-pilot-stats { grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
+ .ai-pilot-facts>div { flex-wrap:wrap; gap:6px 14px; }
+ .ai-pilot-screen .settings-card { border:1px solid var(--line); border-radius:14px; }
+ .ai-pilot-stat { padding:16px 12px; overflow-wrap:anywhere; }
+ .profile-ai-card { grid-column:auto; }
+}

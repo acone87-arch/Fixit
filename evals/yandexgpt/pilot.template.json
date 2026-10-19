@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "paid_calls_enabled": false,
+  "organization_codes": [
+    "akvadez",
+    "promtekhservis"
+  ],
+  "organization_code_note": "Evaluation labels only; not verified database IDs or organization slugs.",
+  "product_owner_code": null,
+  "dispatcher_code": null,
+  "technician_codes": [],
+  "monthly_budget_rub": 300,
+  "budget_scope": "Shared across both pilot organizations, evaluation calls and retries; calendar month in Asia/Yekaterinburg. No per-organization multiplication.",
+  "budget_authorization": "User specified both organizations and 300 RUB per month on 2026-10-19. Shared total is the conservative interpretation.",
+  "daily_limit_rub": 10,
+  "evaluation_budget_rub": 30,
+  "sub_limit_note": "Conservative implementation allocations within the shared 300 RUB: daily 10 RUB, evaluation 30 RUB total including model smoke. Neither is an additional budget. No runtime enforcement exists yet.",
+  "max_cost_per_accepted_result_rub": null,
+  "provider_account_verified": true,
+  "provider_logging_verified": false,
+  "retention_policy_approved": false,
+  "selected_candidate": null,
+  "candidates": [
+    {
+      "id": "pro-51",
+      "model_uri_template": "gpt://<folder_id>/yandexgpt-5.1",
+      "account_availability": "verified_by_live_call_2026-10-19",
+      "structured_output_smoke": "passed_on_limited_synthetic_cases",
+      "quality_evaluation": "observed_v1_regressions_passed_on_3_tune_cases_not_full_acceptance",
+      "sync_input_rub_per_1000_tokens": 0.8,
+      "sync_output_rub_per_1000_tokens": 0.8
+    },
+    {
+      "id": "pro-5",
+      "model_uri_template": "gpt://<folder_id>/yandexgpt-5-pro",
+      "account_availability": "verified_by_live_call_2026-10-19",
+      "structured_output_smoke": "passed_on_limited_synthetic_cases",
+      "quality_evaluation": "observed_v1_regressions_passed_on_3_tune_cases_not_full_acceptance",
+      "sync_input_rub_per_1000_tokens": 1.2,
+      "sync_output_rub_per_1000_tokens": 1.2
+    }
+  ],
+  "price_checked_on": "2026-10-19",
+  "price_source": "https://aistudio.yandex.ru/ru/docs/ai-studio/pricing",
+  "price_note": "Public synchronous RUB prices including VAT; recheck account tariff before paid calls. This file is a preparation template, not runtime configuration.",
+  "provider_account_verification_scope": "Existing credential successfully called both candidate model URIs; account billing, IAM scope, quotas and tenant mapping not audited.",
+  "request_logging_opt_out_configured": true,
+  "provider_logging_note": "x-data-logging-enabled:false sent on all probe requests; no account-wide tracing/logging audit performed.",
+  "cloud_evaluation_configured": true,
+  "credential_file_note": "Ignored .env.yandex.local with mode 0600; values are never stored in this JSON. Existing FlowInvoice credential reused with user authorization; no credential or IAM changes made.",
+  "cloud_check_summary": {
+    "date": "2026-10-19",
+    "successful_responses": 13,
+    "unreconciled_attempts": 1,
+    "known_cost_estimate_rub": "3.5776",
+    "unreconciled_reserve_rub": "2.821600",
+    "total_accounted_rub": "6.399200",
+    "actual_invoice_reconciled": false,
+    "report": "CLOUD_CHECK_2026-10-19.md",
+    "latest_report": "SEMANTIC_REGRESSION_2026-10-19.md"
+  },
+  "current_prompt_version": "fixit-ai00-evidence-v2"
+}

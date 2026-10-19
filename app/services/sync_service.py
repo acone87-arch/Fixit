@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import get_technician_mobile_warehouse_id
 from app.models.core import Equipment, EquipmentStatus, Task, TaskStatus, Ticket, TicketStatus
 from app.models.warehouse import Part
+from app.models.ai import AIGeneration
 from app.models.repair import Repair, RepairPart, SyncOperation, SyncStatus
 from app.schemas.repair import RepairCreate, SyncItemResult
 from app.services.stock_service import InsufficientStockError, decrement_stock
@@ -205,6 +206,19 @@ async def sync_one_repair(db: AsyncSession, technician_id: uuid.UUID, organizati
             # StockMovement has a real FK to Repair. Flushing the repair first
             # keeps every ledger row attributable even inside the same savepoint.
             await db.flush()
+            # Provenance is optional metadata. Stale/foreign IDs never attach
+            # and never prevent a technician from saving a real repair.
+            if payload.ai_generation_id and linked_request:
+                generation = await db.scalar(select(AIGeneration).where(
+                    AIGeneration.id == payload.ai_generation_id,
+                    AIGeneration.organization_id == organization_id,
+                    AIGeneration.user_id == technician_id,
+                    AIGeneration.request_id == linked_request.id,
+                    AIGeneration.status == "succeeded",
+                    AIGeneration.repair_id.is_(None)).with_for_update())
+                if generation:
+                    generation.repair_id = repair.id
+                    generation.saved_at = datetime.now(timezone.utc)
 
             # Для акта без запчастей склад вообще не нужен. Раньше именно это
             # лишнее требование не давало технику закрыть выполненный ремонт.

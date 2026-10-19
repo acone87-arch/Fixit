@@ -15,6 +15,7 @@ const state = {
 let adminScanStream = null;
 let activeTechnicianWorkspaceCleanup = null;
 let activeServiceRequestDetailCleanup = null;
+let activeAIPilotCleanup = null;
 let activeImageLightbox = null;
 let activeClientPhotoUrls = [];
 let deferredInstallPrompt = null;
@@ -687,6 +688,7 @@ async function renderProfile(content) {
   content.innerHTML = `<section class="profile-screen">
     <header class="page-header"><div><h1>Профиль и настройки</h1><div class="page-subtitle">Личные данные, внешний вид, приложение и безопасность</div></div></header>
     <div class="profile-grid">
+      ${['owner', 'admin', 'dispatcher'].includes(state.me.role) ? '<section class="settings-card profile-ai-card"><span class="settings-kicker">AI</span><h2>Пилот YandexGPT</h2><p>Настройки помощника, общий лимит и результаты вашей организации.</p><a href="#profile/ai" class="btn btn-secondary" id="profile-ai-pilot">Открыть пилот</a></section>' : ''}
       <section class="settings-card profile-identity"><span class="settings-kicker">УЧЁТНАЯ ЗАПИСЬ</span><h2>${esc(state.me.full_name)}</h2>
         <dl><div><dt>Email</dt><dd>${esc(state.me.email)}</dd></div><div><dt>Телефон</dt><dd>${esc(state.me.phone || 'Не указан')}</dd></div><div><dt>Роль</dt><dd>${esc(ROLE_LABEL[state.me.role] || state.me.role)}</dd></div></dl>
       </section>
@@ -779,6 +781,7 @@ async function router() {
     activeServiceRequestDetailCleanup();
     activeServiceRequestDetailCleanup = null;
   }
+  if (activeAIPilotCleanup) { activeAIPilotCleanup(); activeAIPilotCleanup = null; }
   content.innerHTML = '<div class="section-loading">Загрузка…</div>';
   try {
     if (state.route === 'inventory') { content.innerHTML = '<p>Инвентаризация оборудования</p><button class="btn btn-secondary" onclick="openQrQuickAction()">Сканировать QR</button>'; await openInventoryToken(routeId); }
@@ -794,6 +797,7 @@ async function router() {
     else if (state.me.role.startsWith('client_') && state.route === 'documents') await renderClientDocuments(content);
     else if (state.route === 'warehouse') await renderWarehouse(content);
     else if (state.route === 'users') await renderUsers(content);
+    else if (state.route === 'profile' && routeId === 'ai') activeAIPilotCleanup = window.FixitAIPilot.mount(content, {api, role: state.me.role, getSession: () => `${state.token}:${state.me?.organization_id}:${state.me?.id}`});
     else if (state.route === 'profile') await renderProfile(content);
     else content.innerHTML = '<div class="section-loading">Раздел не найден</div>';
   } catch (e) {
@@ -1193,12 +1197,16 @@ async function openTechnicianRequestWorkspace(id, loadedRequest = null) {
     try { equipmentPhotoUrl = URL.createObjectURL(await apiBlob(`/equipment/${request.equipment_id}/photo`)); } catch (_) {}
   }
   const draft = { diagnostic: '', work: '', comment: '', usedParts: {}, photos: [] };
+  draft.aiNote = '';
+  draft.aiGenerationId = null;
   const draftKey = requestDraftKey(request.id);
   const persistedDraft = await RequestDraftStore.get(draftKey).catch(() => null);
   if (persistedDraft) {
     draft.diagnostic = persistedDraft.diagnostic || '';
     draft.work = persistedDraft.work || '';
     draft.comment = persistedDraft.comment || '';
+    draft.aiNote = persistedDraft.aiNote || '';
+    draft.aiGenerationId = persistedDraft.aiGenerationId || null;
     draft.usedParts = persistedDraft.usedParts || {};
     draft.photos = (persistedDraft.photos || []).map(normalizeDraftPhoto).filter(Boolean);
   }
@@ -1209,6 +1217,7 @@ async function openTechnicianRequestWorkspace(id, loadedRequest = null) {
   let completionSync = { repairPending: false, attachmentsPending: 0, fullySynced: true, repairId: null };
   let completionInFlight = false;
   let draftCompleted = false;
+  let cleanupAI = () => {};
   let attachmentPhotoUrls = [];
   const statusText = { assigned: 'Назначена', on_the_way: 'В пути', arrived: 'На объекте', in_progress: 'В работе', waiting_parts: 'Ждёт запчасти', waiting_approval: 'Ждёт согласование', completed: 'Выполнена' };
   // ``arrived`` is only a compatibility row from older deployments; new work
@@ -1227,13 +1236,13 @@ async function openTechnicianRequestWorkspace(id, loadedRequest = null) {
   const persistDraft = async () => {
     if (draftCompleted) return true;
     rememberDraft();
-    try { await RequestDraftStore.put({ key: draftKey, diagnostic: draft.diagnostic, work: draft.work, comment: draft.comment, approvalTarget: draft.approvalTarget, usedParts: draft.usedParts, photos: draft.photos.filter(hasDraftPhotoFile).map(({ file, approvalAttachmentId }) => ({ blob: file, name: file.name, type: file.type, approvalAttachmentId })), completionLocalUuid, completionRepairId, completionQueued, timestamp: new Date().toISOString() }); return true; }
+    try { await RequestDraftStore.put({ key: draftKey, diagnostic: draft.diagnostic, work: draft.work, comment: draft.comment, aiNote: draft.aiNote, aiGenerationId: draft.aiGenerationId, approvalTarget: draft.approvalTarget, usedParts: draft.usedParts, photos: draft.photos.filter(hasDraftPhotoFile).map(({ file, approvalAttachmentId }) => ({ blob: file, name: file.name, type: file.type, approvalAttachmentId })), completionLocalUuid, completionRepairId, completionQueued, timestamp: new Date().toISOString() }); return true; }
     catch (error) { toast(`Черновик не сохранён: ${error.message}. Освободите место и повторите; не закрывайте страницу.`, 'error'); return false; }
   };
   const releasePhotos = () => draft.photos.forEach((photo) => URL.revokeObjectURL(photo.url));
   let workCameraStream = null;
   const stopWorkCamera = () => { workCameraStream?.getTracks().forEach((track) => track.stop()); workCameraStream = null; };
-  const disposeWorkspace = () => { persistDraft(); stopWorkCamera(); releasePhotos(); attachmentPhotoUrls.forEach((url) => URL.revokeObjectURL(url)); attachmentPhotoUrls = []; if (equipmentPhotoUrl) URL.revokeObjectURL(equipmentPhotoUrl); window.removeEventListener('fixit-offline-sync', onOfflineSync); window.removeEventListener('pagehide', persistOnBackground); document.removeEventListener('visibilitychange', persistOnBackground); };
+  const disposeWorkspace = () => { cleanupAI(); persistDraft(); stopWorkCamera(); releasePhotos(); attachmentPhotoUrls.forEach((url) => URL.revokeObjectURL(url)); attachmentPhotoUrls = []; if (equipmentPhotoUrl) URL.revokeObjectURL(equipmentPhotoUrl); window.removeEventListener('fixit-offline-sync', onOfflineSync); window.removeEventListener('pagehide', persistOnBackground); document.removeEventListener('visibilitychange', persistOnBackground); };
   const persistOnBackground = (lifecycleEvent) => { if (document.visibilityState === 'hidden' || lifecycleEvent?.type === 'pagehide') persistDraft(); };
   const addDraftFiles = async (files) => {
     const available = 5 - draft.photos.length;
@@ -1324,6 +1333,7 @@ async function openTechnicianRequestWorkspace(id, loadedRequest = null) {
       if (!await persistDraft()) return;
       if (!window.FixitOffline) throw new Error('Офлайн-движок недоступен; обновите приложение');
       const payload = { local_uuid: completionLocalUuid, equipment_id: request.equipment_id, service_request_id: request.id, fault_type: draft.diagnostic.trim().slice(0, 100) || null, description: [draft.diagnostic.trim() && `Диагностика: ${draft.diagnostic.trim()}`, `Работы: ${draft.work.trim()}`, draft.comment.trim() && `Комментарий: ${draft.comment.trim()}`].filter(Boolean).join('\n'), labor_minutes: 0, client_signer_name: null, client_signed_at: null, started_at: started, closed_at: new Date().toISOString(), device_updated_at: new Date().toISOString(), base_equipment_version: request.equipment_version || 1, parts_used };
+      if (draft.aiGenerationId) payload.ai_generation_id = draft.aiGenerationId;
       if (!completionQueued) {
         await window.FixitOffline.enqueueRepair(payload, draft.photos.map((photo) => ({ file: photo.file, kind: 'after' })));
         completionQueued = true;
@@ -1355,6 +1365,7 @@ async function openTechnicianRequestWorkspace(id, loadedRequest = null) {
     finally { completionInFlight = false; }
   };
   const draw = () => {
+    cleanupAI();
     attachmentPhotoUrls.forEach((url) => URL.revokeObjectURL(url));
     attachmentPhotoUrls = [];
     const timeline = request.history.map((item) => {
@@ -1380,7 +1391,25 @@ async function openTechnicianRequestWorkspace(id, loadedRequest = null) {
       : request.status === 'in_progress' ? '<button class="btn btn-primary tech-request-main" id="request-complete">Завершить работу</button>'
       : request.status === 'waiting_parts' ? '<button class="btn btn-primary tech-request-main" id="request-resume">Продолжить работу</button>'
       : request.status === 'completed' && completionQueued && !completionSync.fullySynced ? '<button class="btn btn-primary tech-request-main" id="request-retry-sync">Повторить отправку фото</button>' : '';
-    content.innerHTML = `<section class="tech-request-workspace"><header class="tech-request-header"><button class="tech-request-back" id="request-back">←</button><div><span>Заявка SR-${String(request.number).padStart(5, '0')}</span><h1>${esc(request.title || 'Заявка на сервис')}</h1></div>${statusBadge()}</header><div class="tech-request-scroll"><section class="tech-request-meta"><div><small>Приоритет</small><strong>${request.priority === 'urgent' ? 'Срочно' : 'Плановая'}</strong></div><div><small>Создана</small><strong>${fmtDate(request.created_at)}</strong></div></section>${syncNotice}${completionSync.errors?.length ? `<div class="tech-request-sync pending">${completionSync.errors.map(esc).join('<br>')}<br>Данные сохранены. После устранения причины повторите отправку.</div>` : ''}<section class="tech-request-section tech-request-equipment"><div><h2>Оборудование</h2><div><button class="btn btn-ghost btn-sm" id="request-equipment-photo">Фото оборудования</button><button class="btn btn-ghost btn-sm" id="request-passport">Открыть паспорт</button></div></div>${equipmentPhotoUrl ? `<img class="tech-request-equipment-photo" src="${equipmentPhotoUrl}" alt="Фото оборудования">` : '<div class="tech-request-equipment-placeholder">FIXIT</div>'}<strong>${esc(request.equipment_type || request.equipment_name)}</strong><p>${esc([request.manufacturer, request.model].filter(Boolean).join(' ') || 'Модель не указана')} · <span class="mono">S/N ${esc(request.serial_number)}</span></p>${badge(EQUIPMENT_STATUS, request.equipment_status || 'working')}</section><section class="tech-request-section tech-request-place"><h2>Место работ</h2>${request.site_name ? `<strong>${esc(request.site_name)}</strong>` : ''}${request.site_address ? `<p>${esc(request.site_address)}</p><a href="https://maps.google.com/?q=${encodeURIComponent(request.site_address)}" target="_blank" rel="noopener">Маршрут</a>` : ''}${request.equipment_location_details ? `<p class="location-details">📍 ${esc(request.equipment_location_details)}</p>` : ''}${request.client_name ? `<small>${esc(request.client_name)}</small>` : ''}${request.contact_name || request.contact_phone ? `<a href="tel:${esc(request.contact_phone || '')}">${esc(request.contact_name || 'Контакт')} · ${esc(request.contact_phone || '')}</a>` : ''}</section><section class="tech-request-section"><h2>Проблема</h2><p>${esc(request.description || 'Описание не добавлено')}</p><div class="tech-request-files">${attachments}</div></section><section class="tech-request-section"><h2>Назначенный техник</h2><p>${esc(request.assigned_technician_name || 'Не назначен')}</p></section>${workArea}${requestResultHtml(request)}<section class="tech-request-section"><h2>История</h2><div class="tech-request-timeline-list">${timeline}</div></section></div><footer>${action}</footer></section>`;
+    content.innerHTML = `<section class="tech-request-workspace"><header class="tech-request-header"><button class="tech-request-back" id="request-back">←</button><div><span>Заявка SR-${String(request.number).padStart(5, '0')}</span><h1>${esc(request.title || 'Заявка на сервис')}</h1></div>${statusBadge()}</header><div class="tech-request-scroll"><section class="tech-request-meta"><div><small>Приоритет</small><strong>${request.priority === 'urgent' ? 'Срочно' : 'Плановая'}</strong></div><div><small>Создана</small><strong>${fmtDate(request.created_at)}</strong></div></section>${syncNotice}${completionSync.errors?.length ? `<div class="tech-request-sync pending">${completionSync.errors.map(esc).join('<br>')}<br>Данные сохранены. После устранения причины повторите отправку.</div>` : ''}<section class="tech-request-section tech-request-equipment"><div><h2>Оборудование</h2><div><button class="btn btn-ghost btn-sm" id="request-equipment-photo">Фото оборудования</button><button class="btn btn-ghost btn-sm" id="request-passport">Открыть паспорт</button></div></div>${equipmentPhotoUrl ? `<img class="tech-request-equipment-photo" src="${equipmentPhotoUrl}" alt="Фото оборудования">` : '<div class="tech-request-equipment-placeholder">FIXIT</div>'}<strong>${esc(request.equipment_type || request.equipment_name)}</strong><p>${esc([request.manufacturer, request.model].filter(Boolean).join(' ') || 'Модель не указана')} · <span class="mono">S/N ${esc(request.serial_number)}</span></p>${badge(EQUIPMENT_STATUS, request.equipment_status || 'working')}</section><section class="tech-request-section tech-request-place"><h2>Место работ</h2>${request.site_name ? `<strong>${esc(request.site_name)}</strong>` : ''}${request.site_address ? `<p>${esc(request.site_address)}</p><a href="https://maps.google.com/?q=${encodeURIComponent(request.site_address)}" target="_blank" rel="noopener">Маршрут</a>` : ''}${request.equipment_location_details ? `<p class="location-details">📍 ${esc(request.equipment_location_details)}</p>` : ''}${request.client_name ? `<small>${esc(request.client_name)}</small>` : ''}${request.contact_name || request.contact_phone ? `<a href="tel:${esc(request.contact_phone || '')}">${esc(request.contact_name || 'Контакт')} · ${esc(request.contact_phone || '')}</a>` : ''}</section><section class="tech-request-section"><h2>Проблема</h2><p>${esc(request.description || 'Описание не добавлено')}</p><div class="tech-request-files">${attachments}</div></section><section class="tech-request-section"><h2>Назначенный техник</h2><p>${esc(request.assigned_technician_name || 'Не назначен')}</p></section>${workArea}<section class="tech-request-section ai-workspace" id="request-ai-workspace"></section>${requestResultHtml(request)}<section class="tech-request-section"><h2>История</h2><div class="tech-request-timeline-list">${timeline}</div></section></div><footer>${action}</footer></section>`;
+    const aiRoot = content.querySelector('#request-ai-workspace');
+    if (window.FixitAIWorkspace && aiRoot) cleanupAI = window.FixitAIWorkspace.mount(aiRoot, {
+      api, uuid: createUuid, requestId: request.id, equipmentId: request.equipment_id,
+      writable: isWorkStatus && !completionQueued && !draftCompleted,
+      note: draft.aiNote || [draft.diagnostic, draft.work, draft.comment].filter(Boolean).join('\n'),
+      getSnapshot: () => { rememberDraft(); return { diagnostic: draft.diagnostic, work: draft.work,
+        comment: draft.comment, status: request.status, queued: completionQueued, completing: completionInFlight, token: state.token }; },
+      onNote: (note) => { draft.aiNote = note; void persistDraft(); },
+      onApply: async (result) => {
+        if (!workStatuses.has(request.status) || completionQueued || completionInFlight || draftCompleted) return false;
+        draft.aiGenerationId = result.generation_id || null;
+        for (const field of ['diagnostic', 'work', 'comment']) {
+          draft[field] = result[field];
+          const input = content.querySelector(`#request-${field}`); if (input) input.value = result[field];
+        }
+        return await persistDraft();
+      },
+    });
     const approvalSelect = content.querySelector('#request-approval-target');
     if (approvalSelect) {
       approvalSelect.value = draft.approvalTarget;
@@ -2618,6 +2647,7 @@ function openCreateUserModal() {
 async function logout() {
   void removePushSubscription(state.token);
   activeTechnicianWorkspaceCleanup?.(); activeTechnicianWorkspaceCleanup = null;
+  activeAIPilotCleanup?.(); activeAIPilotCleanup = null;
   await window.FixitOffline?.logout?.().catch(() => null);
   state.token = null;
   state.me = null;

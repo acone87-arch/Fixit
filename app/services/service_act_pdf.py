@@ -17,10 +17,12 @@ from reportlab.platypus import Image as PdfImage, Paragraph, SimpleDocTemplate, 
 
 
 def _font_name() -> str:
-    """Register a Cyrillic font both in the Docker image and on Windows dev hosts."""
+    """Register a Cyrillic font in Docker and on Windows/macOS dev hosts."""
     candidates = (
         Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
         Path("C:/Windows/Fonts/arial.ttf"),
+        Path("/System/Library/Fonts/Supplemental/Arial.ttf"),
+        Path("/Library/Fonts/Arial.ttf"),
     )
     for path in candidates:
         if path.exists():
