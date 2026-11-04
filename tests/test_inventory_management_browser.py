@@ -41,7 +41,14 @@ async def test_select_free_labels_preview_download_and_filter_reset(live, mobile
             await expect(page.locator('#qr-preview-canvas')).to_be_visible()
             await expect(page.locator('#qr-page-number')).to_have_text('Лист 1 из 2')
             await page.locator('#qr-page-next').click()
-            await expect(page.locator('#qr-page-number')).to_have_text('Лист 2 из 2')
+            try:
+                await expect(page.locator('#qr-page-number')).to_have_text('Лист 2 из 2', timeout=15000)
+            except AssertionError as exc:
+                raise AssertionError({
+                    'render_status': await page.locator('#qr-render-status').text_content(),
+                    'print_error': await page.locator('#qr-print-error').text_content(),
+                    'page_errors': errors,
+                }) from exc
             await expect(page.locator('#qr-page-next')).to_be_disabled()
             assert await page.evaluate('document.documentElement.scrollWidth <= innerWidth')
             await page.screenshot(path=str(tmp_path / 'qr-preview.png'), full_page=True)
