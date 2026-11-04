@@ -25,7 +25,7 @@ def test_client_scope_is_used_for_equipment_requests_and_protected_media():
 
 def test_guest_qr_surface_stays_opaque_and_never_returns_internal_history():
     tickets = Path("app/routers/tickets.py").read_text(encoding="utf8")
-    assert "Equipment.public_qr_token == qr_token" in tickets
+    assert "equipment_for_token(qr_token)" in tickets
     assert "_rate_limit(request, qr_token)" in tickets
     assert "active_request" in tickets
     public_fields = set(__import__("app.schemas.equipment", fromlist=["PublicEquipmentOut"]).PublicEquipmentOut.model_fields)

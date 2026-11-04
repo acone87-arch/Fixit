@@ -65,8 +65,8 @@ async def test_full_alembic_chain_from_empty_through_inventory_0020_and_ai_0022(
                              {'id': marker, 'name': 'Synthetic migration organization', 'slug': 'migration-ai'})
             await db.commit()
         upgrade('20261019_0020')
-        upgrade('head')
-        upgrade('head')
+        upgrade('20261019_0022')
+        upgrade('20261019_0022')
         async with pg.sessions() as db:
             assert await db.scalar(text(f'SELECT version_num FROM "{schema}".alembic_version')) == '20261019_0022'
             assert await db.scalar(text(f'SELECT count(*) FROM "{schema}".organizations WHERE id=:id'), {'id': marker}) == 1

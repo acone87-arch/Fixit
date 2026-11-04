@@ -147,3 +147,40 @@ async def test_print_free_only_rechecks_binding_and_rejects_foreign_selection(pg
     assert (await pg.http.post(endpoint,headers=auth(pg.owner,pg.org),json={'tokens':[tokens[1],foreign_token]})).status_code == 404
     for values in ([], tokens * 251, ['not-a-token']):
         assert (await pg.http.post(endpoint,headers=auth(pg.owner,pg.org),json={'tokens':values})).status_code == 422
+
+async def test_migration_backfills_existing_tokens_and_refuses_data_loss(pg):
+    import importlib.util
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+    spec = importlib.util.spec_from_file_location('qr_migration', 'alembic/versions/20261104_0024_qr_labels.py')
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    async with pg.sessions() as db:
+        active = Equipment(organization_id=pg.org.id, site_id=pg.sites[0].id,
+                           name='Existing machine', equipment_type_id=pg.kind.id, inventory_pending=False)
+        pending = Equipment(organization_id=pg.org.id, site_id=pg.sites[0].id,
+                            name='Legacy placeholder', inventory_pending=True)
+        db.add_all([active, pending])
+        await db.commit()
+        active_id, pending_id = active.id, pending.id
+        active_token, pending_token = active.public_qr_token, pending.public_qr_token
+        connection = await db.connection()
+        def migrate(sync):
+            with Operations.context(MigrationContext.configure(sync)):
+                migration.downgrade()  # An empty label table is safe to recreate.
+                migration.upgrade()
+        await connection.run_sync(migrate)
+        await db.commit()
+        bound = await db.get(QRLabel, active_token)
+        free = await db.get(QRLabel, pending_token)
+        assert bound.equipment_id == active_id and bound.legacy_equipment_id is None
+        assert free.equipment_id is None and free.legacy_equipment_id == pending_id
+        assert await db.scalar(select(func.count()).select_from(Equipment)) == 2
+        connection = await db.connection()
+        def refuse(sync):
+            with Operations.context(MigrationContext.configure(sync)):
+                migration.downgrade()
+        with pytest.raises(RuntimeError, match='QR identities must be preserved'):
+            await connection.run_sync(refuse)
+        await db.rollback()
+        assert await db.scalar(select(func.count()).select_from(QRLabel)) == 2
