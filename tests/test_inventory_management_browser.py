@@ -6,6 +6,7 @@ import pytest
 from pypdf import PdfReader
 
 from test_onboarding_browser import live
+from test_onboarding_postgres import pg
 from test_inventory_browser import signed_page
 from test_inventory_postgres import batch, complete
 
@@ -21,7 +22,7 @@ async def test_select_free_labels_preview_download_and_filter_reset(live, mobile
     assert (await complete(f, labels[0])).status_code == 200
     async with async_playwright() as playwright:
         browser = await playwright.chromium.launch(executable_path=os.getenv('FIXIT_CHROMIUM_PATH') or None)
-        context, page = await signed_page(browser, f, f.owner, mobile)
+        context, page = await signed_page(browser, f, f.owner, mobile, dismiss_onboarding=True)
         errors = []
         page.on('pageerror', lambda error: errors.append(str(error)))
         try:

@@ -16,7 +16,7 @@ from test_inventory_postgres import batch, complete
 pytestmark = [pytest.mark.asyncio,pytest.mark.skipif(os.getenv('FIXIT_RUN_BROWSER')!='1',reason='FIXIT_RUN_BROWSER=1 required')]
 
 
-async def signed_page(browser, f, user, mobile=False):
+async def signed_page(browser, f, user, mobile=False, dismiss_onboarding=False):
     context=await browser.new_context(viewport={'width':390,'height':844} if mobile else {'width':1280,'height':900},
         service_workers='block',is_mobile=mobile,has_touch=mobile)
     authorization = user['Authorization'] if isinstance(user, dict) else auth(user,f.org)['Authorization']
@@ -24,7 +24,9 @@ async def signed_page(browser, f, user, mobile=False):
     claims = json.loads(base64.urlsafe_b64decode(token.split('.')[1] + '=='))
     # PWA onboarding has its own tests; QR scenarios start after it was dismissed.
     onboarding_key = f"fixit-onboarding-dismissed:{f.org.id}:{claims['sub']}"
-    await context.add_init_script('localStorage.setItem("token", '+json.dumps(token)+');localStorage.setItem('+json.dumps(onboarding_key)+',"1");')
+    await context.add_init_script('localStorage.setItem("token", '+json.dumps(token)+');localStorage.setItem("fixit-install-dismissed","1");')
+    if dismiss_onboarding:
+        await context.add_init_script('localStorage.setItem('+json.dumps(onboarding_key)+',"1");')
     return context, await context.new_page()
 
 
@@ -39,7 +41,7 @@ async def test_reprint_selection_download_and_site_change(live, tmp_path, mobile
         assert (await complete(f, row)).status_code == 200
     async with async_playwright() as p:
         browser = await p.chromium.launch(executable_path=os.getenv('FIXIT_CHROMIUM_PATH') or None)
-        context, page = await signed_page(browser, f, f.owner, mobile)
+        context, page = await signed_page(browser, f, f.owner, mobile, dismiss_onboarding=True)
         try:
             await page.goto('http://127.0.0.1:8765/#equipment')
             await page.locator('#equipment-qr-reprint').click()
@@ -83,7 +85,7 @@ async def test_new_site_batch_pdf_mobile_scan_fill_retry_and_next(live, tmp_path
     await f.http.put(f'/api/clients/{f.client.id}/technicians',headers=auth(f.owner,f.org),json={'technician_ids':[str(f.tech.id)]})
     async with async_playwright() as p:
         browser=await p.chromium.launch(executable_path=os.getenv('FIXIT_CHROMIUM_PATH') or None)
-        owner_context,page=await signed_page(browser,f,f.owner)
+        owner_context,page=await signed_page(browser,f,f.owner,dismiss_onboarding=True)
         try:
             await page.goto('http://127.0.0.1:8765/#equipment')
             await page.get_by_role('button', name='QR-наклейки', exact=True).wait_for()
@@ -103,7 +105,7 @@ async def test_new_site_batch_pdf_mobile_scan_fill_retry_and_next(live, tmp_path
             async with f.sessions() as db:
                 rows=(await db.scalars(select(QRLabel).where(QRLabel.equipment_id.is_(None)).order_by(QRLabel.number))).all()
             assert len(rows)==2
-            tech_context,mobile=await signed_page(browser,f,f.tech,True)
+            tech_context,mobile=await signed_page(browser,f,f.tech,True,dismiss_onboarding=True)
             try:
                 await mobile.goto(f'http://127.0.0.1:8765/e/{rows[0].token}')
                 await mobile.locator('#label-new').click()
@@ -145,7 +147,7 @@ async def test_admin_edits_all_card_details_without_changing_qr(live):
     row=done.json()
     async with async_playwright() as p:
         browser=await p.chromium.launch(executable_path=os.getenv('FIXIT_CHROMIUM_PATH') or None)
-        context,page=await signed_page(browser,f,f.owner,True)
+        context,page=await signed_page(browser,f,f.owner,True,dismiss_onboarding=True)
         try:
             await page.goto('http://127.0.0.1:8765/#equipment')
             await page.get_by_role('button', name='QR-наклейки', exact=True).wait_for()
@@ -186,7 +188,7 @@ async def test_site_manager_completes_pending_card_from_mobile_qr(live):
     row=rows[0]
     async with async_playwright() as p:
         browser=await p.chromium.launch(executable_path=os.getenv('FIXIT_CHROMIUM_PATH') or None)
-        manager_context,page=await signed_page(browser,f,manager_headers,True)
+        manager_context,page=await signed_page(browser,f,manager_headers,True,dismiss_onboarding=True)
         try:
             await page.goto(f"http://127.0.0.1:8765/e/{row['public_qr_token']}")
             await page.locator('#label-new').click()
@@ -215,7 +217,7 @@ async def test_save_cards_without_serial(live, mobile, theme):
     _, _, rows = await batch(f, 1)
     async with async_playwright() as p:
         browser = await p.chromium.launch(executable_path=os.getenv('FIXIT_CHROMIUM_PATH') or None)
-        context, page = await signed_page(browser, f, f.owner, mobile)
+        context, page = await signed_page(browser, f, f.owner, mobile, dismiss_onboarding=True)
         await page.set_viewport_size({'width': 390, 'height': 844} if mobile else {'width': 1440, 'height': 1000})
         try:
             await page.goto('http://127.0.0.1:8765/#equipment')
