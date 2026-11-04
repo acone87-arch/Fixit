@@ -1,5 +1,7 @@
 """Mobile primary inventory and admin editing using actual Pulse UI, HTTP and PG."""
 import os
+import base64
+import json
 import uuid
 
 import pytest
@@ -19,7 +21,10 @@ async def signed_page(browser, f, user, mobile=False):
         service_workers='block',is_mobile=mobile,has_touch=mobile)
     authorization = user['Authorization'] if isinstance(user, dict) else auth(user,f.org)['Authorization']
     token=authorization.removeprefix('Bearer ')
-    await context.add_init_script('localStorage.setItem("token", '+__import__('json').dumps(token)+');localStorage.setItem("fixit-install-dismissed","1");')
+    claims = json.loads(base64.urlsafe_b64decode(token.split('.')[1] + '=='))
+    # PWA onboarding has its own tests; QR scenarios start after it was dismissed.
+    onboarding_key = f"fixit-onboarding-dismissed:{f.org.id}:{claims['sub']}"
+    await context.add_init_script('localStorage.setItem("token", '+json.dumps(token)+');localStorage.setItem('+json.dumps(onboarding_key)+',"1");')
     return context, await context.new_page()
 
 
@@ -37,7 +42,6 @@ async def test_reprint_selection_download_and_site_change(live, tmp_path, mobile
         context, page = await signed_page(browser, f, f.owner, mobile)
         try:
             await page.goto('http://127.0.0.1:8765/#equipment')
-            await page.locator('#onboarding-continue').click(timeout=15000)
             await page.locator('#equipment-qr-reprint').click()
             await page.locator('#qr-reprint-site').select_option(str(f.sites[0].id))
             choices = page.locator('#qr-reprint-list input[data-equipment-id]')
@@ -215,7 +219,6 @@ async def test_save_cards_without_serial(live, mobile, theme):
         await page.set_viewport_size({'width': 390, 'height': 844} if mobile else {'width': 1440, 'height': 1000})
         try:
             await page.goto('http://127.0.0.1:8765/#equipment')
-            await page.locator('#onboarding-continue').click(timeout=15000)
             await page.evaluate('(theme) => applyAppearance(theme, "large")', theme)
             await page.locator('#add-equipment-btn').click()
             await page.locator('#f-location-details').fill('Прачечная, этаж 2')
