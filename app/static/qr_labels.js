@@ -172,16 +172,16 @@ async function openQRPrintPreview(labels, freeOnly = false) {
   modal.querySelector('#qr-print-close').onclick = closeModal;
   modal.querySelector('#qr-print-download').onclick = () => downloadBlob(blob, 'fixit-qr-selected.pdf');
   modal.querySelector('#qr-preview-zoom').onclick = event => { const zoomed = modal.querySelector('#qr-preview-area').classList.toggle('is-zoomed'); event.currentTarget.textContent = zoomed ? 'Лист целиком' : 'Крупнее'; event.currentTarget.setAttribute('aria-pressed', String(zoomed)); };
-  let documentPDF = null, loadingTask = null, pageNumber = 1, rendering = false, printing = false, printFrame = null;
+  let documentPDF = null, loadingTask = null, pageNumber = 1, rendering = false, previewReady = false, printing = false, printFrame = null;
   const prev = modal.querySelector('#qr-page-prev'), next = modal.querySelector('#qr-page-next');
   const printButton = modal.querySelector('#qr-print-start');
   const controls = () => {
     prev.disabled = rendering || printing || pageNumber === 1;
     next.disabled = rendering || printing || pageNumber === pages;
-    printButton.disabled = !documentPDF || rendering || printing;
+    printButton.disabled = !documentPDF || !previewReady || rendering || printing;
   };
   const renderPage = async () => {
-    rendering = true; controls();
+    rendering = true; previewReady = false; controls();
     try {
       const page = await documentPDF.getPage(pageNumber);
       if (!modal.isConnected) return;
@@ -191,6 +191,7 @@ async function openQRPrintPreview(labels, freeOnly = false) {
       await page.render({canvasContext:canvas.getContext('2d'), viewport}).promise;
       modal.querySelector('#qr-page-number').textContent = `Лист ${pageNumber} из ${pages}`;
       modal.querySelector('#qr-render-status').hidden = true;
+      previewReady = true;
     } finally { rendering = false; controls(); }
   };
   const changePage = async delta => {
@@ -227,9 +228,9 @@ async function openQRPrintPreview(labels, freeOnly = false) {
   const onRoute = () => { if (modal.isConnected) closeModal(); };
   observer.observe(document.body, {childList:true}); window.addEventListener('hashchange', onRoute);
   try {
-    const pdfjs = await import('/static/vendor/pdfjs/pdf.min.mjs');
+    const pdfjs = await import('/static/vendor/pdfjs/pdf.min.mjs?v=5.6.205-legacy');
     if (!modal.isConnected) return;
-    pdfjs.GlobalWorkerOptions.workerSrc = '/static/vendor/pdfjs/pdf.worker.min.mjs';
+    pdfjs.GlobalWorkerOptions.workerSrc = '/static/vendor/pdfjs/pdf.worker.min.mjs?v=5.6.205-legacy';
     loadingTask = pdfjs.getDocument({data:new Uint8Array(await blob.arrayBuffer()), isEvalSupported:false});
     documentPDF = await loadingTask.promise;
     if (!modal.isConnected) return;
