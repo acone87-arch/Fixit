@@ -9,6 +9,7 @@ from sqlalchemy import func, select
 
 from app.models.core import Equipment, EquipmentInventoryBatch
 from app.models.repair import Repair
+from app.models.qr_label import QRLabel
 from test_onboarding_postgres import pg, auth
 from test_request_workflow_postgres import flow, qr_body, start, repair_body, sync
 
@@ -20,19 +21,31 @@ async def batch(f, quantity=2, **overrides):
     payload.update(overrides)
     response = await f.http.post('/api/equipment-inventory/batches', headers=auth(f.owner,f.org), json=payload)
     assert response.status_code == 201, response.text
-    rows = (await f.http.get('/api/equipment', headers=auth(f.owner,f.org))).json()
-    return payload, response.json(), [row for row in rows if row['inventory_batch_id'] == response.json()['id']]
+    rows = (await f.http.get('/api/qr-labels', headers=auth(f.owner,f.org))).json()
+    return payload, response.json(), [dict(row, id=row['token'], public_qr_token=row['token'],
+        version=1, inventory_number=row['number'], inventory_pending=True, serial_number=None,
+        equipment_type_id=None, location_details=None) for row in rows if row['batch_id'] == response.json()['id']]
 
 
 def details(f, row, **overrides):
     return dict(equipment_type_id=f.kind.id, manufacturer='Karcher', model='BD 50',
-        serial_number='INVENTORY-'+row['id'][:8], location='Этаж 2',
+        serial_number='INVENTORY-'+row['token'][:8], location='Этаж 2',
         location_details='Прачечная, корпус 2, 1 этаж', expected_version=row['version'], **overrides)
 
 
-async def complete(f, row, body=None, user=None):
-    return await f.http.post(f"/api/equipment-inventory/{row['id']}/complete",
-        headers=auth(user or f.owner, f.org), json=body or details(f,row))
+async def complete(f, row, body=None, user=None, headers=None):
+    values = dict(body or details(f,row))
+    values.pop('expected_version', None)
+    values.pop('location', None)
+    response = await f.http.post(f"/api/qr-labels/{row['token']}/bind",
+        headers=headers or auth(user or f.owner, f.org), json={'new_equipment':values,
+        'idempotency_key':row['token']})
+    if response.status_code == 200:
+        passport = await f.http.get(f"/api/equipment/{response.json()['equipment_id']}/passport",
+            headers=auth(f.owner,f.org))
+        row['id'] = passport.json()['id']
+        return passport
+    return response
 
 
 async def test_batch_retries_pdf_and_empty_equipment_identities(pg):
@@ -44,7 +57,7 @@ async def test_batch_retries_pdf_and_empty_equipment_identities(pg):
     responses = await asyncio.gather(*[pg.http.post('/api/equipment-inventory/batches', headers=auth(pg.owner,pg.org), json=payload) for _ in range(4)])
     assert all(r.status_code == 201 and r.json()['id'] == created['id'] for r in responses)
     async with pg.sessions() as db:
-        assert await db.scalar(select(func.count()).select_from(Equipment)) == 9
+        assert await db.scalar(select(func.count()).select_from(Equipment)) == 0
         assert await db.scalar(select(func.count()).select_from(EquipmentInventoryBatch)) == 1
     pdf = await pg.http.get(created['pdf_url'], headers=auth(pg.owner,pg.org))
     assert pdf.status_code == 200
@@ -53,8 +66,8 @@ async def test_batch_retries_pdf_and_empty_equipment_identities(pg):
     urls = [a.get_object()['/A']['/URI'] for page in reader.pages for a in page['/Annots']]
     assert {url.rsplit('/',1)[-1] for url in urls} == {row['public_qr_token'] for row in rows}
     for row in rows:
-        passport = await pg.http.get(f"/api/equipment/{row['id']}/passport", headers=auth(pg.owner,pg.org))
-        assert passport.status_code == 200 and passport.json()['inventory_pending']
+        label = await pg.http.get(f"/api/qr-labels/{row['token']}", headers=auth(pg.owner,pg.org))
+        assert label.status_code == 200 and label.json()['status'] == 'free'
     payload['quantity'] = 8
     assert (await pg.http.post('/api/equipment-inventory/batches', headers=auth(pg.owner,pg.org), json=payload)).status_code == 409
 
@@ -64,11 +77,7 @@ async def test_concurrent_batches_allocate_site_numbers_and_deletion_keeps_water
     results = await asyncio.gather(*[batch(pg, quantity=10) for _ in range(2)])
     numbers = sorted(row['inventory_number'] for _, _, rows in results for row in rows)
     assert numbers == list(range(11, 31))
-    for _, created, rows in results:
-        response = await pg.http.post('/api/equipment/pending/delete', headers=auth(pg.owner, pg.org),
-            json={'site_id': str(pg.sites[0].id), 'equipment_ids': [row['id'] for row in rows]})
-        assert response.status_code == 204, response.text
-        assert (await pg.http.get(created['pdf_url'], headers=auth(pg.owner, pg.org))).status_code == 409
+    # Issued numbers stay reserved even while labels remain free.
     _, _, more = await batch(pg, quantity=2)
     assert sorted(row['inventory_number'] for row in more) == [31, 32]
     _, _, other_site = await batch(pg, quantity=2, site_id=str(pg.sites[1].id))
@@ -138,16 +147,12 @@ async def test_only_admin_can_batch_and_site_manager_or_assigned_technician_can_
     row=rows[0]
     assert (await f.http.post('/api/equipment-inventory/batches', headers=auth(f.tech,f.org), json=payload)).status_code == 403
     assert (await f.http.get(created['pdf_url'], headers=auth(f.tech,f.org))).status_code == 403
-    manager_done = await f.http.post(f"/api/equipment-inventory/{row['id']}/complete",
-        headers=f.manager_headers, json=details(f,row))
+    manager_done = await complete(f,row,headers=f.manager_headers)
     assert manager_done.status_code == 200, manager_done.text
-    assert (await f.http.post(f"/api/equipment-inventory/{row['id']}/complete",
-        headers=f.manager_headers, json=details(f,row))).status_code == 200  # response loss retry
-    manager_change = {**details(f,row), 'model': 'Changed by manager'}
-    assert (await f.http.post(f"/api/equipment-inventory/{row['id']}/complete",
-        headers=f.manager_headers, json=manager_change)).status_code == 409
+    assert (await complete(f,row,headers=f.manager_headers)).status_code == 200
+    assert (await complete(f,row,{**details(f,row), 'model':'Changed'},headers=f.manager_headers)).status_code == 409
     assert (await f.http.patch(f"/api/equipment/{row['id']}", headers=f.manager_headers,
-        json={'model':'Changed','expected_version':2})).status_code == 403
+        json={'model':'Changed','expected_version':1})).status_code == 403
     row=rows[1]
     assert (await complete(f,row,user=f.tech)).status_code == 403
     grant = await f.http.put(f'/api/clients/{f.client.id}/technicians', headers=auth(f.owner,f.org), json={'technician_ids':[str(f.tech.id)]})
@@ -160,8 +165,7 @@ async def test_only_admin_can_batch_and_site_manager_or_assigned_technician_can_
     # Other client / other tenant and unknown batch must remain inaccessible.
     _, _, other = await batch(f, site_id=str(f.sites[2].id))
     assert (await complete(f,other[0],user=f.tech)).status_code == 403
-    assert (await f.http.post(f"/api/equipment-inventory/{other[0]['id']}/complete",
-        headers=f.manager_headers, json=details(f,other[0]))).status_code == 404
+    assert (await complete(f,other[0],headers=f.manager_headers)).status_code in {403,404}
     assert (await f.http.post('/api/equipment-inventory/batches',headers=auth(f.owner,f.org),json={**payload,'idempotency_key':str(uuid.uuid4()),'site_id':str(f.sites[3].id)})).status_code == 404
     assert (await f.http.get('/api/equipment-inventory/batches/'+str(uuid.uuid4())+'/pdf',headers=auth(f.owner,f.org))).status_code == 404
 
@@ -177,9 +181,9 @@ async def test_completion_concurrency_and_duplicate_serial_rollback(pg):
     duplicate=await complete(pg,rows[1],{**details(pg,rows[1]),'serial_number':saved['serial_number']})
     assert duplicate.status_code==409
     async with pg.sessions() as db:
-        remaining=await db.get(Equipment,uuid.UUID(rows[1]['id']))
-        assert remaining.inventory_pending and remaining.serial_number is None and remaining.version==1
-    for changes in [{'serial_number':'x' * 256}, {'equipment_type_id':999999}, {'expected_version':99}]:
+        remaining=await db.get(QRLabel,uuid.UUID(rows[1]['token']))
+        assert remaining.equipment_id is None
+    for changes in [{'serial_number':'x' * 256}, {'equipment_type_id':999999}]:
         assert (await complete(pg,rows[1],{**details(pg,rows[1]),**changes})).status_code in {409,422}
 
 
@@ -188,10 +192,10 @@ async def test_full_admin_edit_and_existing_service_chain(flow):
     _,created,rows=await batch(f)
     row=rows[0]
     # Empty labels must not produce incomplete service records through any intake.
-    assert (await f.http.post(f"/api/public/equipment/{row['public_qr_token']}/tickets",json=qr_body())).status_code==409
+    assert (await f.http.post(f"/api/public/equipment/{row['public_qr_token']}/tickets",json=qr_body())).status_code==404
     request_body={'equipment_id':row['id'],'title':'Не работает'}
-    assert (await f.http.post('/api/service-requests',headers=auth(f.owner,f.org),json=request_body)).status_code==409
-    assert (await f.http.post('/api/client-portal/requests',headers=f.manager_headers,json=request_body)).status_code==409
+    assert (await f.http.post('/api/service-requests',headers=auth(f.owner,f.org),json=request_body)).status_code==422
+    assert (await f.http.post('/api/client-portal/requests',headers=f.manager_headers,json=request_body)).status_code==404
     done=await complete(f,row); assert done.status_code==200,done.text
     saved=done.json()
     assert (saved['id'],saved['public_qr_token'])==(row['id'],row['public_qr_token'])

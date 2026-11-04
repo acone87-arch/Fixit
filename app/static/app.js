@@ -633,13 +633,10 @@ function openQrQuickAction() {
     const token = qrTokenFromValue(rawValue);
     if (!token) return toast('Считайте QR-код или вставьте ссылку', 'error');
     try {
-      const equipment = await api(`/equipment/by-qr/${encodeURIComponent(token)}`);
       closeModal();
-      if (equipment.passport_allowed === false) {
-        toast(`Оборудование: ${equipment.serial_number || equipment.id}. Полный паспорт доступен после назначения клиента в обслуживание.`, 'info');
-        return;
-      }
-      await openEquipmentPassport(equipment.id);
+      const nextHash = `#inventory/${encodeURIComponent(token)}`;
+      if (location.hash === nextHash) await renderLabelBinding(document.getElementById('content'), token);
+      else location.hash = nextHash;
     } catch (error) { toast(error.message || 'Оборудование по QR не найдено', 'error'); }
   };
   const startCamera = async () => {
@@ -767,7 +764,7 @@ async function router() {
   state.clientTab = state.clientId ? (routeTab || 'overview') : null;
   state.clientSiteId = state.clientTab === 'sites' && routeChildId ? routeChildId : null;
   const allowedRoutes = [...(NAV[state.me?.role] || []).map(([key]) => key), 'profile'];
-  if (!allowedRoutes.includes(state.route) && state.route !== 'inventory') {
+  if (!allowedRoutes.includes(state.route) && !['inventory', 'labels'].includes(state.route)) {
     state.route = defaultRoute;
     history.replaceState(null, '', `#${defaultRoute}`);
   }
@@ -784,7 +781,8 @@ async function router() {
   if (activeAIPilotCleanup) { activeAIPilotCleanup(); activeAIPilotCleanup = null; }
   content.innerHTML = '<div class="section-loading">Загрузка…</div>';
   try {
-    if (state.route === 'inventory') { content.innerHTML = '<p>Инвентаризация оборудования</p><button class="btn btn-secondary" onclick="openQrQuickAction()">Сканировать QR</button>'; await openInventoryToken(routeId); }
+    if (state.route === 'inventory') { await renderLabelBinding(content, routeId); }
+    else if (state.route === 'labels') await renderQRLabels(content);
     else if (state.route === 'pulse') await renderPulse(content);
     else if (state.me.role.startsWith('client_') && state.route === 'requests' && state.requestId) await renderClientRequest(content, state.requestId);
     else if (state.route === 'requests' && state.requestId) await openServiceRequest(state.requestId);
@@ -2026,7 +2024,7 @@ async function renderEquipment(content) {
   const clientOf = (id) => state.clients.find((client) => client.id === id);
   const canEdit = state.me.role !== 'technician';
   const technicianFleet = state.me.role === 'technician';
-  const canManageInventory = ['owner', 'admin'].includes(state.me.role);
+  const canManageInventory = ['owner', 'admin', 'dispatcher'].includes(state.me.role);
   const activeSites = state.sites.filter((site) => site.is_active);
 
   content.innerHTML = `
@@ -2044,13 +2042,8 @@ async function renderEquipment(content) {
         ${canEdit ? '<button class="btn btn-primary" id="add-equipment-btn">+ Добавить оборудование</button>' : ''}
       </div>
     </div>
-    ${canManageInventory ? `<section class="inventory-entry-card" aria-label="Первичная инвентаризация оборудования">
-      <div><strong>Первичная инвентаризация</strong><span>Создайте сразу несколько пустых карточек и скачайте PDF с QR-кодами для печати.</span></div>
-      <div class="inventory-entry-actions"><button class="btn btn-primary" id="inventory-batches-btn">Создать партию оборудования и QR</button><button class="btn btn-secondary" id="inventory-delete-pending">Удалить незаполненные QR</button></div>
-    </section><section class="inventory-entry-card" aria-label="Повторная печать QR оборудования">
-      <div><strong>Перепечатать QR</strong><span>Выберите оборудование на объекте и скачайте готовые этикетки A4.</span></div>
-      <button class="btn btn-secondary" id="equipment-qr-reprint">Перепечатать QR</button>
-    </section>` : ''}
+    <div class="qr-section-tabs"><button class="btn btn-primary" aria-current="page">Оборудование</button><button class="btn btn-secondary" onclick="location.hash='labels'">QR-наклейки</button></div>
+    ${canManageInventory ? `<section class="inventory-entry-card"><div><strong>Маркировка оборудования</strong><span>Свободные наклейки хранятся отдельно. Отсканируйте QR, чтобы выбрать или добавить машину.</span></div><button class="btn btn-secondary" id="equipment-qr-reprint">Печать QR оборудования</button></section>` : ''}
     <div class="card mobile-table" style="padding:0">
       <table>
         <thead><tr><th>Тип оборудования</th><th>Серийный №</th><th>Статус</th><th>Клиент и объект</th></tr></thead>
@@ -2062,8 +2055,6 @@ async function renderEquipment(content) {
     const nextItems = await api('/equipment');
     items.splice(0, items.length, ...nextItems); renderRows();
   };
-  document.getElementById('inventory-batches-btn')?.addEventListener('click', () => openInventoryBatches(document.getElementById('equipment-location-filter').value, refreshItems).catch(error => toast(error.message, 'error')));
-  document.getElementById('inventory-delete-pending')?.addEventListener('click', () => openPendingEquipmentDelete(document.getElementById('equipment-location-filter').value, refreshItems).catch(error => toast(error.message, 'error')));
   document.getElementById('equipment-qr-reprint')?.addEventListener('click', () => openEquipmentQRReprint(document.getElementById('equipment-location-filter').value).catch(error => toast(error.message, 'error')));
   const rows = document.getElementById('equipment-rows');
   const cards = document.getElementById('equipment-cards');
@@ -2271,7 +2262,7 @@ async function openCreateServiceRequestForEquipment(passport) {
 async function openEquipmentPassport(id) {
   try {
     const [passport, qrBlob] = await Promise.all([api(`/equipment/${id}/passport`), apiBlob(`/equipment/${id}/qr`)]);
-    if (passport.inventory_pending) return openEquipmentDetailsEditor(passport);
+    if (passport.inventory_pending) { location.hash = `inventory/${passport.public_qr_token}`; return; }
     const qrObjectUrl = URL.createObjectURL(qrBlob);
     const equipmentTypeName = (state.equipmentTypes.find((type) => type.id === passport.equipment_type_id) || {}).name || passport.name;
     const clientName = readableClientName(passport.client_name, passport.site_name);

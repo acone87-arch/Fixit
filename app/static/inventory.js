@@ -131,10 +131,10 @@ async function openInventoryBatches(selectedSite = '', onCreated = async () => {
   await ensureCustomers(true);
   const sites = state.sites.filter(site => site.is_active);
   if (!sites.length) return toast('Сначала создайте объект обслуживания', 'error');
-  const modal = openModal('Первичная инвентаризация', `
-    <p>Создайте пустые карточки, распечатайте QR и заполните оборудование на объекте с телефона.</p>
+  const modal = openModal('Новая партия наклеек', `
+    <p>Подготовьте свободные QR-наклейки для объекта. Оборудование появится только после привязки к новой машине.</p>
     <div class="field"><label for="inventory-site">Объект</label><select id="inventory-site">${sites.map(site => `<option value="${site.id}" ${selectedSite === site.id ? 'selected' : ''}>${esc(site.name)} · ${esc(site.client_name || '')}</option>`).join('')}</select></div>
-    <div class="field"><label for="inventory-count">Количество оборудования</label><input id="inventory-count" type="number" min="1" max="500" value="10"></div>
+    <div class="field"><label for="inventory-count">Количество наклеек</label><input id="inventory-count" type="number" min="1" max="500" value="10"></div>
     <p class="text-soft">От 1 до 500 QR в партии. Нумерация продолжается с последнего выданного номера на объекте. PDF: A4, 8 этикеток на листе, печать в масштабе 100%.</p>
     <div id="inventory-batches">Загрузка партий…</div>`,
     '<button class="btn btn-secondary" id="inventory-close">Закрыть</button><button class="btn btn-primary" id="inventory-generate">Создать партию QR</button>');
@@ -144,7 +144,7 @@ async function openInventoryBatches(selectedSite = '', onCreated = async () => {
     const siteId = modal.querySelector('#inventory-site').value;
     const batches = await api(`/equipment-inventory/batches?site_id=${encodeURIComponent(siteId)}`);
     if (siteId !== modal.querySelector('#inventory-site').value) return;
-    modal.querySelector('#inventory-batches').innerHTML = batches.length ? batches.map(batch => `<p><strong>Партия ${esc(batch.id.slice(0,8))}</strong> · ${fmtDate(batch.created_at)}<br>Заполнено ${batch.completed} из ${batch.remaining}${batch.deleted ? ` · Удалено: ${batch.deleted}` : ''} <button class="btn btn-secondary" data-inventory-pdf="${batch.id}" ${batch.remaining === 0 ? 'disabled' : ''}>Скачать PDF</button></p>`).join('') : '<p>На этом объекте ещё нет партий QR.</p>';
+    modal.querySelector('#inventory-batches').innerHTML = batches.length ? batches.map(batch => `<p><strong>Партия ${esc(batch.id.slice(0,8))}</strong> · ${fmtDate(batch.created_at)}<br>Привязано ${batch.completed} · Свободно ${batch.remaining - batch.completed} · Всего ${batch.remaining}${batch.deleted ? ` · Удалено: ${batch.deleted}` : ''} <button class="btn btn-secondary" data-inventory-pdf="${batch.id}" ${batch.remaining === 0 ? 'disabled' : ''}>Скачать PDF</button></p>`).join('') : '<p>На этом объекте ещё нет партий QR.</p>';
     modal.querySelectorAll('[data-inventory-pdf]').forEach(button => button.onclick = async () => {
       button.disabled = true;
       try {
@@ -172,7 +172,7 @@ async function openInventoryBatches(selectedSite = '', onCreated = async () => {
       button.disabled = true;
       await api('/equipment-inventory/batches', {method:'POST', body:JSON.stringify(attempt)});
       localStorage.removeItem(storageKey); attempt = null;
-      toast('Партия создана. Скачайте PDF для печати');
+      toast('Наклейки созданы. Скачайте PDF и привяжите их на объекте');
       await refresh();
       await onCreated();
     } catch (error) { toast(error.message, 'error'); }
@@ -182,9 +182,7 @@ async function openInventoryBatches(selectedSite = '', onCreated = async () => {
 }
 
 async function openInventoryToken(token) {
-  const equipment = await api(`/equipment/by-qr/${encodeURIComponent(token)}`);
-  if (equipment.passport_allowed === false) throw new Error('Оборудование не назначено вам для обслуживания');
-  await openEquipmentPassport(equipment.id);
+  location.hash = `inventory/${encodeURIComponent(token)}`;
 }
 
 async function openEquipmentDetailsEditor(passport) {

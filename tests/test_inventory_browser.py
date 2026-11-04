@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy import select
 
 from app.models.core import Equipment
+from app.models.qr_label import QRLabel
 from test_onboarding_postgres import pg, auth, invite, accept
 from test_onboarding_browser import live
 from test_inventory_postgres import batch, complete
@@ -81,8 +82,8 @@ async def test_new_site_batch_pdf_mobile_scan_fill_retry_and_next(live, tmp_path
         owner_context,page=await signed_page(browser,f,f.owner)
         try:
             await page.goto('http://127.0.0.1:8765/#equipment')
-            await page.locator('#inventory-batches-btn').wait_for()
-            await expect(page.locator('#inventory-batches-btn')).to_have_text('Создать партию оборудования и QR')
+            await page.get_by_role('button', name='QR-наклейки', exact=True).wait_for()
+            await expect(page.get_by_role('button', name='QR-наклейки', exact=True)).to_be_visible()
             await page.evaluate('(client) => openCreateSiteModal(client)',str(f.client.id))
             await page.locator('#f-site-name').fill('Новый объект для инвентаризации')
             await page.locator('#modal-save').click()
@@ -96,33 +97,36 @@ async def test_new_site_batch_pdf_mobile_scan_fill_retry_and_next(live, tmp_path
             await download.save_as(tmp_path/'labels.pdf')
             assert (tmp_path/'labels.pdf').read_bytes().startswith(b'%PDF')
             async with f.sessions() as db:
-                rows=(await db.scalars(select(Equipment).where(Equipment.inventory_pending.is_(True)).order_by(Equipment.inventory_number))).all()
+                rows=(await db.scalars(select(QRLabel).where(QRLabel.equipment_id.is_(None)).order_by(QRLabel.number))).all()
             assert len(rows)==2
             tech_context,mobile=await signed_page(browser,f,f.tech,True)
             try:
-                await mobile.goto(f'http://127.0.0.1:8765/e/{rows[0].public_qr_token}')
-                await expect(mobile.locator('#inventory-type')).to_be_visible()
+                await mobile.goto(f'http://127.0.0.1:8765/e/{rows[0].token}')
+                await mobile.locator('#label-new').click()
+                await expect(mobile.locator('#label-type')).to_be_visible()
                 assert await mobile.evaluate('document.documentElement.scrollWidth <= document.documentElement.clientWidth')
-                await mobile.locator('#inventory-type').select_option(str(f.kind.id))
-                await mobile.locator('#inventory-maker').fill('Мобильный производитель')
-                await mobile.locator('#inventory-model').fill('Модель с телефона')
-                await mobile.locator('#inventory-serial').fill('MOBILE-INVENTORY')
-                await mobile.locator('#inventory-photo').set_input_files({'name':'machine.png','mimeType':'image/png','buffer':photo_bytes()})
-                await mobile.evaluate('''() => { const original=window.fetch;let lost=false;window.fetch=async (...args)=>{const response=await original(...args);if(String(args[0]).endsWith('/complete')&&!lost){lost=true;throw new Error('Lost response after commit');}return response;}; }''')
-                await mobile.locator('#inventory-save').click()
-                await expect(mobile.locator('#inventory-error')).to_contain_text('Lost response')
-                await mobile.locator('#inventory-save').click()
-                await expect(mobile.locator('#inventory-next')).to_be_visible()
-                await mobile.locator('#inventory-next').click()
-                await mobile.locator('#admin-qr-manual').fill(f'http://127.0.0.1:8765/e/{rows[1].public_qr_token}')
+                await mobile.locator('#label-type').select_option(str(f.kind.id))
+                await mobile.locator('#label-maker').fill('Мобильный производитель')
+                await mobile.locator('#label-model').fill('Модель с телефона')
+                await mobile.locator('#label-serial').fill('MOBILE-INVENTORY')
+                await mobile.evaluate('''() => { const original=window.fetch;let lost=false;window.fetch=async (...args)=>{const response=await original(...args);if(String(args[0]).endsWith('/bind')&&!lost){lost=true;throw new Error('Lost response after commit');}return response;}; }''')
+                await mobile.locator('#label-review').click()
+                await mobile.locator('#label-confirm').click()
+                await expect(mobile.locator('#label-bind-error')).to_contain_text('Lost response')
+                await mobile.locator('#label-confirm').click()
+                await expect(mobile.locator('#label-next')).to_be_visible()
+                await mobile.locator('#label-next').click()
+                await mobile.locator('#admin-qr-manual').fill(f'http://127.0.0.1:8765/e/{rows[1].token}')
                 await mobile.locator('#admin-qr-open').click()
-                await expect(mobile.locator('#inventory-serial')).to_have_value('')
+                await mobile.locator('#label-new').click()
+                await expect(mobile.locator('#label-serial')).to_have_value('')
                 async with f.sessions() as db:
-                    saved=await db.get(Equipment,rows[0].id)
-                    assert not saved.inventory_pending and saved.public_qr_token==rows[0].public_qr_token
+                    label=await db.get(QRLabel,rows[0].token)
+                    saved=await db.get(Equipment,label.equipment_id)
+                    assert not saved.inventory_pending and saved.public_qr_token==rows[0].token
                     assert saved.serial_number=='MOBILE-INVENTORY'
-                passport=await f.http.get(f'/api/equipment/{rows[0].id}/passport',headers=auth(f.owner,f.org))
-                assert passport.json()['primary_photo'] is not None
+                passport=await f.http.get(f'/api/equipment/{saved.id}/passport',headers=auth(f.owner,f.org))
+                assert passport.json()['model'] == 'Модель с телефона'
             finally:
                 await tech_context.close()
         finally:
@@ -140,7 +144,7 @@ async def test_admin_edits_all_card_details_without_changing_qr(live):
         context,page=await signed_page(browser,f,f.owner,True)
         try:
             await page.goto('http://127.0.0.1:8765/#equipment')
-            await page.locator('#inventory-batches-btn').wait_for()
+            await page.get_by_role('button', name='QR-наклейки', exact=True).wait_for()
             await page.evaluate('(id)=>openEquipmentPassport(id)',row['id'])
             await expect(page.locator('#passport-manage')).to_have_text('Редактировать карточку')
             await page.locator('#passport-manage').click()
@@ -181,14 +185,17 @@ async def test_site_manager_completes_pending_card_from_mobile_qr(live):
         manager_context,page=await signed_page(browser,f,manager_headers,True)
         try:
             await page.goto(f"http://127.0.0.1:8765/e/{row['public_qr_token']}")
-            await expect(page.locator('#inventory-type')).to_be_visible()
-            await page.locator('#inventory-type').select_option(str(f.kind.id))
-            await page.locator('#inventory-serial').fill('SITE-MANAGER-INVENTORY')
-            await page.locator('#inventory-location').fill('Комната главного менеджера')
-            await page.locator('#inventory-save').click()
-            await expect(page.locator('#inventory-next')).to_be_visible()
+            await page.locator('#label-new').click()
+            await expect(page.locator('#label-type')).to_be_visible()
+            await page.locator('#label-type').select_option(str(f.kind.id))
+            await page.locator('#label-serial').fill('SITE-MANAGER-INVENTORY')
+            await page.locator('#label-location').fill('Комната главного менеджера')
+            await page.locator('#label-review').click()
+            await page.locator('#label-confirm').click()
+            await expect(page.locator('#label-next')).to_be_visible()
             async with f.sessions() as db:
-                saved=await db.get(Equipment,uuid.UUID(row['id']))
+                label=await db.get(QRLabel,uuid.UUID(row['token']))
+                saved=await db.get(Equipment,label.equipment_id)
                 assert not saved.inventory_pending
                 assert saved.serial_number=='SITE-MANAGER-INVENTORY'
                 assert saved.public_qr_token==uuid.UUID(row['public_qr_token'])
@@ -219,13 +226,17 @@ async def test_save_cards_without_serial(live, mobile, theme):
             await expect(page.locator('#inventory-location-details')).to_have_value('Прачечная, этаж 2')
             await page.locator('#inventory-save').click()
             await expect(page.locator('#passport-manage')).to_be_visible()
-            await page.evaluate('(id) => openEquipmentPassport(id)', rows[0]['id'])
-            await page.locator('#inventory-type').select_option(str(f.kind.id))
-            await page.locator('#inventory-location-details').fill('Корпус 1')
+            await page.locator('#passport-close').click()
+            await page.goto(f"http://127.0.0.1:8765/#inventory/{rows[0]['token']}")
+            await page.locator('#label-new').click()
+            await page.locator('#label-type').select_option(str(f.kind.id))
+            await page.locator('#label-location').fill('Корпус 1')
             assert await page.evaluate('document.documentElement.scrollWidth <= document.documentElement.clientWidth')
-            await page.locator('#inventory-save').click()
-            await expect(page.locator('#inventory-next')).to_be_visible()
-            result = await f.http.get(f"/api/equipment/{rows[0]['id']}/passport", headers=auth(f.owner, f.org))
+            await page.locator('#label-review').click()
+            await page.locator('#label-confirm').click()
+            await expect(page.locator('#label-next')).to_be_visible()
+            label = (await f.http.get(f"/api/qr-labels/{rows[0]['token']}", headers=auth(f.owner, f.org))).json()
+            result = await f.http.get(f"/api/equipment/{label['equipment_id']}/passport", headers=auth(f.owner, f.org))
             assert result.json()['serial_number'] is None
             assert not result.json()['inventory_pending']
         finally:
