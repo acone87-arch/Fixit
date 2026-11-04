@@ -4,4 +4,7 @@ from app.models.organization import AuditEvent, Organization, OrganizationMember
 from app.models.repair import Repair, RepairAttachment, RepairPart, SyncLog, SyncOperation  # noqa: F401
 from app.models.service_request import ServiceRequest, ServiceRequestAttachment, ServiceRequestEvent  # noqa: F401
 from app.models.push import PushSubscription  # noqa: F401
+from app.models.ai import AIGeneration  # noqa: F401
 from app.models.warehouse import Part, StockMovement, Warehouse, WarehouseStock  # noqa: F401
+
+from app.models.qr_label import QRLabel  # noqa: F401

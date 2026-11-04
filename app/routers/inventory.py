@@ -12,7 +12,9 @@ from app.core.deps import CurrentUser, get_current_user, require_roles
 from app.database import get_db
 from app.models.core import Equipment, EquipmentInventoryBatch, EquipmentType, UserRole
 from app.models.customer import Site
+from app.models.qr_label import QRLabel
 from app.schemas.equipment import EquipmentBatchCreate, EquipmentBatchOut, EquipmentInventoryComplete, EquipmentOut, EquipmentQRReprint
+from app.services.qr_labels import preferred_label
 from app.services.access_policy import ensure_equipment_access
 from app.services.inventory_pdf import build_inventory_pdf, build_equipment_sheet_pdf
 from app.services.equipment_label_pdf import EquipmentLabel
@@ -22,8 +24,8 @@ router = APIRouter(prefix='/api/equipment-inventory', tags=['equipment'])
 
 async def batch_out(batch, db):
     remaining, completed = (await db.execute(select(
-        func.count(), func.count().filter(Equipment.inventory_pending.is_(False)),
-    ).select_from(Equipment).where(Equipment.inventory_batch_id == batch.id))).one()
+        func.count(), func.count().filter(QRLabel.equipment_id.is_not(None)),
+    ).select_from(QRLabel).where(QRLabel.batch_id == batch.id))).one()
     return EquipmentBatchOut(id=batch.id, site_id=batch.site_id, quantity=batch.quantity,
         completed=completed, remaining=remaining, deleted=batch.quantity - remaining,
         created_at=batch.created_at, pdf_url=f'/api/equipment-inventory/batches/{batch.id}/pdf')
@@ -31,7 +33,7 @@ async def batch_out(batch, db):
 
 @router.post('/batches', response_model=EquipmentBatchOut, status_code=201)
 async def create_batch(payload: EquipmentBatchCreate, db: AsyncSession = Depends(get_db),
-                       user: CurrentUser = Depends(require_roles(UserRole.admin))):
+                       user: CurrentUser = Depends(require_roles(UserRole.admin, UserRole.dispatcher))):
     # The site lock serializes both retries and allocation of new QR numbers.
     site = await db.scalar(select(Site).where(Site.id == payload.site_id,
         Site.organization_id == user.organization_id, Site.is_active.is_(True)).with_for_update())
@@ -54,10 +56,9 @@ async def create_batch(payload: EquipmentBatchCreate, db: AsyncSession = Depends
     db.add(batch)
     try:
         await db.flush()
-        db.add_all([Equipment(organization_id=user.organization_id, site_id=site.id,
-            name=f'Оборудование №{number}', equipment_type_id=None, serial_number=None,
-            inventory_pending=True, inventory_batch_id=batch.id, inventory_number=number,
-            location=site.name) for number in range(first_number, first_number + payload.quantity)])
+        db.add_all([QRLabel(organization_id=user.organization_id, site_id=site.id,
+            batch_id=batch.id, number=number)
+            for number in range(first_number, first_number + payload.quantity)])
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
@@ -68,7 +69,7 @@ async def create_batch(payload: EquipmentBatchCreate, db: AsyncSession = Depends
 
 @router.get('/batches', response_model=list[EquipmentBatchOut])
 async def list_batches(site_id: uuid.UUID | None = None, db: AsyncSession = Depends(get_db),
-                       user: CurrentUser = Depends(require_roles(UserRole.admin))):
+                       user: CurrentUser = Depends(require_roles(UserRole.admin, UserRole.dispatcher))):
     statement = select(EquipmentInventoryBatch).where(EquipmentInventoryBatch.organization_id == user.organization_id)
     if site_id:
         statement = statement.where(EquipmentInventoryBatch.site_id == site_id)
@@ -78,25 +79,25 @@ async def list_batches(site_id: uuid.UUID | None = None, db: AsyncSession = Depe
 
 @router.get('/batches/{batch_id}/pdf')
 async def batch_pdf(batch_id: uuid.UUID, db: AsyncSession = Depends(get_db),
-                    user: CurrentUser = Depends(require_roles(UserRole.admin))):
+                    user: CurrentUser = Depends(require_roles(UserRole.admin, UserRole.dispatcher))):
     batch = await db.scalar(select(EquipmentInventoryBatch).where(EquipmentInventoryBatch.id == batch_id,
         EquipmentInventoryBatch.organization_id == user.organization_id))
     if not batch:
         raise HTTPException(404, 'Партия не найдена')
     site = await db.get(Site, batch.site_id)
-    rows = (await db.scalars(select(Equipment).where(Equipment.inventory_batch_id == batch.id)
-        .order_by(Equipment.inventory_number))).all()
+    rows = (await db.scalars(select(QRLabel).where(QRLabel.batch_id == batch.id)
+        .order_by(QRLabel.number))).all()
     if not rows:
         raise HTTPException(409, 'Все карточки этой партии удалены. Создайте новую партию QR')
     content = await run_in_threadpool(build_inventory_pdf, site.name, str(batch.id),
-        [(row.inventory_number, str(row.public_qr_token)) for row in rows], settings.public_app_url.rstrip('/'))
+        [(row.number, str(row.token)) for row in rows], settings.public_app_url.rstrip('/'))
     return Response(content, media_type='application/pdf', headers={
         'Content-Disposition': f'attachment; filename="fixit-qr-{batch.id}.pdf"', 'Cache-Control': 'no-store'})
 
 
 @router.post('/reprint/pdf')
 async def reprint_pdf(payload: EquipmentQRReprint, db: AsyncSession = Depends(get_db),
-                      user: CurrentUser = Depends(require_roles(UserRole.admin))):
+                      user: CurrentUser = Depends(require_roles(UserRole.admin, UserRole.dispatcher))):
     site = await db.scalar(select(Site).where(Site.id == payload.site_id,
         Site.organization_id == user.organization_id))
     if not site:
@@ -110,10 +111,11 @@ async def reprint_pdf(payload: EquipmentQRReprint, db: AsyncSession = Depends(ge
     labels = []
     for equipment_id in ids:
         row = await ensure_equipment_access(equipment_id, user, db)
-        labels.append(EquipmentLabel(token=str(row.public_qr_token), site_name=site.name,
+        label = await preferred_label(row, db)
+        labels.append(EquipmentLabel(token=str(label.token if label else row.public_qr_token), site_name=site.name,
             equipment_name=' '.join(filter(None, [row.manufacturer, row.model])) or row.name,
-            inventory_number=row.inventory_number,
-            batch_id=str(row.inventory_batch_id) if row.inventory_batch_id else None))
+            inventory_number=label.number if label else row.inventory_number,
+            batch_id=str(label.batch_id) if label and label.batch_id else str(row.inventory_batch_id) if row.inventory_batch_id else None))
     content = await run_in_threadpool(build_equipment_sheet_pdf, labels, settings.public_app_url.rstrip('/'))
     return Response(content, media_type='application/pdf', headers={
         'Content-Disposition': f'attachment; filename="fixit-qr-reprint-{site.id}.pdf"',
@@ -125,6 +127,9 @@ async def complete_inventory(equipment_id: uuid.UUID, payload: EquipmentInventor
                              db: AsyncSession = Depends(get_db), user: CurrentUser = Depends(get_current_user)):
     if user.role not in {UserRole.owner, UserRole.admin, UserRole.technician, UserRole.client_site_user}:
         raise HTTPException(403, 'Заполнять карточку может администратор, менеджер объекта или назначенный техник')
+    label = await db.scalar(select(QRLabel).where(QRLabel.legacy_equipment_id == equipment_id))
+    if label:
+        raise HTTPException(409, 'Используйте сканирование QR и привязку наклейки к оборудованию')
     equipment = await ensure_equipment_access(equipment_id, user, db)
     await db.refresh(equipment, with_for_update=True)
     await ensure_equipment_access(equipment_id, user, db)

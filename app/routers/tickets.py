@@ -15,6 +15,8 @@ from app.schemas.equipment import PublicEquipmentOut
 from app.schemas.ticket import GuestTicketCreate, TicketCreateResult, TicketOut
 from app.models.service_request import GuestRequestReceipt, ServiceRequest, ServiceRequestAttachment
 from app.services.service_requests import event, lock_request_intake, next_number
+from app.services.qr_labels import equipment_for_token
+from app.models.qr_label import QRLabel
 from app.services.media import image_response, normalize_image
 
 public_router = APIRouter(prefix="/api/public/equipment", tags=["guest"])
@@ -23,13 +25,17 @@ admin_router = APIRouter(prefix="/api/tickets", tags=["tickets"])
 
 @public_router.get("/{qr_token}", response_model=PublicEquipmentOut)
 async def get_public_equipment(qr_token: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    label = await db.get(QRLabel, qr_token)
+    if label and not label.equipment_id:
+        return PublicEquipmentOut(name="Свободная QR-наклейка", manufacturer=None, model=None,
+            serial_number=None, inventory_pending=True, status="working")
     row = (
         await db.execute(
             select(Equipment, EquipmentType.name, Site.name, EquipmentAttachment)
             .outerjoin(EquipmentType, Equipment.equipment_type_id == EquipmentType.id)
             .join(Site, Site.id == Equipment.site_id)
             .outerjoin(EquipmentAttachment, EquipmentAttachment.equipment_id == Equipment.id)
-            .where(Equipment.public_qr_token == qr_token)
+            .where(equipment_for_token(qr_token))
         )
     ).first()
     if not row:
@@ -49,7 +55,7 @@ async def get_public_equipment(qr_token: uuid.UUID, db: AsyncSession = Depends(g
 @public_router.get("/{qr_token}/photo")
 async def get_public_equipment_photo(qr_token: uuid.UUID, db: AsyncSession = Depends(get_db)):
     row = (await db.execute(select(EquipmentAttachment).join(Equipment, Equipment.id == EquipmentAttachment.equipment_id).where(
-        Equipment.public_qr_token == qr_token))).scalar_one_or_none()
+        equipment_for_token(qr_token)))).scalar_one_or_none()
     if not row: raise HTTPException(status.HTTP_404_NOT_FOUND, "Фото не добавлено")
     path = UPLOAD_ROOT / row.file_url
     if not path.is_file(): raise HTTPException(status.HTTP_404_NOT_FOUND, "Фото не найдено")
@@ -63,7 +69,7 @@ async def create_guest_ticket(qr_token: uuid.UUID, payload: GuestTicketCreate, r
     # контроля над HTTP-заголовками, а поле в теле запроса гарантированно дойдёт.
     _rate_limit(request, qr_token)
     equipment = await db.scalar(
-        select(Equipment).where(Equipment.public_qr_token == qr_token).with_for_update()
+        select(Equipment).where(equipment_for_token(qr_token)).with_for_update()
     )
     if not equipment:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Оборудование не найдено")
@@ -138,7 +144,7 @@ async def upload_guest_problem_photo(qr_token: uuid.UUID, request_id: uuid.UUID,
                                     db: AsyncSession = Depends(get_db)):
     _rate_limit(request, qr_token)
     service_request = await db.scalar(select(ServiceRequest).join(Equipment, Equipment.id == ServiceRequest.equipment_id).where(
-        ServiceRequest.id == request_id, Equipment.public_qr_token == qr_token).with_for_update(of=ServiceRequest))
+        ServiceRequest.id == request_id, equipment_for_token(qr_token)).with_for_update(of=ServiceRequest))
     if not service_request: raise HTTPException(status.HTTP_404_NOT_FOUND, "Заявка не найдена")
     if client_id is not None:
         client_id = client_id.strip()

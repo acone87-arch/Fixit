@@ -15,7 +15,7 @@ def test_new_invite_link_uses_configured_canonical_public_url(monkeypatch):
 def test_new_equipment_qr_uses_configured_public_url_without_changing_token(monkeypatch):
     token = uuid.uuid4()
     item = SimpleNamespace(
-        id=uuid.uuid4(), public_qr_token=token, site_id=uuid.uuid4(),
+        id=uuid.uuid4(), organization_id=uuid.uuid4(), public_qr_token=token, site_id=uuid.uuid4(),
         inventory_batch_id=None, inventory_number=17, name="Насос",
     )
     generated: list[tuple] = []
@@ -31,6 +31,7 @@ def test_new_equipment_qr_uses_configured_public_url_without_changing_token(monk
     monkeypatch.setattr(equipment, "_equipment_for_user", equipment_for_user)
     monkeypatch.setattr(equipment, "build_single_label_pdf", build)
     db = AsyncMock()
+    db.scalar.return_value = None
     db.get.return_value = SimpleNamespace(name="Главный склад")
 
     response = asyncio.run(equipment.equipment_qr(uuid.uuid4(), db=db, user=None))

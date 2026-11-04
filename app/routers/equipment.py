@@ -1,5 +1,6 @@
 import uuid
 from pathlib import Path
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
@@ -12,6 +13,7 @@ from app.core.deps import CurrentUser, get_current_user, require_roles
 from app.database import get_db
 from app.models.core import Equipment, EquipmentAttachment, EquipmentInventoryBatch, EquipmentType, Task, Ticket, User, UserRole
 from app.models.customer import Client, Site, TechnicianClientAccess
+from app.models.qr_label import QRLabel
 from app.models.repair import Repair, RepairAttachment, RepairPart
 from app.models.service_request import ServiceRequest, ServiceRequestAttachment, ServiceRequestEvent
 from app.models.warehouse import Part
@@ -31,6 +33,7 @@ from app.schemas.equipment import (
 )
 from app.services.client_portal import CLIENT_ROLES, client_scope, ensure_client_equipment
 from app.services.access_policy import ensure_equipment_access
+from app.services.qr_labels import equipment_for_token, preferred_label
 from app.services.media import image_response, normalize_image
 from app.services.equipment_label_pdf import EquipmentLabel, build_single_label_pdf
 
@@ -101,6 +104,7 @@ async def list_equipment(client_id: uuid.UUID | None = None, site_id: uuid.UUID 
         )))
     if site_id:
         statement = statement.where(Equipment.site_id == site_id)
+    statement = statement.where(Equipment.inventory_pending.is_(False))
     rows = (await db.execute(statement)).all()
     # Для старых записей сохраняем историческое поле name в БД, но наружу
     # всегда отдаём тип: все клиенты показывают единое обозначение техники.
@@ -145,6 +149,10 @@ async def create_equipment(
     )
     db.add(equipment)
     try:
+        await db.flush()
+        db.add(QRLabel(token=equipment.public_qr_token, organization_id=user.organization_id,
+            site_id=equipment.site_id, equipment_id=equipment.id, bound_by_user_id=user.id,
+            bound_at=datetime.now(timezone.utc)))
         await db.commit()
     except Exception as exc:
         await db.rollback()
@@ -246,7 +254,7 @@ async def get_equipment_by_qr(
 ):
     """QR identifies equipment; it never elevates a technician without fleet access."""
     equipment = await db.scalar(select(Equipment).where(
-        Equipment.public_qr_token == qr_token, Equipment.organization_id == user.organization_id
+        equipment_for_token(qr_token), Equipment.organization_id == user.organization_id
     ))
     if not equipment:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Оборудование не найдено")
@@ -553,10 +561,11 @@ async def equipment_qr(equipment_id: uuid.UUID, db: AsyncSession = Depends(get_d
     equipment = await _equipment_for_user(equipment_id, db, user)
     site = await db.get(Site, equipment.site_id)
     batch = await db.get(EquipmentInventoryBatch, equipment.inventory_batch_id) if equipment.inventory_batch_id else None
+    label = await preferred_label(equipment, db)
     content = await run_in_threadpool(build_single_label_pdf, EquipmentLabel(
-        token=str(equipment.public_qr_token), site_name=site.name if site else "Объект не указан",
-        equipment_name=equipment.name or None, inventory_number=equipment.inventory_number,
-        batch_id=str(batch.id) if batch else None,
+        token=str(label.token if label else equipment.public_qr_token), site_name=site.name if site else "Объект не указан",
+        equipment_name=equipment.name or None, inventory_number=label.number if label else equipment.inventory_number,
+        batch_id=str(label.batch_id) if label and label.batch_id else str(batch.id) if batch else None,
     ), settings.public_app_url)
     return Response(content, media_type="application/pdf", headers={
         "Content-Disposition": f'attachment; filename="fixit-qr-{equipment.id}.pdf"', "Cache-Control": "no-store",

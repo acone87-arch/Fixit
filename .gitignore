@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+test-results/
 .venv/
 
 # Local configuration and credentials
@@ -19,3 +20,6 @@ node_modules/
 .venv-inventory/
 .inventory-*.py
 tmp/pdfs/
+
+# Local AI pilot measurements, provider outputs and reviewer files
+evals/yandexgpt/local/

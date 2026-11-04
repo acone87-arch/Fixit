@@ -11,7 +11,8 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.config import settings
 from app.database import get_db
-from app.routers import inventory
+from app.routers import inventory, qr_labels
+from app.routers import ai
 from app.routers import auth, client_portal, customers, equipment, invites, organizations, push, repairs, service_requests, sync, tasks, tickets, users, warehouses
 
 def configure_http_security(application: FastAPI) -> None:
@@ -30,6 +31,7 @@ configure_http_security(app)
 
 app.include_router(auth.router)
 app.include_router(inventory.router)
+app.include_router(qr_labels.router)
 app.include_router(organizations.router)
 app.include_router(customers.router)
 app.include_router(customers.sites_router)
@@ -48,6 +50,7 @@ app.include_router(client_portal.router)
 app.include_router(invites.router)
 app.include_router(invites.public_router)
 app.include_router(push.router)
+app.include_router(ai.router)
 
 
 @app.get("/health", tags=["meta"])

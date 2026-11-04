@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     services:
       postgres:
@@ -56,8 +56,10 @@ jobs:
           python -m playwright install --with-deps chromium
           npm ci --prefix tests --ignore-scripts
           npx --prefix tests playwright install --with-deps chromium
+      - name: QR and request browser acceptance
+        run: pytest -x -q tests/test_inventory_browser.py tests/test_inventory_management_browser.py tests/test_request_workflow_browser.py --junitxml=test-results/qr-browser.xml
       - name: Run Python, PostgreSQL and browser acceptance
-        run: pytest -q --junitxml=test-results/release.xml
+        run: pytest -q --ignore=tests/test_inventory_browser.py --ignore=tests/test_inventory_management_browser.py --ignore=tests/test_request_workflow_browser.py --junitxml=test-results/release.xml
       - name: Run JS runtime acceptance
         run: |
           node tests/onboarding_equipment_runtime_test.js
@@ -86,7 +88,7 @@ jobs:
   deploy:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment: production
     timeout-minutes: 25
     steps:

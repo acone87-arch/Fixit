@@ -221,7 +221,7 @@ async def dashboard(db: AsyncSession = Depends(get_db), user: CurrentUser = Depe
     query, client_id, site_ids = await _requests_query(user, db)
     requests = (await db.execute(query)).all()
     eq_query = select(Equipment).join(Site, Site.id == Equipment.site_id).where(
-        Equipment.organization_id == user.organization_id, Site.client_id == client_id)
+        Equipment.organization_id == user.organization_id, Equipment.inventory_pending.is_(False), Site.client_id == client_id)
     if site_ids is not None: eq_query = eq_query.where(Site.id.in_(site_ids))
     equipment = (await db.scalars(eq_query)).all()
     active = [row[0] for row in requests if row[0].status not in {"completed", "closed", "cancelled"}]
@@ -238,7 +238,7 @@ async def list_equipment(db: AsyncSession = Depends(get_db), user: CurrentUser =
     query = (select(Equipment, EquipmentType.name, Site, EquipmentAttachment)
         .join(Site, Site.id == Equipment.site_id).outerjoin(EquipmentType, EquipmentType.id == Equipment.equipment_type_id)
         .outerjoin(EquipmentAttachment, EquipmentAttachment.equipment_id == Equipment.id)
-        .where(Equipment.organization_id == user.organization_id, Site.client_id == client_id).order_by(Equipment.updated_at.desc()))
+        .where(Equipment.organization_id == user.organization_id, Equipment.inventory_pending.is_(False), Site.client_id == client_id).order_by(Equipment.updated_at.desc()))
     if site_ids is not None: query = query.where(Site.id.in_(site_ids))
     rows = (await db.execute(query)).all()
     return [{"id": item.id, "name": name or item.name, "manufacturer": item.manufacturer, "model": item.model,
