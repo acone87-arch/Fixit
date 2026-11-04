@@ -50,4 +50,6 @@ def test_frontend_offers_all_sites_and_hides_photo_deletion_for_technicians():
     assert 'Все объекты' in source
     assert "const canDeletePhoto = ['owner', 'admin', 'dispatcher'].includes(state.me.role);" in source
     assert "canDeletePhoto ? '<button type=\"button\" id=\"passport-photo-delete\">" in source
-    assert 'после назначения клиента в обслуживание' in source
+    labels = (ROOT / 'app' / 'static' / 'qr_labels.js').read_text(encoding='utf-8')
+    assert "equipment.passport_allowed === false" in labels
+    assert 'Оборудование не назначено вам для обслуживания' in labels

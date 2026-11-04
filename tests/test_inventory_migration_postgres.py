@@ -6,6 +6,7 @@ from alembic.operations import Operations
 from sqlalchemy import select, func
 
 from app.models.core import Equipment
+from app.models.qr_label import QRLabel
 from test_onboarding_postgres import pg
 from test_request_workflow_postgres import flow
 from test_inventory_postgres import batch
@@ -24,7 +25,13 @@ async def test_inventory_upgrade_preserves_old_equipment_and_qr(flow):
         connection=await db.connection()
         def upgrade(sync_connection):
             with Operations.context(MigrationContext.configure(sync_connection)):
+                spec = importlib.util.spec_from_file_location('qr_migration', 'alembic/versions/20261104_0024_qr_labels.py')
+                qr = importlib.util.module_from_spec(spec); spec.loader.exec_module(qr)
+                # Reconstruct the pre-QR schema in this isolated test fixture.
+                Operations(MigrationContext.configure(sync_connection)).execute("DELETE FROM qr_labels")
+                qr.downgrade()
                 revision=migration(); revision.downgrade(); revision.upgrade()
+                qr.upgrade()
         await connection.run_sync(upgrade)
         await db.commit()
         assert await db.scalar(select(func.count()).select_from(Equipment))==3
@@ -41,7 +48,8 @@ async def test_inventory_upgrade_preserves_old_equipment_and_qr(flow):
         with pytest.raises(RuntimeError,match='Inventory batches exist'):
             await connection.run_sync(downgrade)
         await db.rollback()
-        assert await db.scalar(select(func.count()).select_from(Equipment))==5
+        assert await db.scalar(select(func.count()).select_from(Equipment))==3
+        assert await db.scalar(select(func.count()).select_from(QRLabel))==5
 
 
 async def test_optional_serial_upgrade_and_safe_downgrade(flow):
